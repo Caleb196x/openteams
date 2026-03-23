@@ -99,8 +99,6 @@ openteams-cloud/
 # Run artifacts
 .runs/
 .context/
-runs/
-context/
 .openteams/
 **/.openteams/
 .main_page/

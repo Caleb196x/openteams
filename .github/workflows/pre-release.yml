@@ -9,7 +9,7 @@ on:
         default: "patch"
         type: choice
         options:
-          - no-bump
+          - no-update-version
           - patch
           - minor
           - major
@@ -114,7 +114,7 @@ jobs:
 
           timestamp=$(date +%Y%m%d%H%M%S)
 
-          if [[ "${{ github.event.inputs.version_type }}" == "no-bump" ]]; then
+          if [[ "${{ github.event.inputs.version_type }}" == "no-update-version" ]]; then
             # Rebuild from the current checked-in version without incrementing it.
             new_version="$current_repo_version"
             new_tag="v${new_version}-build-${timestamp}"
@@ -1526,11 +1526,11 @@ jobs:
 
           VERSION="${{ needs.bump-version.outputs.new_version }}"
           
-          # For no-bump, check if version already exists in npm
-          if [[ "${{ github.event.inputs.version_type }}" == "no-bump" ]]; then
+          # For no-update-version, check if version already exists in npm
+          if [[ "${{ github.event.inputs.version_type }}" == "no-update-version" ]]; then
             existing_version=$(npm view @openteams-lab/openteams-web version 2>/dev/null || echo "")
             if [[ "$existing_version" == "$VERSION" ]]; then
-              echo "::warning::Version $VERSION already exists on npm. Skipping publish (no-bump mode)."
+              echo "::warning::Version $VERSION already exists on npm. Skipping publish (no-update-version mode)."
               echo "skipped=true" >> $GITHUB_OUTPUT
               exit 0
             fi
@@ -1713,8 +1713,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.bump-version.outputs.new_tag }}
-          name: ${{ github.event.inputs.version_type == 'prerelease' && format('Pre-release {0}', needs.bump-version.outputs.new_tag) || github.event.inputs.version_type == 'no-bump' && format('Build {0}', needs.bump-version.outputs.new_tag) || format('Release {0}', needs.bump-version.outputs.new_tag) }}
-          prerelease: ${{ github.event.inputs.version_type == 'prerelease' || github.event.inputs.version_type == 'no-bump' }}
+          name: ${{ github.event.inputs.version_type == 'prerelease' && format('Pre-release {0}', needs.bump-version.outputs.new_tag) || github.event.inputs.version_type == 'no-update-version' && format('Build {0}', needs.bump-version.outputs.new_tag) || format('Release {0}', needs.bump-version.outputs.new_tag) }}
+          prerelease: ${{ github.event.inputs.version_type == 'prerelease' || github.event.inputs.version_type == 'no-update-version' }}
           generate_release_notes: false
           body: ${{ steps.changelog.outputs.body }}
           files: |

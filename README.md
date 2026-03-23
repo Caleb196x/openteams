@@ -205,22 +205,22 @@ Open the frontend page at `http://localhost:<FRONTEND_PORT>` (example: `http://l
 
 ### V0.2
 
-- ~~[x] Multi-agent group chat with shared context~~
-- ~~[x] Parallel agent execution~~
-- ~~[x] Agent @mention and autonomous collaboration~~
-- ~~[x] 10 coding-agent runtimes support (Claude Code, Gemini CLI, Codex, Qwen Code, Amp, Cursor Agent, Copilot, Droid, Kimi Code, OpenCode)~~
-- ~~[x] Desktop apps (Windows, macOS, Linux)~~
-- ~~[x] Web app via npx~~
-- ~~[x] Multi-language support (EN, ZH, JA, KO, FR, ES)~~
+- [x] Multi-agent group chat with shared context
+- [x] Parallel agent execution
+- [x] Agent @mention and autonomous collaboration
+- [x] 10 coding-agent runtimes support (Claude Code, Gemini CLI, Codex, Qwen Code, Amp, Cursor Agent, Copilot, Droid, Kimi Code, OpenCode)
+- [x] Desktop apps (Windows, macOS, Linux)
+- [x] Web app via npx
+- [x] Multi-language support (EN, ZH, JA, KO, FR, ES)
 
 ### V0.3
-- ~~[x] The frontend interface has been completely overhauled.~~
-- ~~[x] 160+ built-in AI members~~
-- ~~[x] 8 built-in AI team presets~~
-- ~~[x] Team rules configuration~~
-- ~~[x] 1000+ built-in skills~~
-- ~~[x] Fully local execution with workspace isolation~~
-- ~~[x] Redefine the input protocol~~
+- [x] The frontend interface has been completely overhauled.
+- [x] 160+ built-in AI members
+- [x] 8 built-in AI team presets
+- [x] Team rules configuration
+- [x] 1000+ built-in skills
+- [x] Fully local execution with workspace isolation
+- [x] Redefine the input protocol
 
 ### Roadmap
 - [x] Backend for Code Agent optimized for OpenTeams use cases —— v0.3.4
