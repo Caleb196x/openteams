@@ -5,6 +5,7 @@ src-tauri/target/
 src-tauri/bin/
 binaries/
 openteams-cli/binaries/
+**/dist/
 
 # Node.js
 node_modules/

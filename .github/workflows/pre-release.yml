@@ -79,12 +79,6 @@ jobs:
           echo "Suffix: $suffix"
           echo "suffix=$suffix" >> $GITHUB_OUTPUT
 
-      - name: Validate no-bump options
-        if: ${{ github.event.inputs.version_type == 'no-bump' && github.event.inputs.publish_to_npm == 'true' }}
-        run: |
-          echo "::error::publish_to_npm=true is not supported when version_type=no-bump."
-          exit 1
-
       - name: Determine and update versions
         id: version
         run: |
@@ -684,7 +678,7 @@ jobs:
       - name: Setup Bun for CLI build
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.10
+          bun-version: 1.3.11
 
       - name: Build CLI binary
         run: |
@@ -991,7 +985,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.10
+          bun-version: 1.3.11
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -1530,6 +1524,18 @@ jobs:
             exit 1
           fi
 
+          VERSION="${{ needs.bump-version.outputs.new_version }}"
+          
+          # For no-bump, check if version already exists in npm
+          if [[ "${{ github.event.inputs.version_type }}" == "no-bump" ]]; then
+            existing_version=$(npm view @openteams-lab/openteams-web version 2>/dev/null || echo "")
+            if [[ "$existing_version" == "$VERSION" ]]; then
+              echo "::warning::Version $VERSION already exists on npm. Skipping publish (no-bump mode)."
+              echo "skipped=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+
           # Publish main package (@openteams-lab/openteams-web)
           cd openteams-npx
           tarball=$(ls -1t openteams-*.tgz 2>/dev/null | head -n 1)
@@ -1573,7 +1579,7 @@ jobs:
         id: changelog
         uses: actions/github-script@v7
         env:
-          NPM_PUBLISHED: ${{ github.event.inputs.publish_to_npm == 'true' && steps.npm_publish.outcome == 'success' }}
+          NPM_PUBLISHED: ${{ github.event.inputs.publish_to_npm == 'true' && steps.npm_publish.outcome == 'success' && steps.npm_publish.outputs.skipped != 'true' }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
