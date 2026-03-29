@@ -55,17 +55,21 @@ const CreateSessionDialogImpl = NiceModal.create<CreateSessionDialogProps>(
         try {
           const result = await chatApi.validateWorkspacePath(workspacePath);
           setValidationError(
-            result.valid ? '' : (result.error ?? 'Invalid path')
+            result.valid
+              ? ''
+              : (result.error ?? t('session.invalidPath', 'Invalid path'))
           );
         } catch {
-          setValidationError('Validation failed');
+          setValidationError(
+            t('session.validationFailed', 'Validation failed')
+          );
         } finally {
           setIsValidating(false);
         }
       }, 500);
 
       return () => clearTimeout(timer);
-    }, [workspacePath]);
+    }, [t, workspacePath]);
 
     const handleBrowse = async () => {
       const selected = await FolderPickerDialog.show({
