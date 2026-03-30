@@ -23,6 +23,8 @@
     "skills": "Skills Library",
     "archivedSection": "Archived",
     "settingsInSidebar": "Settings",
+    "updateAvailable": "Update available",
+    "updateAvailableVersion": "Update available: {{version}}",
     "searchSessions": "Search sessions",
     "searchSessionsPlaceholder": "Search session names...",
     "clearSessionSearch": "Clear session search",
@@ -660,6 +662,40 @@
       "loadingLog": "Loading log...",
       "logEmpty": "Log is empty.",
       "fullErrorLog": "Full Error Log"
+    }
+  },
+  "versionUpdate": {
+    "title": "Update available: {{version}}",
+    "message": "Review the release details below, then start the update when ready.",
+    "restartTitle": "Restart to finish update?",
+    "restartMessage": "The new version is ready. Restart the {{runtime}} now to apply it.",
+    "currentVersion": "Current version",
+    "latestVersion": "Latest version",
+    "unknownVersion": "Unknown",
+    "publishedAt": "Published {{date}}",
+    "noUpdate": "No newer version is available right now.",
+    "unsupported": "This deployment mode does not support in-app updates.",
+    "releaseNotes": "Release notes",
+    "openRelease": "Open release",
+    "restartLater": "Later",
+    "restartNow": "Restart now",
+    "runtime": {
+      "desktop": "desktop app",
+      "service": "service"
+    },
+    "actions": {
+      "desktop": "Download and update",
+      "npx": "Update now",
+      "unavailable": "Update unavailable"
+    },
+    "status": {
+      "checking": "Checking desktop updater...",
+      "downloading": "Downloading and installing update...",
+      "ready": "Update installed. Restart to finish.",
+      "upToDate": "You are already on the latest version.",
+      "error": "Desktop update failed.",
+      "preparing": "Preparing desktop update package...",
+      "packageUpdating": "Updating npx package in the background..."
     }
   },
   "workspacePreview": {

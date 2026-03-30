@@ -17,7 +17,7 @@
     "frontend:lint": "cd frontend && pnpm run lint",
     "frontend:format": "cd frontend && pnpm run format",
     "frontend:format:check": "cd frontend && pnpm run format:check",
-    "frontend:dev": "cd frontend && pnpm run dev -- --port ${FRONTEND_PORT:-3000} --host",
+    "frontend:dev": "node scripts/frontend-dev.js",
     "frontend:check": "cd frontend && pnpm run check",
     "backend:lint": "cargo clippy --workspace --all-targets --features qa-mode -- -D warnings",
     "backend:format": "cargo fmt --all",

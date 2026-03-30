@@ -41,6 +41,8 @@ import {
 } from '@/utils/executor';
 import { CreateSessionDialog } from '@/components/ui-new/dialogs/CreateSessionDialog';
 import { SettingsDialog } from '@/components/ui-new/dialogs/SettingsDialog';
+import { UpdateDialog } from '@/components/ui-new/dialogs/UpdateDialog';
+import { useVersionCheck } from '@/hooks/useVersionCheck';
 
 import {
   type SessionMember,
@@ -613,6 +615,7 @@ export function ChatSessions() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const promptFileInputRef = useRef<HTMLInputElement | null>(null);
   const { config, profiles, loginStatus, homeDirectory } = useUserSystem();
+  const { canSelfUpdate, hasUpdate, latestVersion } = useVersionCheck();
   const appLanguage = resolveAppLanguageCode(
     config?.language,
     i18n.resolvedLanguage || i18n.language,
@@ -3606,6 +3609,12 @@ export function ChatSessions() {
         onOpenSettings={() => {
           SettingsDialog.show();
         }}
+        onOpenVersionDialog={() => {
+          setIsSkillsPanelOpen(false);
+          UpdateDialog.show();
+        }}
+        hasAvailableUpdate={canSelfUpdate && hasUpdate}
+        latestVersion={canSelfUpdate ? latestVersion : null}
         isAiTeamActive={isAiTeamPresetsOpen}
         isSkillsActive={isSkillsPanelOpen}
         width={leftSidebarWidth}
