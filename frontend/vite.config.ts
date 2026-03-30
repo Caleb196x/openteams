@@ -3,8 +3,62 @@ import { sentryVitePlugin } from '@sentry/vite-plugin';
 import react from '@vitejs/plugin-react';
 import fs from 'fs';
 import path from 'path';
-import { createLogger, defineConfig, Plugin } from 'vite';
+import { pathToFileURL } from 'url';
 import pkg from './package.json';
+
+type ViteRuntime = {
+  createLogger: () => {
+    error: (msg: string, options?: unknown) => void;
+    warn: (msg: string, options?: unknown) => void;
+  };
+};
+
+function resolveViteRuntimeEntry() {
+  const pnpmStoreDir = path.resolve(__dirname, '../node_modules/.pnpm');
+  const preferredMajor = pkg.devDependencies?.vite?.match(/\d+/)?.[0] ?? null;
+
+  const candidates = fs
+    .readdirSync(pnpmStoreDir)
+    .filter((entry) => entry.startsWith('vite@'))
+    .map((entry) => {
+      const version = entry.slice('vite@'.length).split('_')[0];
+      const runtimeEntry = path.join(
+        pnpmStoreDir,
+        entry,
+        'node_modules',
+        'vite',
+        'dist',
+        'node',
+        'index.js'
+      );
+
+      return {
+        runtimeEntry,
+        version,
+      };
+    })
+    .filter((candidate) => fs.existsSync(candidate.runtimeEntry));
+
+  const selectedCandidate =
+    candidates.find(
+      (candidate) =>
+        preferredMajor !== null &&
+        candidate.version.startsWith(`${preferredMajor}.`)
+    ) ?? candidates[0];
+
+  if (!selectedCandidate) {
+    throw new Error(
+      `Unable to locate Vite runtime in ${pnpmStoreDir}. ` +
+        'Run `pnpm install` to restore frontend dependencies.'
+    );
+  }
+
+  return selectedCandidate.runtimeEntry;
+}
+
+const { createLogger } = (await import(
+  pathToFileURL(resolveViteRuntimeEntry()).href
+)) as ViteRuntime;
 
 function createFilteredLogger() {
   const logger = createLogger();
@@ -33,7 +87,7 @@ function createFilteredLogger() {
   return logger;
 }
 
-function executorSchemasPlugin(): Plugin {
+function executorSchemasPlugin() {
   const VIRTUAL_ID = 'virtual:executor-schemas';
   const RESOLVED_VIRTUAL_ID = '\0' + VIRTUAL_ID;
 
@@ -77,7 +131,7 @@ export default schemas;
   };
 }
 
-export default defineConfig({
+export default {
   customLogger: createFilteredLogger(),
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
@@ -138,4 +192,4 @@ export default defineConfig({
     exclude: ['wa-sqlite'],
   },
   build: { sourcemap: true },
-});
+};

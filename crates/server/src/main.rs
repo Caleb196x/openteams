@@ -35,6 +35,10 @@ fn is_desktop_mode() -> bool {
     std::env::var_os("AGENT_CHATGROUP_DESKTOP").is_some()
 }
 
+fn should_skip_browser_launch() -> bool {
+    std::env::var_os("OPENTEAMS_SKIP_BROWSER").is_some()
+}
+
 #[tokio::main]
 async fn main() -> Result<(), OpenTeamsError> {
     // Install rustls crypto provider before any TLS operations
@@ -205,16 +209,21 @@ async fn main() -> Result<(), OpenTeamsError> {
         if let Err(e) = write_port_file(actual_port).await {
             tracing::warn!("Failed to write port file: {}", e);
         }
-        tracing::info!("Opening browser...");
-        tokio::spawn(async move {
-            if let Err(e) = open_browser(&format!("http://127.0.0.1:{actual_port}")).await {
-                tracing::warn!(
-                    "Failed to open browser automatically: {}. Please open http://127.0.0.1:{} manually.",
-                    e,
-                    actual_port
-                );
-            }
-        });
+
+        if should_skip_browser_launch() {
+            tracing::info!("Skipping automatic browser launch for restarted process");
+        } else {
+            tracing::info!("Opening browser...");
+            tokio::spawn(async move {
+                if let Err(e) = open_browser(&format!("http://127.0.0.1:{actual_port}")).await {
+                    tracing::warn!(
+                        "Failed to open browser automatically: {}. Please open http://127.0.0.1:{} manually.",
+                        e,
+                        actual_port
+                    );
+                }
+            });
+        }
     }
 
     axum::serve(listener, app_router)

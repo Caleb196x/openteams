@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ArrowCircleUpIcon,
   ArrowCounterClockwiseIcon,
   BoxArrowDownIcon,
   BroomIcon,
@@ -44,6 +45,9 @@ export interface SessionListSidebarProps {
   onOpenAiTeam: () => void;
   onOpenSkills: () => void;
   onOpenSettings: () => void;
+  onOpenVersionDialog: () => void;
+  hasAvailableUpdate?: boolean;
+  latestVersion?: string | null;
   isAiTeamActive?: boolean;
   isSkillsActive?: boolean;
   width: number;
@@ -71,6 +75,9 @@ export function SessionListSidebar({
   onOpenAiTeam,
   onOpenSkills,
   onOpenSettings,
+  onOpenVersionDialog,
+  hasAvailableUpdate = false,
+  latestVersion = null,
   isAiTeamActive = false,
   isSkillsActive = false,
   width,
@@ -97,6 +104,16 @@ export function SessionListSidebar({
   const appVersionLabel = appVersion.startsWith('v')
     ? appVersion
     : `v${appVersion}`;
+  const latestVersionLabel = latestVersion
+    ? latestVersion.startsWith('v')
+      ? latestVersion
+      : `v${latestVersion}`
+    : null;
+  const updateButtonLabel = latestVersionLabel
+    ? t('sidebar.updateAvailableVersion', {
+        version: latestVersionLabel,
+      })
+    : t('sidebar.updateAvailable');
   const collapseActionLabel = isCollapsed
     ? t('sidebar.expandSidebar')
     : t('sidebar.collapseSidebar');
@@ -363,6 +380,23 @@ export function SessionListSidebar({
           </div>
           <div className="chat-session-left-divider" />
           <div className="chat-session-left-footer collapsed">
+            {hasAvailableUpdate && (
+              <button
+                type="button"
+                onClick={onOpenVersionDialog}
+                className="chat-session-left-settings-btn chat-session-left-update-btn icon-only"
+                aria-label={updateButtonLabel}
+                title={updateButtonLabel}
+              >
+                <span className="chat-session-left-update-icon-wrap">
+                  <ArrowCircleUpIcon className="size-icon-xs" />
+                  <span
+                    className="chat-session-left-update-dot"
+                    aria-hidden="true"
+                  />
+                </span>
+              </button>
+            )}
             <button
               type="button"
               onClick={onOpenSettings}
@@ -566,20 +600,39 @@ export function SessionListSidebar({
           </div>
 
           <div className="chat-session-left-footer">
-            <button
-              type="button"
-              onClick={onOpenSettings}
-              className="chat-session-left-settings-btn"
-              aria-label={t('header.settings')}
-              title={t('header.settings')}
-            >
-              <GearSixIcon className="size-icon-sm" />
-              <span>
-                {t('sidebar.settingsInSidebar', {
-                  defaultValue: t('header.settings'),
-                })}
-              </span>
-            </button>
+            <div className="chat-session-left-footer-actions">
+              {hasAvailableUpdate && (
+                <button
+                  type="button"
+                  onClick={onOpenVersionDialog}
+                  className="chat-session-left-settings-btn chat-session-left-update-btn icon-only"
+                  aria-label={updateButtonLabel}
+                  title={updateButtonLabel}
+                >
+                  <span className="chat-session-left-update-icon-wrap">
+                    <ArrowCircleUpIcon className="size-icon-xs" />
+                    <span
+                      className="chat-session-left-update-dot"
+                      aria-hidden="true"
+                    />
+                  </span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onOpenSettings}
+                className="chat-session-left-settings-btn"
+                aria-label={t('header.settings')}
+                title={t('header.settings')}
+              >
+                <GearSixIcon className="size-icon-sm" />
+                <span>
+                  {t('sidebar.settingsInSidebar', {
+                    defaultValue: t('header.settings'),
+                  })}
+                </span>
+              </button>
+            </div>
             <div className="chat-session-left-version" title={appVersionLabel}>
               {appVersionLabel}
             </div>

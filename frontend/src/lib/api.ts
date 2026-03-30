@@ -142,6 +142,21 @@ export interface AgentInfo {
   name: string;
 }
 
+export interface VersionCheckInfo {
+  current_version: string;
+  latest_version: string;
+  has_update: boolean;
+  deploy_mode: 'npx' | 'tauri' | 'unknown';
+  release_url: string;
+  release_notes: string | null;
+  published_at: string | null;
+}
+
+export interface VersionUpdateResult {
+  success: boolean;
+  message: string;
+}
+
 export class ApiError<E = unknown> extends Error {
   public status?: number;
   public error_data?: E;
@@ -1553,6 +1568,27 @@ export const migrationApi = {
       body: JSON.stringify(data),
     });
     return handleApiResponse<MigrationResponse>(response);
+  },
+};
+
+export const versionApi = {
+  check: async (): Promise<VersionCheckInfo> => {
+    const response = await makeRequest('/api/version/check');
+    return handleApiResponse<VersionCheckInfo>(response);
+  },
+
+  updateNpx: async (): Promise<VersionUpdateResult> => {
+    const response = await makeRequest('/api/version/update-npx', {
+      method: 'POST',
+    });
+    return handleApiResponse<VersionUpdateResult>(response);
+  },
+
+  restart: async (): Promise<VersionUpdateResult> => {
+    const response = await makeRequest('/api/version/restart', {
+      method: 'POST',
+    });
+    return handleApiResponse<VersionUpdateResult>(response);
   },
 };
 
