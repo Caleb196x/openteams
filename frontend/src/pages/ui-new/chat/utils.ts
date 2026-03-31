@@ -11,6 +11,7 @@ import {
   findVariantByModel,
   withExecutorProfileVariant,
 } from '@/utils/executor';
+import { replaceWhitespaceWithUnderscores } from '@/utils/string';
 import {
   isMentionAllAlias,
   mentionTokenRegex,
@@ -1143,14 +1144,30 @@ export interface MemberPresetImportPlan {
   workspacePath: string;
 }
 
+const normalizeMemberPresetName = (
+  value: string,
+  fallbackValue = ''
+): string => {
+  const normalized = replaceWhitespaceWithUnderscores(value);
+  if (normalized.length > 0) {
+    return normalized;
+  }
+  return replaceWhitespaceWithUnderscores(fallbackValue);
+};
+
 export function getLocalizedMemberPresetName(
   preset: Pick<ChatMemberPreset, 'id' | 'name' | 'is_builtin'>,
   t: TFunction<'chat'>
 ): string {
-  if (!preset.is_builtin) return preset.name;
-  return t(`members.presetDisplay.members.${preset.id}`, {
-    defaultValue: preset.name,
-  });
+  if (!preset.is_builtin) {
+    return normalizeMemberPresetName(preset.name, preset.id);
+  }
+  return normalizeMemberPresetName(
+    t(`members.presetDisplay.members.${preset.id}`, {
+      defaultValue: preset.name,
+    }),
+    preset.id
+  );
 }
 
 export function getLocalizedTeamPresetName(
@@ -1168,9 +1185,12 @@ export function getLocalizedMemberPresetNameById(
   fallbackName: string,
   t: TFunction<'chat'>
 ): string {
-  return t(`members.presetDisplay.members.${presetId}`, {
-    defaultValue: fallbackName,
-  });
+  return normalizeMemberPresetName(
+    t(`members.presetDisplay.members.${presetId}`, {
+      defaultValue: fallbackName,
+    }),
+    presetId
+  );
 }
 
 export function buildMemberPresetImportPlan({
@@ -1192,8 +1212,7 @@ export function buildMemberPresetImportPlan({
   availableRunnerTypes: string[];
   profiles: ExecutorConfigs['executors'] | null | undefined;
 }): MemberPresetImportPlan | null {
-  const presetName =
-    preset.name.trim().length > 0 ? preset.name.trim() : preset.id;
+  const presetName = normalizeMemberPresetName(preset.name, preset.id);
   const systemPrompt = preset.system_prompt?.trim() ?? '';
   const baseToolsEnabled = normalizePresetToolsEnabled(preset.tools_enabled);
   const runnerType = resolvePresetRunnerType({
@@ -1205,7 +1224,7 @@ export function buildMemberPresetImportPlan({
   if (!runnerType) {
     return {
       presetId: preset.id,
-      presetName: preset.name,
+      presetName,
       runnerType: '',
       finalName: presetName,
       systemPrompt,
@@ -1236,7 +1255,7 @@ export function buildMemberPresetImportPlan({
     : baseToolsEnabled;
   return {
     presetId: preset.id,
-    presetName: preset.name,
+    presetName,
     runnerType,
     finalName: presetName,
     systemPrompt,

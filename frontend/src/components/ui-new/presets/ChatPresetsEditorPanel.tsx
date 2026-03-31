@@ -28,7 +28,7 @@ import {
   getVariantModelName,
   getVariantOptions as getExecutorVariantOptions,
 } from '@/utils/executor';
-import { toPrettyCase } from '@/utils/string';
+import { toPrettyCase, replaceWhitespaceWithUnderscores } from '@/utils/string';
 import {
   SettingsField,
   settingsFieldClassName,
@@ -121,7 +121,7 @@ const normalizeDraft = (draft: ChatPresetsConfig): ChatPresetsConfig => {
   const members = draft.members.map((member) => ({
     ...member,
     id: member.id.trim(),
-    name: member.name.trim(),
+    name: replaceWhitespaceWithUnderscores(member.name),
     description: member.description.trim(),
     runner_type: member.runner_type?.trim() || null,
     recommended_model: normalizeRecommendedModel(member.recommended_model),
@@ -278,7 +278,7 @@ export function ChatPresetsEditorPanel({
   const { setDirty: setContextDirty } = useSettingsDirty();
 
   const sourcePresets = useMemo(
-    () => config?.chat_presets ?? emptyPresets(),
+    () => normalizeDraft(config?.chat_presets ?? emptyPresets()),
     [config?.chat_presets]
   );
 
@@ -374,10 +374,14 @@ export function ChatPresetsEditorPanel({
 
   const getLocalizedMemberName = useCallback(
     (member: Pick<ChatMemberPreset, 'id' | 'name' | 'is_builtin'>): string => {
-      if (!member.is_builtin) return member.name;
-      return tChat(`members.presetDisplay.members.${member.id}`, {
-        defaultValue: member.name,
-      });
+      if (!member.is_builtin) {
+        return replaceWhitespaceWithUnderscores(member.name);
+      }
+      return replaceWhitespaceWithUnderscores(
+        tChat(`members.presetDisplay.members.${member.id}`, {
+          defaultValue: member.name,
+        })
+      );
     },
     [tChat]
   );
@@ -388,10 +392,12 @@ export function ChatPresetsEditorPanel({
     const searchLower = memberSearch.toLowerCase().trim();
     return draft.members.filter((member) => {
       const localizedName = member.is_builtin
-        ? tChat(`members.presetDisplay.members.${member.id}`, {
-            defaultValue: member.name,
-          })
-        : member.name;
+        ? replaceWhitespaceWithUnderscores(
+            tChat(`members.presetDisplay.members.${member.id}`, {
+              defaultValue: member.name,
+            })
+          )
+        : replaceWhitespaceWithUnderscores(member.name);
       return (
         localizedName.toLowerCase().includes(searchLower) ||
         member.id.toLowerCase().includes(searchLower) ||
@@ -406,10 +412,12 @@ export function ChatPresetsEditorPanel({
     const searchLower = teamMemberSearch.toLowerCase().trim();
     return draft.members.filter((member) => {
       const localizedName = member.is_builtin
-        ? tChat(`members.presetDisplay.members.${member.id}`, {
-            defaultValue: member.name,
-          })
-        : member.name;
+        ? replaceWhitespaceWithUnderscores(
+            tChat(`members.presetDisplay.members.${member.id}`, {
+              defaultValue: member.name,
+            })
+          )
+        : replaceWhitespaceWithUnderscores(member.name);
       return (
         localizedName.toLowerCase().includes(searchLower) ||
         member.id.toLowerCase().includes(searchLower) ||
@@ -769,7 +777,7 @@ export function ChatPresetsEditorPanel({
                 onChange={(event) =>
                   updateMember(selectedMember.id, (current) => ({
                     ...current,
-                    name: event.target.value,
+                    name: replaceWhitespaceWithUnderscores(event.target.value),
                   }))
                 }
                 className={panelFieldClassName}

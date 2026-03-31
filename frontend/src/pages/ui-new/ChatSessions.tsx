@@ -30,6 +30,7 @@ import { cn } from '@/lib/utils';
 import { useUserSystem } from '@/components/ConfigProvider';
 import { useTheme } from '@/components/ThemeProvider';
 import { formatDateShortWithTime } from '@/utils/date';
+import { replaceWhitespaceWithUnderscores } from '@/utils/string';
 import { getActualTheme } from '@/utils/theme';
 import {
   extractExecutorProfileVariant,
@@ -2664,11 +2665,14 @@ export function ChatSessions() {
         }
 
         if (!preset.enabled) {
+          const presetName = replaceWhitespaceWithUnderscores(
+            preset.name || preset.id
+          );
           plans.push({
             presetId: preset.id,
-            presetName: preset.name,
+            presetName,
             runnerType: '',
-            finalName: preset.name,
+            finalName: presetName,
             systemPrompt: '',
             toolsEnabled: {},
             action: 'skip',
@@ -2799,7 +2803,7 @@ export function ChatSessions() {
           continue;
         }
 
-        const finalName = entry.finalName.trim();
+        const finalName = replaceWhitespaceWithUnderscores(entry.finalName);
         const workspacePath = entry.workspacePath.trim();
         const runnerType = entry.runnerType.trim();
 
@@ -2978,7 +2982,7 @@ export function ChatSessions() {
             )
           );
         if (updates.finalName !== undefined)
-          patch.finalName = updates.finalName;
+          patch.finalName = replaceWhitespaceWithUnderscores(updates.finalName);
         if (updates.workspacePath !== undefined)
           patch.workspacePath = updates.workspacePath;
         if (updates.runnerType !== undefined) {
@@ -3538,7 +3542,7 @@ export function ChatSessions() {
         setLeftSidebarWidth(newWidth);
       } else if (isResizing === 'right') {
         const delta = e.clientX - startX;
-        const newWidth = Math.max(240, Math.min(600, startWidth + delta));
+        const newWidth = Math.max(240, Math.min(600, startWidth - delta));
         setRightSidebarWidth(newWidth);
       }
     };
@@ -4128,6 +4132,14 @@ export function ChatSessions() {
           </button>
         )}
 
+        {/* Right Sidebar Resize Handle */}
+        {isRightSidebarOpen && (
+          <div
+            className="chat-session-resize-handle w-1 cursor-col-resize transition-colors shrink-0"
+            onMouseDown={(e) => handleResizeStart('right', e)}
+          />
+        )}
+
         <div
           className={cn(
             'chat-session-right-drawer-shell shrink-0 min-h-0 overflow-hidden',
@@ -4206,14 +4218,6 @@ export function ChatSessions() {
             onCancelTeamImport={handleCancelTeamImport}
           />
         </div>
-
-        {/* Right Sidebar Resize Handle */}
-        {isRightSidebarOpen && (
-          <div
-            className="chat-session-resize-handle w-1 cursor-col-resize transition-colors shrink-0"
-            onMouseDown={(e) => handleResizeStart('right', e)}
-          />
-        )}
       </div>
 
       <SkillsPanel

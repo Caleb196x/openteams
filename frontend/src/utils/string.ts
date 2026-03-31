@@ -10,6 +10,10 @@ export const toPrettyCase = (value: string): string => {
     .join(' ');
 };
 
+export const replaceWhitespaceWithUnderscores = (value: string): string => {
+  return value.trim().replace(/\s+/g, '_');
+};
+
 /**
  * Generates a pretty project name from a file path
  * Converts directory names like "my-awesome-project" to "My Awesome Project"
