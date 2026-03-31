@@ -25,6 +25,7 @@ export function useVersionCheck() {
     refetchInterval: VERSION_REFETCH_INTERVAL_MS,
     retry: 1,
   });
+  const { refetch } = query;
 
   const versionInfo: VersionCheckInfo | null = query.data ?? null;
   const runtime: VersionRuntime = versionInfo?.deploy_mode ?? 'unknown';
@@ -38,6 +39,7 @@ export function useVersionCheck() {
       queryClient.invalidateQueries({ queryKey: VERSION_QUERY_KEY });
     },
   });
+  const { mutateAsync: updateNpxMutateAsync } = updateNpxMutation;
 
   const restartMutation = useMutation({
     mutationFn: async (): Promise<VersionUpdateResult> => {
@@ -66,19 +68,18 @@ export function useVersionCheck() {
       return response;
     },
   });
-  const checkNow = useCallback(() => query.refetch(), [query.refetch]);
+  const { mutateAsync: restartMutateAsync } = restartMutation;
+
+  const checkNow = useCallback(() => refetch(), [refetch]);
   const updateNowInNpx = useCallback(() => {
     if (runtime !== 'npx') {
       return Promise.reject(
         new Error('Self-update is unavailable in this deployment mode.')
       );
     }
-    return updateNpxMutation.mutateAsync();
-  }, [runtime, updateNpxMutation.mutateAsync]);
-  const restartNow = useCallback(
-    () => restartMutation.mutateAsync(),
-    [restartMutation.mutateAsync]
-  );
+    return updateNpxMutateAsync();
+  }, [runtime, updateNpxMutateAsync]);
+  const restartNow = useCallback(() => restartMutateAsync(), [restartMutateAsync]);
 
   return {
     runtime,
