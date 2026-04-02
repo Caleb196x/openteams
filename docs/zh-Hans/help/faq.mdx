@@ -5,10 +5,18 @@ sidebarTitle: "常见问题"
 ---
 
 ## AI成员没有返回消息？
+没有返回消息有多种原因：
+- `@成员`中有红色小点，说明Agent处理消息失败，可以在`工作区`中查看错误消息
+- Agent有执行过程，但是最终没有消息，那么就是Agent主动选择了不发送消息，如果要查看原始消息可以到`.openteams/runs/<session>/run_records/<session>_<runid>/output.md`文件中查看当前消息的输出
+- Agent执行过程中没有输出，最终也没有输出，那么就是大模型内部发生了错误，可能是您的模型ID配置错误，您可以查看运行日志来获取错误信息。
+其他未提及的情况请前往[github](https://github.com/openteams-lab/openteams/issues)上提交issue，我们将第一时间为您解决。
 
 ## AI成员返回错误日志在哪？
+位于AI成员工作区路径下的`.openteams/runs/<session>/run_records/<session>_<runid>/raw.log`
 
-## 怎么查看AI成员的原始输入输出？
+## 怎么卸载软件？
+Windwos桌面端前往安装目录，找到`Uninstall openteams`，双击卸载。
+npx使用`npx uninstall openteams-web`即卸载。
 
 ## 怎么清除数据库？
 
