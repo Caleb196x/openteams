@@ -48,6 +48,7 @@ const DEFAULT_PROVIDER_OPTIONS: CliProviderInfo[] = [
   { id: 'openai', name: 'OpenAI', configured: false },
   { id: 'google', name: 'Google', configured: false },
   { id: 'openrouter', name: 'OpenRouter', configured: false },
+  { id: 'minimax', name: 'MiniMax', configured: false },
   { id: 'ollama', name: 'Ollama', configured: false },
 ];
 
@@ -56,6 +57,7 @@ const VALIDATABLE_PROVIDERS = new Set<CliProviderId>([
   'openai',
   'google',
   'openrouter',
+  'minimax',
   'ollama',
   'custom',
 ]);
@@ -65,6 +67,7 @@ const API_KEY_VALIDATION_REQUIRED_PROVIDERS = new Set<CliProviderId>([
   'openai',
   'google',
   'openrouter',
+  'minimax',
 ]);
 
 const SETTINGS_INLINE_PANEL_CLASS = cn(settingsMutedPanelClassName, 'p-4');
@@ -101,6 +104,7 @@ const REMOTE_MODEL_PROVIDERS = new Set<CliProviderId>([
   'openai',
   'google',
   'openrouter',
+  'minimax',
   'ollama',
 ]);
 
@@ -154,6 +158,8 @@ function getProviderApiKey(config: CliConfig, provider: CliProviderId): string {
       return config.provider.google?.api_key ?? '';
     case 'openrouter':
       return config.provider.openrouter?.api_key ?? '';
+    case 'minimax':
+      return config.provider.minimax?.api_key ?? '';
     case 'custom':
       return config.provider.custom?.api_key ?? '';
     case 'ollama':
@@ -176,6 +182,8 @@ function getProviderEndpoint(
       return config.provider.google?.endpoint ?? '';
     case 'openrouter':
       return config.provider.openrouter?.endpoint ?? '';
+    case 'minimax':
+      return config.provider.minimax?.endpoint ?? '';
     case 'ollama':
       return config.provider.ollama?.endpoint ?? '';
     case 'custom':
@@ -201,6 +209,7 @@ function getScopedModelDefault(
     case 'google':
       return config.model.google?.default ?? null;
     case 'openrouter':
+    case 'minimax':
     case 'ollama':
     case 'custom':
       return null;
@@ -222,6 +231,9 @@ function ensureProviderConfig(config: CliConfig, provider: CliProviderId) {
       break;
     case 'openrouter':
       config.provider.openrouter ??= emptyProviderCredentials();
+      break;
+    case 'minimax':
+      config.provider.minimax ??= emptyProviderCredentials();
       break;
     case 'ollama':
       config.provider.ollama ??= emptyOllamaConfig();
@@ -265,6 +277,12 @@ function setProviderApiKey(
         api_key: normalized,
       };
       break;
+    case 'minimax':
+      config.provider.minimax = {
+        ...(config.provider.minimax ?? emptyProviderCredentials()),
+        api_key: normalized,
+      };
+      break;
     case 'custom':
       config.provider.custom = {
         ...(config.provider.custom ?? emptyCustomProviderConfig()),
@@ -305,6 +323,12 @@ function setProviderEndpoint(
     case 'openrouter':
       config.provider.openrouter = {
         ...(config.provider.openrouter ?? emptyProviderCredentials()),
+        endpoint: normalized,
+      };
+      break;
+    case 'minimax':
+      config.provider.minimax = {
+        ...(config.provider.minimax ?? emptyProviderCredentials()),
         endpoint: normalized,
       };
       break;
@@ -426,6 +450,7 @@ function sanitizeCliConfig(config: CliConfig): CliConfig {
   next.provider.openrouter = sanitizeProviderCredentials(
     next.provider.openrouter
   );
+  next.provider.minimax = sanitizeProviderCredentials(next.provider.minimax);
   next.provider.ollama = sanitizeOllamaConfig(next.provider.ollama);
   next.provider.custom = sanitizeCustomProviderConfig(next.provider.custom);
   next.model.anthropic = sanitizeProviderModelConfig(next.model.anthropic);
