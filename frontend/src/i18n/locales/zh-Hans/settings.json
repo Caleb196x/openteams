@@ -15,12 +15,20 @@
         "title": "设置",
         "general": "常规",
         "generalDesc": "主题、通知和偏好设置",
+        "projects": "项目",
+        "projectsDesc": "项目仓库和配置",
+        "repos": "仓库",
+        "reposDesc": "仓库脚本和配置",
         "agents": "代理",
         "agentsDesc": "编码代理配置",
         "cli": "服务提供商",
         "cliDesc": "提供商、模型与行为设置",
         "mcp": "MCP 服务器",
-        "mcpDesc": "模型上下文协议服务器"
+        "mcpDesc": "模型上下文协议服务器",
+        "organizations": "组织设置",
+        "organizationsDesc": "管理组织成员和权限",
+        "remote-projects": "项目",
+        "remote-projectsDesc": "管理项目"
       }
     },
     "general": {
