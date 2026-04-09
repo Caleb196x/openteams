@@ -26,6 +26,12 @@ const BUN_EXECUTABLE = process.execPath;
 const CLI_PACKAGE_VERSION = JSON.parse(
   readFileSync(CLI_PACKAGE_JSON_PATH, "utf8")
 ).version as string;
+const REQUIRED_CLI_DEPENDENCIES = [
+  join(CLI_PACKAGE_DIR, "node_modules", "@opentui", "solid", "package.json"),
+  join(CLI_PACKAGE_DIR, "node_modules", "@opentui", "core", "package.json"),
+  join(CLI_PACKAGE_DIR, "node_modules", "@openteams", "script", "package.json"),
+  join(CLI_PACKAGE_DIR, "node_modules", "solid-js", "package.json"),
+];
 
 interface Target {
   name: string;
@@ -179,13 +185,36 @@ function copyBuiltBinary(target: Target, writeDefaultAlias: boolean): void {
 }
 
 function installDeps(): void {
-  if (!existsSync(join(CLI_DIR, "node_modules"))) {
-    console.log("[build] Installing dependencies...");
-    execFileSync(BUN_EXECUTABLE, ["install"], {
-      cwd: CLI_DIR,
-      stdio: "inherit",
-    });
+  const rootNodeModulesPath = join(CLI_DIR, "node_modules");
+  const missingDependencyPaths = REQUIRED_CLI_DEPENDENCIES.filter(
+    (dependencyPath) => !existsSync(dependencyPath)
+  );
+  const shouldInstall =
+    !existsSync(rootNodeModulesPath) || missingDependencyPaths.length > 0;
+
+  if (!shouldInstall) {
+    return;
   }
+
+  if (missingDependencyPaths.length > 0) {
+    console.warn(
+      `[build] CLI dependency links are missing or stale. Reinstalling Bun workspace dependencies.\n${missingDependencyPaths
+        .map((dependencyPath) => `  - ${dependencyPath}`)
+        .join("\n")}`
+    );
+  } else {
+    console.log("[build] Installing dependencies...");
+  }
+
+  const installArgs = ["install", "--ignore-scripts"];
+  if (missingDependencyPaths.length > 0) {
+    installArgs.push("--force");
+  }
+
+  execFileSync(BUN_EXECUTABLE, installArgs, {
+    cwd: CLI_DIR,
+    stdio: "inherit",
+  });
 }
 
 function main(): void {

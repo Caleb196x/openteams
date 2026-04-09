@@ -109,6 +109,17 @@ fn spawn_backend(port: u16) -> Result<CommandChild, Box<dyn std::error::Error>> 
     Ok(child)
 }
 
+fn apply_default_webview_zoom(window: &tauri::Window) {
+    #[cfg(windows)]
+    {
+        // Match an end-user browser zoom setting of 80% at the WebView level so
+        // fixed overlays, dialogs, and portal content all scale together.
+        let _ = window.with_webview(|webview| unsafe {
+            let _ = webview.controller().SetZoomFactor(0.8);
+        });
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![delete_all_user_data, delete_cache_data])
@@ -121,6 +132,8 @@ fn main() {
             });
 
             if let Some(window) = app.get_window("main") {
+                apply_default_webview_zoom(&window);
+
                 // Tauri 1.x remote IPC access is more reliable with localhost than loopback IPs.
                 let url = format!("http://localhost:{}", port);
                 window.eval(&format!(

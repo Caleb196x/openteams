@@ -275,7 +275,18 @@
   }
 
   .new-design {
+    --new-design-ui-scale: 1;
     @apply bg-background text-foreground font-ibm-plex-sans;
+  }
+
+  @media (min-width: 1200px) {
+    @supports (zoom: 1) {
+      .new-design.new-design--browser-scale {
+        --new-design-ui-scale: 0.8;
+        zoom: var(--new-design-ui-scale);
+        overflow: hidden;
+      }
+    }
   }
 
   .new-design *:focus {
@@ -424,6 +435,12 @@
 }
 
 @layer components {
+  .new-design .chat-app-shell {
+    height: calc(100vh / var(--new-design-ui-scale));
+    width: calc(100vw / var(--new-design-ui-scale));
+    overflow: hidden;
+  }
+
   .new-design .chat-session-route {
     background: linear-gradient(135deg, #f9f8f6 0%, #efece9 100%);
     padding: 1px;
