@@ -125,43 +125,6 @@ interface BuiltinSkillsStats {
   categories: string[];
 }
 
-// Special handler for Result-returning endpoints
-const handleApiResponseAsResult = async <T, E>(
-  response: Response
-): Promise<Result<T, E>> => {
-  if (!response.ok) {
-    // HTTP error - no structured error data
-    let errorMessage = `Request failed with status ${response.status}`;
-
-    try {
-      const errorData = await response.json();
-      if (errorData.message) {
-        errorMessage = errorData.message;
-      }
-    } catch {
-      errorMessage = response.statusText || errorMessage;
-    }
-
-    return {
-      success: false,
-      error: undefined,
-      message: errorMessage,
-    };
-  }
-
-  const result: ApiResponse<T, E> = await response.json();
-
-  if (!result.success) {
-    return {
-      success: false,
-      error: result.error_data || undefined,
-      message: result.message || undefined,
-    };
-  }
-
-  return { success: true, data: result.data as T };
-};
-
 export const handleApiResponse = async <T, E = T>(
   response: Response
 ): Promise<T> => {

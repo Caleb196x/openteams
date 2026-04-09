@@ -16,6 +16,8 @@ export function NewDesignScope({ children }: NewDesignScopeProps) {
   const [container, setContainer] = useState<HTMLElement | null>(null);
   const hasTracked = useRef(false);
   const { resolvedTheme } = useTheme();
+  const isTauriRuntime =
+    typeof window !== 'undefined' && '__TAURI__' in window;
 
   useEffect(() => {
     if (!hasTracked.current) {
@@ -27,7 +29,9 @@ export function NewDesignScope({ children }: NewDesignScopeProps) {
   return (
     <div
       ref={setContainer}
-      className={`new-design h-full ${resolvedTheme === 'dark' ? 'dark' : ''}`}
+      className={`new-design h-full ${
+        resolvedTheme === 'dark' ? 'dark' : ''
+      } ${isTauriRuntime ? '' : 'new-design--browser-scale'}`}
     >
       {container && (
         <PortalContainerContext.Provider value={container}>

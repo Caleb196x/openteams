@@ -12,8 +12,6 @@ import * as Sentry from '@sentry/react';
 import i18n from './i18n';
 import posthog from 'posthog-js';
 import { PostHogProvider } from 'posthog-js/react';
-// Import modal type definitions
-import './types/modals';
 
 import {
   useLocation,
