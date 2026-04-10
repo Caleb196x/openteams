@@ -1077,6 +1077,7 @@ impl ChatRunner {
                 .build_message_attachment_context(source_message, &context_dir)
                 .await?;
             let session_agents = self.build_session_agent_summaries(session_id).await?;
+            let session = ChatSession::find_by_id(&self.db.pool, session_id).await?;
 
             // Resolve the enabled native skills allowed for this session member.
             let agent_skills = self
@@ -1098,7 +1099,7 @@ impl ChatRunner {
                 reference_context.as_ref(),
                 &agent_skills,
                 prompt_language,
-                ui_config.chat_presets.team_protocol.as_deref(),
+                Self::resolve_session_team_protocol(session.as_ref()),
             );
             fs::write(&input_path, &prompt).await?;
 

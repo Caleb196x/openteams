@@ -10,6 +10,7 @@ use db::{
     models::{
         chat_agent::ChatAgent,
         chat_message::{ChatMessage, ChatSenderType},
+        chat_session::{ChatSession, ChatSessionStatus},
         chat_session_agent::{ChatSessionAgent, ChatSessionAgentState},
         chat_skill::ChatSkill,
     },
@@ -1108,4 +1109,71 @@ fn resolve_team_protocol_guidelines_falls_back_when_empty() {
     let prompt = ChatRunner::resolve_team_protocol_guidelines(Some(" "));
 
     assert_eq!(prompt, "no team collaboration protocol");
+}
+
+#[test]
+fn resolve_session_team_protocol_returns_enabled_session_content_only() {
+    let now = Utc::now();
+    let session = ChatSession {
+        id: Uuid::new_v4(),
+        title: Some("demo".to_string()),
+        status: ChatSessionStatus::Active,
+        summary_text: None,
+        archive_ref: None,
+        last_seen_diff_key: None,
+        team_protocol: Some("  Follow the team protocol.  ".to_string()),
+        team_protocol_enabled: true,
+        default_workspace_path: None,
+        created_at: now,
+        updated_at: now,
+        archived_at: None,
+    };
+
+    assert_eq!(
+        ChatRunner::resolve_session_team_protocol(Some(&session)),
+        Some("Follow the team protocol.")
+    );
+}
+
+#[test]
+fn resolve_session_team_protocol_ignores_disabled_or_empty_session_content() {
+    let now = Utc::now();
+    let disabled_session = ChatSession {
+        id: Uuid::new_v4(),
+        title: Some("demo".to_string()),
+        status: ChatSessionStatus::Active,
+        summary_text: None,
+        archive_ref: None,
+        last_seen_diff_key: None,
+        team_protocol: Some("Follow the team protocol.".to_string()),
+        team_protocol_enabled: false,
+        default_workspace_path: None,
+        created_at: now,
+        updated_at: now,
+        archived_at: None,
+    };
+    let empty_session = ChatSession {
+        id: Uuid::new_v4(),
+        title: Some("demo".to_string()),
+        status: ChatSessionStatus::Active,
+        summary_text: None,
+        archive_ref: None,
+        last_seen_diff_key: None,
+        team_protocol: Some("   ".to_string()),
+        team_protocol_enabled: true,
+        default_workspace_path: None,
+        created_at: now,
+        updated_at: now,
+        archived_at: None,
+    };
+
+    assert_eq!(
+        ChatRunner::resolve_session_team_protocol(Some(&disabled_session)),
+        None
+    );
+    assert_eq!(
+        ChatRunner::resolve_session_team_protocol(Some(&empty_session)),
+        None
+    );
+    assert_eq!(ChatRunner::resolve_session_team_protocol(None), None);
 }

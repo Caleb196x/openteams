@@ -2143,6 +2143,21 @@ impl ChatRunner {
         normalized_protocol.to_string()
     }
 
+    pub(super) fn resolve_session_team_protocol(
+        session: Option<&ChatSession>,
+    ) -> Option<&str> {
+        let session = session?;
+        if !session.team_protocol_enabled {
+            return None;
+        }
+
+        session
+            .team_protocol
+            .as_deref()
+            .map(str::trim)
+            .filter(|protocol| !protocol.is_empty())
+    }
+
     pub(super) fn strip_embedded_team_protocol_from_system_prompt(system_prompt: &str) -> String {
         let normalized = system_prompt.replace("\r\n", "\n");
 
