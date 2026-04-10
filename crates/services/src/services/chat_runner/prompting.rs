@@ -1645,13 +1645,38 @@ impl ChatRunner {
     pub(super) fn parse_agent_protocol_messages(
         content: &str,
     ) -> Result<Vec<AgentProtocolMessage>, AgentProtocolError> {
-        let json_str = Self::extract_json_from_content(content)?;
-        let raw: serde_json::Value =
-            serde_json::from_str(&json_str).map_err(Self::invalid_json_error)?;
+        let strict_error = match Self::extract_json_from_content(content) {
+            Ok(json_str) => match Self::parse_agent_protocol_messages_from_json(&json_str) {
+                Ok(messages) => return Ok(messages),
+                Err(err) => err,
+            },
+            Err(err) => err,
+        };
 
+        if strict_error.code != ChatProtocolNoticeCode::InvalidJson {
+            return Err(strict_error);
+        }
+
+        let Some(relaxed_json) = Self::extract_relaxed_json_from_content(content) else {
+            return Err(strict_error);
+        };
+        let normalized_json = Self::normalize_relaxed_protocol_json(&relaxed_json);
+
+        match Self::parse_agent_protocol_messages_from_json(&normalized_json) {
+            Ok(messages) => Ok(messages),
+            Err(err) if err.code != ChatProtocolNoticeCode::InvalidJson => Err(err),
+            Err(_) => Err(strict_error),
+        }
+    }
+
+    pub(super) fn parse_agent_protocol_messages_from_json(
+        json_str: &str,
+    ) -> Result<Vec<AgentProtocolMessage>, AgentProtocolError> {
+        let raw: serde_json::Value =
+            serde_json::from_str(json_str).map_err(Self::invalid_json_error)?;
         let messages = match &raw {
             serde_json::Value::Array(_) => {
-                serde_json::from_str::<Vec<AgentProtocolMessage>>(&json_str)
+                serde_json::from_str::<Vec<AgentProtocolMessage>>(json_str)
                     .map_err(Self::invalid_json_error)?
             }
             _ => {
@@ -1667,6 +1692,234 @@ impl ChatRunner {
         };
 
         Self::validate_agent_protocol_messages(messages)
+    }
+
+    pub(super) fn extract_relaxed_json_from_content(content: &str) -> Option<String> {
+        let trimmed = content.trim();
+        if matches!(trimmed.chars().next(), Some('[' | '{'))
+            && let Some(candidate) = Self::extract_balanced_json_like_prefix(trimmed)
+        {
+            return Some(candidate);
+        }
+
+        if let Some(start) = trimmed.find("```json") {
+            let json_start = start + 7;
+            let remaining = &trimmed[json_start..];
+            if let Some(candidate) = Self::extract_balanced_json_like_prefix(remaining) {
+                return Some(candidate);
+            }
+        }
+
+        if let Some(start) = trimmed.find("```") {
+            let block_start = start + 3;
+            let remaining = &trimmed[block_start..];
+            if let Some(candidate) = Self::extract_balanced_json_like_prefix(remaining) {
+                return Some(candidate);
+            }
+        }
+
+        for (index, ch) in trimmed.char_indices() {
+            if matches!(ch, '[' | '{')
+                && let Some(candidate) = Self::extract_balanced_json_like_prefix(&trimmed[index..])
+            {
+                return Some(candidate);
+            }
+        }
+
+        None
+    }
+
+    pub(super) fn extract_balanced_json_like_prefix(content: &str) -> Option<String> {
+        let trimmed = content.trim_start();
+        if !matches!(trimmed.chars().next(), Some('[' | '{')) {
+            return None;
+        }
+
+        let mut stack = Vec::new();
+        let mut in_string = false;
+        let mut escaped = false;
+
+        for (index, ch) in trimmed.char_indices() {
+            if in_string {
+                if escaped {
+                    escaped = false;
+                    continue;
+                }
+
+                match ch {
+                    '\\' => escaped = true,
+                    '"' => in_string = false,
+                    _ => {}
+                }
+                continue;
+            }
+
+            match ch {
+                '"' => in_string = true,
+                '[' | '{' => stack.push(ch),
+                ']' => {
+                    if stack.pop() != Some('[') {
+                        return None;
+                    }
+                    if stack.is_empty() {
+                        return Some(trimmed[..index + ch.len_utf8()].to_string());
+                    }
+                }
+                '}' => {
+                    if stack.pop() != Some('{') {
+                        return None;
+                    }
+                    if stack.is_empty() {
+                        return Some(trimmed[..index + ch.len_utf8()].to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        None
+    }
+
+    pub(super) fn normalize_relaxed_protocol_json(content: &str) -> String {
+        #[derive(Clone, Copy)]
+        enum Scope {
+            Array,
+            Object { expecting_first_member: bool },
+        }
+
+        let mut normalized = String::with_capacity(content.len() + 32);
+        let mut scopes = Vec::new();
+        let mut index = 0usize;
+
+        while index < content.len() {
+            let Some(ch) = content[index..].chars().next() else {
+                break;
+            };
+            let next = index + ch.len_utf8();
+
+            match ch {
+                '{' => {
+                    normalized.push(ch);
+                    scopes.push(Scope::Object {
+                        expecting_first_member: true,
+                    });
+                    index = next;
+                }
+                '[' => {
+                    normalized.push(ch);
+                    scopes.push(Scope::Array);
+                    index = next;
+                }
+                '}' | ']' => {
+                    normalized.push(ch);
+                    scopes.pop();
+                    index = next;
+                }
+                '"' => {
+                    let Some(string_end) = Self::find_json_string_end(content, index) else {
+                        normalized.push_str(&content[index..]);
+                        break;
+                    };
+                    let raw_literal = &content[index..string_end];
+                    let is_first_object_member = matches!(
+                        scopes.last(),
+                        Some(Scope::Object {
+                            expecting_first_member: true
+                        })
+                    );
+
+                    if is_first_object_member
+                        && let Ok(raw_value) = serde_json::from_str::<String>(raw_literal)
+                        && let Some(protocol_type) =
+                            Self::canonical_protocol_message_type_name(&raw_value)
+                    {
+                        let next_token_index = Self::skip_json_whitespace(content, string_end);
+                        if matches!(content[next_token_index..].chars().next(), Some(',')) {
+                            normalized.push_str("\"type\": ");
+                            normalized.push_str(
+                                &serde_json::to_string(protocol_type)
+                                    .expect("protocol type should serialize"),
+                            );
+                            if let Some(Scope::Object {
+                                expecting_first_member,
+                            }) = scopes.last_mut()
+                            {
+                                *expecting_first_member = false;
+                            }
+                            index = string_end;
+                            continue;
+                        }
+                    }
+
+                    normalized.push_str(raw_literal);
+                    if let Some(Scope::Object {
+                        expecting_first_member,
+                    }) = scopes.last_mut()
+                        && *expecting_first_member
+                    {
+                        *expecting_first_member = false;
+                    }
+                    index = string_end;
+                }
+                _ => {
+                    normalized.push_str(&content[index..next]);
+                    index = next;
+                }
+            }
+        }
+
+        normalized
+    }
+
+    pub(super) fn find_json_string_end(content: &str, start: usize) -> Option<usize> {
+        let mut escaped = false;
+        let mut index = start + 1;
+
+        while index < content.len() {
+            let ch = content[index..].chars().next()?;
+            let next = index + ch.len_utf8();
+
+            if escaped {
+                escaped = false;
+                index = next;
+                continue;
+            }
+
+            match ch {
+                '\\' => escaped = true,
+                '"' => return Some(next),
+                _ => {}
+            }
+
+            index = next;
+        }
+
+        None
+    }
+
+    pub(super) fn skip_json_whitespace(content: &str, start: usize) -> usize {
+        let mut index = start;
+        while index < content.len() {
+            let Some(ch) = content[index..].chars().next() else {
+                break;
+            };
+            if !ch.is_whitespace() {
+                break;
+            }
+            index += ch.len_utf8();
+        }
+        index
+    }
+
+    pub(super) fn canonical_protocol_message_type_name(value: &str) -> Option<&'static str> {
+        let normalized = value.trim().to_ascii_lowercase();
+        match normalized.as_str() {
+            "send" => Some("send"),
+            "record" => Some("record"),
+            "artifact" | "artiface" | "artefact" => Some("artifact"),
+            "conclusion" => Some("conclusion"),
+            _ => None,
+        }
     }
 
     pub(super) fn validate_agent_protocol_messages(

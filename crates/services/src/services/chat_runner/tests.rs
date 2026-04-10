@@ -252,6 +252,52 @@ fn parse_agent_protocol_messages_json_with_embedded_backticks() {
 }
 
 #[test]
+fn parse_agent_protocol_messages_supports_relaxed_message_type_shorthand() {
+    let content = r#"
+```json
+[
+  {
+    "type": "send",
+    "to": "you",
+    "intent": "reply",
+    "content": "done"
+  },
+  {
+    "record",
+    "content": "hero grid restored to idle"
+  },
+  {
+    "conclusion",
+    "content": "restoration behavior is now configured"
+  }
+]
+```
+"#;
+
+    let messages = ChatRunner::parse_agent_protocol_messages(content).expect("messages");
+    assert_eq!(messages.len(), 3);
+    assert!(matches!(
+        messages[0].message_type,
+        AgentProtocolMessageType::Send
+    ));
+    assert_eq!(messages[0].to.as_deref(), Some("you"));
+    assert_eq!(messages[0].intent.as_deref(), Some("reply"));
+    assert!(matches!(
+        messages[1].message_type,
+        AgentProtocolMessageType::Record
+    ));
+    assert_eq!(messages[1].content, "hero grid restored to idle");
+    assert!(matches!(
+        messages[2].message_type,
+        AgentProtocolMessageType::Conclusion
+    ));
+    assert_eq!(
+        messages[2].content,
+        "restoration behavior is now configured"
+    );
+}
+
+#[test]
 fn parse_agent_protocol_messages_rejects_legacy_object() {
     let content = r#"{
   "send_to_member": { "target": "@architect", "content": "sync API changes" },
