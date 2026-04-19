@@ -49,10 +49,7 @@ impl WorkflowPlanRevision {
             .await
     }
 
-    pub async fn find_by_plan(
-        pool: &SqlitePool,
-        plan_id: Uuid,
-    ) -> Result<Vec<Self>, sqlx::Error> {
+    pub async fn find_by_plan(pool: &SqlitePool, plan_id: Uuid) -> Result<Vec<Self>, sqlx::Error> {
         sqlx::query_as::<_, Self>(&format!(
             "{REVISION_SELECT}\nWHERE plan_id = ?1\nORDER BY revision_no ASC"
         ))

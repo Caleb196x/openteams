@@ -5,6 +5,7 @@ pub mod runs;
 pub mod sessions;
 pub mod skills;
 pub mod work_items;
+pub mod workflow;
 
 use axum::{Router, extract::DefaultBodyLimit, middleware::from_fn_with_state, routing::get};
 
@@ -47,6 +48,10 @@ pub fn router(deployment: &DeploymentImpl) -> Router<DeploymentImpl> {
             get(messages::get_messages).post(messages::create_message),
         )
         .route("/work-items", get(work_items::get_work_items))
+        .route(
+            "/workflow/generate-plan-and-run",
+            axum::routing::post(workflow::generate_plan_and_run),
+        )
         .route(
             "/messages/batch-delete",
             axum::routing::post(messages::delete_messages_batch),

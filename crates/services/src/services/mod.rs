@@ -29,6 +29,7 @@ pub mod repo;
 pub mod skill_registry;
 pub mod workflow_compiler;
 pub mod workflow_orchestrator;
+pub mod workflow_runtime;
 pub mod workflow_validator;
 pub mod workspace_manager;
 pub mod worktree_manager;

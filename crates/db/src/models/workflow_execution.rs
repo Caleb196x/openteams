@@ -193,4 +193,45 @@ impl WorkflowExecution {
         .fetch_one(pool)
         .await
     }
+
+    pub async fn update_workflow_card_message_id(
+        pool: &SqlitePool,
+        id: Uuid,
+        workflow_card_message_id: Uuid,
+    ) -> Result<Self, sqlx::Error> {
+        sqlx::query_as::<_, Self>(
+            r#"
+            UPDATE chat_workflow_executions
+            SET workflow_card_message_id = ?2,
+                updated_at = datetime('now', 'subsec')
+            WHERE id = ?1
+            RETURNING id, session_id, plan_id, active_revision_id, active_round_id,
+                      workflow_card_message_id, lead_session_agent_id, status,
+                      current_round, title, compiled_graph_hash,
+                      started_at, completed_at, created_at, updated_at
+            "#,
+        )
+        .bind(id)
+        .bind(workflow_card_message_id)
+        .fetch_one(pool)
+        .await
+    }
+
+    pub async fn set_completed(pool: &SqlitePool, id: Uuid) -> Result<Self, sqlx::Error> {
+        sqlx::query_as::<_, Self>(
+            r#"
+            UPDATE chat_workflow_executions
+            SET completed_at = datetime('now', 'subsec'),
+                updated_at = datetime('now', 'subsec')
+            WHERE id = ?1
+            RETURNING id, session_id, plan_id, active_revision_id, active_round_id,
+                      workflow_card_message_id, lead_session_agent_id, status,
+                      current_round, title, compiled_graph_hash,
+                      started_at, completed_at, created_at, updated_at
+            "#,
+        )
+        .bind(id)
+        .fetch_one(pool)
+        .await
+    }
 }

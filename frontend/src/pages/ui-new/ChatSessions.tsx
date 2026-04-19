@@ -8,7 +8,7 @@ import {
 } from 'react';
 import { UsersThreeIcon, CaretDoubleDownIcon } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
-import { useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ChatMessage,
@@ -97,6 +97,7 @@ import { ChatHeader } from './chat/components/ChatHeader';
 import { CleanupModeBar } from './chat/components/CleanupModeBar';
 import { ChatMessageItem } from './chat/components/ChatMessageItem';
 import { ChatWorkItemCard } from './chat/components/ChatWorkItemCard';
+import { extractWorkflowCardProjection } from './chat/components/ChatWorkflowCard';
 import { RunningAgentPlaceholder } from './chat/components/RunningAgentPlaceholder';
 import { MessageInputArea } from './chat/components/MessageInputArea';
 import { ChatEmptyStateIndicator } from './chat/components/ChatEmptyStateIndicator';
@@ -894,6 +895,14 @@ export function ChatSessions() {
     }
   );
 
+  const generatePlanAndRun = useMutation({
+    mutationFn: async (sessionId: string) => chatApi.generatePlanAndRun(sessionId),
+    onSuccess: ({ workflow_card_message }) => {
+      upsertMessage(workflow_card_message);
+      queryClient.invalidateQueries({ queryKey: ['chatSessions'] });
+    },
+  });
+
   // Message input
   const getMessageMentionHandle = useCallback(
     (message: ChatMessage) => {
@@ -1363,6 +1372,15 @@ export function ChatSessions() {
       ),
     [messages]
   );
+  const hasWorkflowGoal = useMemo(
+    () =>
+      messageList.some(
+        (message) =>
+          message.sender_type === ChatSenderType.user &&
+          message.content.trim().length > 0
+      ),
+    [messageList]
+  );
   const messageIdsByRunId = useMemo(() => {
     const map = new Map<string, string[]>();
 
@@ -1452,6 +1470,30 @@ export function ChatSessions() {
           new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
       );
   }, [runIdsWithSendMessages, sessionAgents, workItems]);
+  const completedWorkflowExecutionIdsWithWorkItems = useMemo(() => {
+    const runIds = new Set<string>();
+    for (const group of workItemGroups) {
+      runIds.add(group.runId);
+    }
+    return runIds;
+  }, [workItemGroups]);
+  const visibleMessageList = useMemo(
+    () =>
+      messageList.filter((message) => {
+        const workflowCard = extractWorkflowCardProjection(message.meta);
+        if (!workflowCard) {
+          return true;
+        }
+
+        return !(
+          workflowCard.state === 'completed' &&
+          completedWorkflowExecutionIdsWithWorkItems.has(
+            workflowCard.execution_id
+          )
+        );
+      }),
+    [completedWorkflowExecutionIdsWithWorkItems, messageList]
+  );
   const messageById = useMemo(
     () => new Map(messageList.map((message) => [message.id, message])),
     [messageList]
@@ -1729,7 +1771,7 @@ export function ChatSessions() {
   const timelineEntries = useMemo<TimelineEntry[]>(
     () =>
       [
-        ...messageList
+        ...visibleMessageList
           .filter((message) => !queuedMessageIds.has(message.id))
           .map((message) => ({
             kind: 'message' as const,
@@ -1744,7 +1786,7 @@ export function ChatSessions() {
           group,
         })),
       ].sort((a, b) => a.createdAtMs - b.createdAtMs),
-    [messageList, workItemGroups, queuedMessageIds]
+    [queuedMessageIds, visibleMessageList, workItemGroups]
   );
   const latestWorkItemEntryKey =
     workItemGroups.length > 0
@@ -3731,6 +3773,34 @@ export function ChatSessions() {
     }
   };
 
+  const handleGenerateWorkflow = useCallback(async () => {
+    if (!activeSessionId) return;
+
+    try {
+      await generatePlanAndRun.mutateAsync(activeSessionId);
+    } catch (error) {
+      const message =
+        error instanceof ApiError
+          ? error.message
+          : t('workflow.runNowFailed', {
+              defaultValue: 'Workflow generation failed.',
+            });
+
+      setConfirmModal({
+        title: t('workflow.runNowFailedTitle', {
+          defaultValue: '执行失败',
+        }),
+        message,
+        mode: 'alert',
+        tone: 'destructive',
+        confirmText: t('common:ok'),
+        onConfirm: () => {
+          setConfirmModal(null);
+        },
+      });
+    }
+  }, [activeSessionId, generatePlanAndRun, t]);
+
   const handleCancelTitleEdit = () => {
     setTitleDraft(activeSession?.title ?? '');
     setIsEditingTitle(false);
@@ -4082,6 +4152,15 @@ export function ChatSessions() {
                 : undefined
             }
             onOpenWorkspaceChanges={() => handleOpenWorkspaceChanges()}
+            canGenerateWorkflow={
+              !!activeSessionId &&
+              !isArchived &&
+              sessionMembers.length > 0 &&
+              hasWorkflowGoal &&
+              !generatePlanAndRun.isPending
+            }
+            isGeneratingWorkflow={generatePlanAndRun.isPending}
+            onGenerateWorkflow={handleGenerateWorkflow}
           />
 
           {/* Cleanup mode controls */}

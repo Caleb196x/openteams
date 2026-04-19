@@ -53,6 +53,10 @@ import {
   extractErrorFromMeta,
 } from '../utils';
 import { formatTokenUsage } from '@/utils/string';
+import {
+  ChatWorkflowCard,
+  extractWorkflowCardProjection,
+} from './ChatWorkflowCard';
 
 const SUPPRESSED_PROTOCOL_ERROR_CODES = new Set([
   'invalid_json',
@@ -199,6 +203,7 @@ export function ChatMessageItem({
       })
     : null;
   const protocolError = extractProtocolErrorMeta(message.meta);
+  const workflowCardProjection = extractWorkflowCardProjection(message.meta);
   const errorInfo = extractErrorFromMeta(message.meta);
   const apiError =
     isAgent && !errorInfo
@@ -237,6 +242,42 @@ export function ChatMessageItem({
 
   // System messages
   if (message.sender_type === ChatSenderType.system) {
+    if (workflowCardProjection) {
+      return (
+        <div className="chat-session-message-row is-system flex items-start gap-base">
+          {isCleanupMode && (
+            <button
+              type="button"
+              className="flex-shrink-0 mt-1"
+              onClick={onToggleSelect}
+            >
+              {isSelected ? (
+                <CheckSquareIcon
+                  className="size-icon text-brand"
+                  weight="fill"
+                />
+              ) : (
+                <SquareIcon className="size-icon text-low" />
+              )}
+            </button>
+          )}
+          <div
+            className={cn(
+              'relative w-full',
+              isCleanupMode && 'cursor-pointer'
+            )}
+            onClick={handleCleanupCardClick}
+            onKeyDown={handleCleanupCardKeyDown}
+            role={isCleanupMode ? 'checkbox' : undefined}
+            aria-checked={isCleanupMode ? isSelected : undefined}
+            tabIndex={isCleanupMode ? 0 : undefined}
+          >
+            <ChatWorkflowCard message={message} />
+          </div>
+        </div>
+      );
+    }
+
     if (shouldSuppressProtocolErrorCard) {
       return null;
     }

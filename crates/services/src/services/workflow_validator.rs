@@ -72,6 +72,31 @@ pub fn validate_structure(plan: &WorkflowPlanJson) -> ValidationResult {
         });
     }
 
+    if plan.agents.available.is_empty() {
+        errors.push(ValidationError {
+            field: "agents.available".into(),
+            message: "可用团队成员列表不能为空".into(),
+        });
+    }
+
+    let mut available_agent_ids = HashSet::new();
+    for agent_id in &plan.agents.available {
+        if agent_id.trim().is_empty() {
+            errors.push(ValidationError {
+                field: "agents.available".into(),
+                message: "可用团队成员标识不能为空".into(),
+            });
+            continue;
+        }
+
+        if !available_agent_ids.insert(agent_id) {
+            errors.push(ValidationError {
+                field: "agents.available".into(),
+                message: format!("可用团队成员标识 '{}' 重复", agent_id),
+            });
+        }
+    }
+
     // nodes 非空
     if plan.nodes.is_empty() {
         errors.push(ValidationError {
@@ -159,10 +184,7 @@ pub fn validate_structure(plan: &WorkflowPlanJson) -> ValidationResult {
 // ---------------------------------------------------------------------------
 
 /// 对 workflow plan JSON 做语义校验：DAG、agent 引用、result 节点约束
-pub fn validate_semantics(
-    plan: &WorkflowPlanJson,
-    valid_agent_ids: &[String],
-) -> ValidationResult {
+pub fn validate_semantics(plan: &WorkflowPlanJson, valid_agent_ids: &[String]) -> ValidationResult {
     let mut errors = Vec::new();
     let node_ids: HashSet<&str> = plan.nodes.iter().map(|n| n.id.as_str()).collect();
 
@@ -233,6 +255,21 @@ pub fn validate_semantics(
 
     // agent 引用校验
     let agent_set: HashSet<&str> = valid_agent_ids.iter().map(|s| s.as_str()).collect();
+    let available_agent_set: HashSet<&str> =
+        plan.agents.available.iter().map(|s| s.as_str()).collect();
+
+    for agent_id in &plan.agents.available {
+        if !agent_set.contains(agent_id.as_str()) {
+            errors.push(ValidationError {
+                field: "agents.available".into(),
+                message: format!(
+                    "可用团队成员 '{}' 不在当前 session 的可用成员列表中",
+                    agent_id
+                ),
+            });
+        }
+    }
+
     for node in &plan.nodes {
         if let Some(ref agent_id) = node.data.agent_id {
             if !agent_id.is_empty() && !agent_set.contains(agent_id.as_str()) {
@@ -240,6 +277,14 @@ pub fn validate_semantics(
                     field: format!("nodes[id={}].data.agentId", node.id),
                     message: format!(
                         "节点 '{}' 引用的 agent '{}' 不在可用团队成员列表中",
+                        node.id, agent_id
+                    ),
+                });
+            } else if !agent_id.is_empty() && !available_agent_set.contains(agent_id.as_str()) {
+                errors.push(ValidationError {
+                    field: format!("nodes[id={}].data.agentId", node.id),
+                    message: format!(
+                        "节点 '{}' 引用的 agent '{}' 不在 agents.available 列表中",
                         node.id, agent_id
                     ),
                 });
@@ -251,10 +296,7 @@ pub fn validate_semantics(
     if !agent_set.contains(plan.agents.lead.as_str()) {
         errors.push(ValidationError {
             field: "agents.lead".into(),
-            message: format!(
-                "Lead agent '{}' 不在可用团队成员列表中",
-                plan.agents.lead
-            ),
+            message: format!("Lead agent '{}' 不在可用团队成员列表中", plan.agents.lead),
         });
     }
 
@@ -281,10 +323,7 @@ pub fn validate_semantics(
 // ---------------------------------------------------------------------------
 
 /// 同时执行结构校验和语义校验
-pub fn validate_plan(
-    plan: &WorkflowPlanJson,
-    valid_agent_ids: &[String],
-) -> ValidationResult {
+pub fn validate_plan(plan: &WorkflowPlanJson, valid_agent_ids: &[String]) -> ValidationResult {
     let mut errors = Vec::new();
 
     let structural = validate_structure(plan);
@@ -355,8 +394,9 @@ fn detect_cycle(plan: &WorkflowPlanJson) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use db::models::workflow_types::*;
+
+    use super::*;
 
     fn make_valid_plan() -> WorkflowPlanJson {
         WorkflowPlanJson {
@@ -415,11 +455,7 @@ mod tests {
     }
 
     fn valid_agents() -> Vec<String> {
-        vec![
-            "lead-agent".into(),
-            "agent-1".into(),
-            "agent-2".into(),
-        ]
+        vec!["lead-agent".into(), "agent-1".into(), "agent-2".into()]
     }
 
     #[test]
@@ -453,10 +489,7 @@ mod tests {
         plan.nodes[0].data.step_type = "unknown".into();
         let result = validate_structure(&plan);
         assert!(!result.is_valid);
-        assert!(result
-            .errors
-            .iter()
-            .any(|e| e.message.contains("步骤类型")));
+        assert!(result.errors.iter().any(|e| e.message.contains("步骤类型")));
     }
 
     #[test]
@@ -486,10 +519,7 @@ mod tests {
         });
         let result = validate_semantics(&plan, &valid_agents());
         assert!(!result.is_valid);
-        assert!(result
-            .errors
-            .iter()
-            .any(|e| e.message.contains("循环依赖")));
+        assert!(result.errors.iter().any(|e| e.message.contains("循环依赖")));
     }
 
     #[test]
@@ -499,10 +529,7 @@ mod tests {
         plan.edges.clear();
         let result = validate_semantics(&plan, &valid_agents());
         assert!(!result.is_valid);
-        assert!(result
-            .errors
-            .iter()
-            .any(|e| e.message.contains("result")));
+        assert!(result.errors.iter().any(|e| e.message.contains("result")));
     }
 
     #[test]
@@ -565,10 +592,30 @@ mod tests {
         plan.nodes[0].data.agent_id = Some("nonexistent-agent".into());
         let result = validate_semantics(&plan, &valid_agents());
         assert!(!result.is_valid);
-        assert!(result
-            .errors
-            .iter()
-            .any(|e| e.message.contains("团队成员")));
+        assert!(result.errors.iter().any(|e| e.message.contains("团队成员")));
+    }
+
+    #[test]
+    fn test_invalid_available_agent_rejected() {
+        let mut plan = make_valid_plan();
+        plan.agents.available.push("ghost-agent".into());
+        let result = validate_semantics(&plan, &valid_agents());
+        assert!(!result.is_valid);
+        assert!(result.errors.iter().any(|e| e.field == "agents.available"));
+    }
+
+    #[test]
+    fn test_agent_reference_must_exist_in_available_list() {
+        let mut plan = make_valid_plan();
+        plan.agents.available = vec!["agent-2".into()];
+        let result = validate_semantics(&plan, &valid_agents());
+        assert!(!result.is_valid);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.message.contains("agents.available"))
+        );
     }
 
     #[test]
@@ -577,10 +624,7 @@ mod tests {
         plan.edges[0].source = "nonexistent".into();
         let result = validate_semantics(&plan, &valid_agents());
         assert!(!result.is_valid);
-        assert!(result
-            .errors
-            .iter()
-            .any(|e| e.message.contains("不存在")));
+        assert!(result.errors.iter().any(|e| e.message.contains("不存在")));
     }
 
     #[test]
@@ -589,9 +633,6 @@ mod tests {
         let agents = vec!["agent-1".into(), "agent-2".into()]; // lead-agent not included
         let result = validate_semantics(&plan, &agents);
         assert!(!result.is_valid);
-        assert!(result
-            .errors
-            .iter()
-            .any(|e| e.field == "agents.lead"));
+        assert!(result.errors.iter().any(|e| e.field == "agents.lead"));
     }
 }

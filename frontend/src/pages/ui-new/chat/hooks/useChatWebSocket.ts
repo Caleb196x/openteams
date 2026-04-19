@@ -665,6 +665,11 @@ export function useChatWebSocket(
             return;
           }
 
+          if (payload.type === 'message_updated') {
+            handleMessageNew(payload.message);
+            return;
+          }
+
           if (payload.type === 'work_item_new') {
             handleWorkItemNew(payload.work_item);
             return;

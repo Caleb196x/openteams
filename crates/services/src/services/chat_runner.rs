@@ -492,6 +492,9 @@ pub enum ChatStreamEvent {
     MessageNew {
         message: ChatMessage,
     },
+    MessageUpdated {
+        message: ChatMessage,
+    },
     WorkItemNew {
         work_item: ChatWorkItem,
     },
@@ -747,6 +750,10 @@ impl ChatRunner {
 
     pub fn emit_message_new(&self, session_id: Uuid, message: ChatMessage) {
         self.emit(session_id, ChatStreamEvent::MessageNew { message });
+    }
+
+    pub fn emit_message_updated(&self, session_id: Uuid, message: ChatMessage) {
+        self.emit(session_id, ChatStreamEvent::MessageUpdated { message });
     }
 
     pub fn emit_work_item_new(&self, session_id: Uuid, work_item: ChatWorkItem) {

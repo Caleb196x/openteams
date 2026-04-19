@@ -260,7 +260,7 @@ impl ChatRunner {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) async fn persist_work_item(
+    pub(crate) async fn persist_work_item(
         &self,
         session_id: Uuid,
         session_agent_id: Uuid,

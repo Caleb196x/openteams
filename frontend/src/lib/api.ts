@@ -94,6 +94,11 @@ export interface OpenInExplorerResponse {
   error?: string | null;
 }
 
+export interface GeneratePlanAndRunResponse {
+  execution_id: string;
+  workflow_card_message: ChatMessage;
+}
+
 export class ApiError<E = unknown> extends Error {
   public status?: number;
   public error_data?: E;
@@ -760,6 +765,22 @@ export const chatApi = {
       `/api/chat/sessions/${sessionId}/work-items${queryParam}`
     );
     return handleApiResponse<ChatWorkItem[]>(response);
+  },
+
+  generatePlanAndRun: async (
+    sessionId: string,
+    userGoal?: string
+  ): Promise<GeneratePlanAndRunResponse> => {
+    const response = await makeRequest(
+      `/api/chat/sessions/${sessionId}/workflow/generate-plan-and-run`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          user_goal: userGoal ?? null,
+        }),
+      }
+    );
+    return handleApiResponse<GeneratePlanAndRunResponse>(response);
   },
 
   createMessage: async (

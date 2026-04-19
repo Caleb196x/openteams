@@ -23,9 +23,8 @@ impl WorkflowCompiler {
         json_str: &str,
         valid_agent_ids: &[String],
     ) -> Result<CompiledGraph, CompileError> {
-        let plan: WorkflowPlanJson = serde_json::from_str(json_str).map_err(|e| {
-            CompileError::ValidationFailed(format!("JSON 解析失败: {}", e))
-        })?;
+        let plan: WorkflowPlanJson = serde_json::from_str(json_str)
+            .map_err(|e| CompileError::ValidationFailed(format!("JSON 解析失败: {}", e)))?;
 
         Self::compile(&plan, valid_agent_ids)
     }
@@ -47,11 +46,7 @@ impl WorkflowCompiler {
         }
 
         // 2. 编译节点为 CompiledStep
-        let default_retry = plan
-            .globals
-            .as_ref()
-            .map(|g| g.default_retry)
-            .unwrap_or(1);
+        let default_retry = plan.globals.as_ref().map(|g| g.default_retry).unwrap_or(1);
 
         let mut steps: Vec<CompiledStep> = Vec::with_capacity(plan.nodes.len());
         let topo_order = Self::topological_sort(plan);
@@ -130,10 +125,7 @@ impl WorkflowCompiler {
     }
 
     /// 仅执行校验，不编译
-    pub fn validate_only(
-        plan: &WorkflowPlanJson,
-        valid_agent_ids: &[String],
-    ) -> ValidationResult {
+    pub fn validate_only(plan: &WorkflowPlanJson, valid_agent_ids: &[String]) -> ValidationResult {
         workflow_validator::validate_plan(plan, valid_agent_ids)
     }
 
@@ -154,12 +146,7 @@ impl WorkflowCompiler {
             hasher.update(format!("{:?}", step.step_type).as_bytes());
             hasher.update(step.title.as_bytes());
             hasher.update(step.instructions.as_bytes());
-            hasher.update(
-                step.assigned_agent_id
-                    .as_deref()
-                    .unwrap_or("")
-                    .as_bytes(),
-            );
+            hasher.update(step.assigned_agent_id.as_deref().unwrap_or("").as_bytes());
             if let Some(ref acceptance) = step.acceptance {
                 for a in acceptance {
                     hasher.update(a.as_bytes());
@@ -197,9 +184,7 @@ impl WorkflowCompiler {
         }
 
         for edge in &plan.edges {
-            if node_set.contains(edge.source.as_str())
-                && node_set.contains(edge.target.as_str())
-            {
+            if node_set.contains(edge.source.as_str()) && node_set.contains(edge.target.as_str()) {
                 adj.entry(edge.source.as_str())
                     .or_default()
                     .push(edge.target.as_str());
@@ -277,11 +262,7 @@ mod tests {
     }
 
     fn agents() -> Vec<String> {
-        vec![
-            "lead-agent".into(),
-            "agent-1".into(),
-            "agent-2".into(),
-        ]
+        vec!["lead-agent".into(), "agent-1".into(), "agent-2".into()]
     }
 
     #[test]

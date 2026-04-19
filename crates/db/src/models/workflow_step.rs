@@ -167,4 +167,33 @@ impl WorkflowStep {
         .fetch_one(pool)
         .await
     }
+
+    pub async fn record_execution_result(
+        pool: &SqlitePool,
+        id: Uuid,
+        latest_run_id: Uuid,
+        summary_text: Option<String>,
+    ) -> Result<Self, sqlx::Error> {
+        sqlx::query_as::<_, Self>(
+            r#"
+            UPDATE chat_workflow_steps
+            SET latest_run_id = ?2,
+                summary_text = ?3,
+                started_at = COALESCE(started_at, datetime('now', 'subsec')),
+                completed_at = datetime('now', 'subsec'),
+                updated_at = datetime('now', 'subsec')
+            WHERE id = ?1
+            RETURNING id, execution_id, round_id, compiled_revision_id, step_key,
+                      step_type, title, instructions, assigned_workflow_agent_session_id,
+                      status, retry_count, max_retry, round_index, display_order,
+                      latest_run_id, summary_text,
+                      created_at, updated_at, started_at, completed_at
+            "#,
+        )
+        .bind(id)
+        .bind(latest_run_id)
+        .bind(summary_text)
+        .fetch_one(pool)
+        .await
+    }
 }

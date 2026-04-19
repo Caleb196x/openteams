@@ -157,4 +157,24 @@ impl ChatMessage {
             .await?;
         Ok(result.rows_affected())
     }
+
+    pub async fn update_content_and_meta(
+        pool: &SqlitePool,
+        id: Uuid,
+        content: &str,
+        meta: serde_json::Value,
+    ) -> Result<Self, sqlx::Error> {
+        let meta_str = serde_json::to_string(&meta).unwrap_or_default();
+        sqlx::query_as::<_, ChatMessage>(
+            r#"UPDATE chat_messages
+               SET content = ?1, meta = ?2
+               WHERE id = ?3
+               RETURNING id, session_id, sender_type, sender_id, content, mentions, meta, created_at"#,
+        )
+        .bind(content)
+        .bind(meta_str)
+        .bind(id)
+        .fetch_one(pool)
+        .await
+    }
 }

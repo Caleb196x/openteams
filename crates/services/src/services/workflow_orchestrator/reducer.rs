@@ -246,37 +246,19 @@ pub fn validate_step_in_execution(
         ),
         E::Pausing => matches!(
             step_status,
-            S::Running
-                | S::InterruptRequested
-                | S::Completed
-                | S::Failed
-                | S::Blocked
+            S::Running | S::InterruptRequested | S::Completed | S::Failed | S::Blocked
         ),
         E::Paused => matches!(
             step_status,
-            S::Pending
-                | S::Blocked
-                | S::Interrupted
-                | S::Completed
-                | S::Failed
-                | S::Cancelled
+            S::Pending | S::Blocked | S::Interrupted | S::Completed | S::Failed | S::Cancelled
         ),
         E::Recompiling => matches!(
             step_status,
-            S::Pending
-                | S::Blocked
-                | S::Interrupted
-                | S::Completed
-                | S::Failed
-                | S::Cancelled
+            S::Pending | S::Blocked | S::Interrupted | S::Completed | S::Failed | S::Cancelled
         ),
         E::WaitingUser => matches!(
             step_status,
-            S::WaitingInput
-                | S::Interrupted
-                | S::Completed
-                | S::Failed
-                | S::Blocked
+            S::WaitingInput | S::Interrupted | S::Completed | S::Failed | S::Blocked
         ),
         E::Completed => matches!(
             step_status,
@@ -480,10 +462,7 @@ pub async fn transition_step(
         );
         return Err(TransitionError::IllegalStepTransition {
             from: format!("{:?}", step.status),
-            to: format!(
-                "{:?} (execution 状态 {:?} 下不允许)",
-                to, execution.status
-            ),
+            to: format!("{:?} (execution 状态 {:?} 下不允许)", to, execution.status),
         });
     }
 
@@ -549,10 +528,7 @@ pub async fn transition_agent_session(
         );
         return Err(TransitionError::IllegalAgentSessionTransition {
             from: format!("{:?}", session.state),
-            to: format!(
-                "{:?} (execution 状态 {:?} 下不允许)",
-                to, execution.status
-            ),
+            to: format!("{:?} (execution 状态 {:?} 下不允许)", to, execution.status),
         });
     }
 
@@ -601,144 +577,176 @@ mod tests {
 
     #[test]
     fn test_pending_to_bootstrapping() {
-        assert!(validate_execution_transition(
-            &WorkflowExecutionStatus::Pending,
-            &WorkflowExecutionStatus::Bootstrapping,
-        )
-        .is_ok());
+        assert!(
+            validate_execution_transition(
+                &WorkflowExecutionStatus::Pending,
+                &WorkflowExecutionStatus::Bootstrapping,
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn test_bootstrapping_to_running() {
-        assert!(validate_execution_transition(
-            &WorkflowExecutionStatus::Bootstrapping,
-            &WorkflowExecutionStatus::Running,
-        )
-        .is_ok());
+        assert!(
+            validate_execution_transition(
+                &WorkflowExecutionStatus::Bootstrapping,
+                &WorkflowExecutionStatus::Running,
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn test_bootstrapping_to_failed() {
-        assert!(validate_execution_transition(
-            &WorkflowExecutionStatus::Bootstrapping,
-            &WorkflowExecutionStatus::Failed,
-        )
-        .is_ok());
+        assert!(
+            validate_execution_transition(
+                &WorkflowExecutionStatus::Bootstrapping,
+                &WorkflowExecutionStatus::Failed,
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn test_running_to_pausing() {
-        assert!(validate_execution_transition(
-            &WorkflowExecutionStatus::Running,
-            &WorkflowExecutionStatus::Pausing,
-        )
-        .is_ok());
+        assert!(
+            validate_execution_transition(
+                &WorkflowExecutionStatus::Running,
+                &WorkflowExecutionStatus::Pausing,
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn test_running_to_waiting_user_acceptance() {
-        assert!(validate_execution_transition(
-            &WorkflowExecutionStatus::Running,
-            &WorkflowExecutionStatus::WaitingUserAcceptance,
-        )
-        .is_ok());
+        assert!(
+            validate_execution_transition(
+                &WorkflowExecutionStatus::Running,
+                &WorkflowExecutionStatus::WaitingUserAcceptance,
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn test_waiting_user_acceptance_to_paused() {
-        assert!(validate_execution_transition(
-            &WorkflowExecutionStatus::WaitingUserAcceptance,
-            &WorkflowExecutionStatus::Paused,
-        )
-        .is_ok());
+        assert!(
+            validate_execution_transition(
+                &WorkflowExecutionStatus::WaitingUserAcceptance,
+                &WorkflowExecutionStatus::Paused,
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn test_paused_to_recompiling() {
-        assert!(validate_execution_transition(
-            &WorkflowExecutionStatus::Paused,
-            &WorkflowExecutionStatus::Recompiling,
-        )
-        .is_ok());
+        assert!(
+            validate_execution_transition(
+                &WorkflowExecutionStatus::Paused,
+                &WorkflowExecutionStatus::Recompiling,
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn test_recompiling_to_resuming() {
-        assert!(validate_execution_transition(
-            &WorkflowExecutionStatus::Recompiling,
-            &WorkflowExecutionStatus::Resuming,
-        )
-        .is_ok());
+        assert!(
+            validate_execution_transition(
+                &WorkflowExecutionStatus::Recompiling,
+                &WorkflowExecutionStatus::Resuming,
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn test_resuming_to_running() {
-        assert!(validate_execution_transition(
-            &WorkflowExecutionStatus::Resuming,
-            &WorkflowExecutionStatus::Running,
-        )
-        .is_ok());
+        assert!(
+            validate_execution_transition(
+                &WorkflowExecutionStatus::Resuming,
+                &WorkflowExecutionStatus::Running,
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn test_resuming_to_pausing_allowed() {
-        assert!(validate_execution_transition(
-            &WorkflowExecutionStatus::Resuming,
-            &WorkflowExecutionStatus::Pausing,
-        )
-        .is_ok());
+        assert!(
+            validate_execution_transition(
+                &WorkflowExecutionStatus::Resuming,
+                &WorkflowExecutionStatus::Pausing,
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn test_completed_to_running_rejected() {
-        assert!(validate_execution_transition(
-            &WorkflowExecutionStatus::Completed,
-            &WorkflowExecutionStatus::Running,
-        )
-        .is_err());
+        assert!(
+            validate_execution_transition(
+                &WorkflowExecutionStatus::Completed,
+                &WorkflowExecutionStatus::Running,
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn test_pending_to_running_rejected() {
-        assert!(validate_execution_transition(
-            &WorkflowExecutionStatus::Pending,
-            &WorkflowExecutionStatus::Running,
-        )
-        .is_err());
+        assert!(
+            validate_execution_transition(
+                &WorkflowExecutionStatus::Pending,
+                &WorkflowExecutionStatus::Running,
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn test_failed_to_running_rejected() {
-        assert!(validate_execution_transition(
-            &WorkflowExecutionStatus::Failed,
-            &WorkflowExecutionStatus::Running,
-        )
-        .is_err());
+        assert!(
+            validate_execution_transition(
+                &WorkflowExecutionStatus::Failed,
+                &WorkflowExecutionStatus::Running,
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn test_recompiling_only_from_paused() {
         // recompiling 只能从 paused 进入
-        assert!(validate_execution_transition(
-            &WorkflowExecutionStatus::Running,
-            &WorkflowExecutionStatus::Recompiling,
-        )
-        .is_err());
+        assert!(
+            validate_execution_transition(
+                &WorkflowExecutionStatus::Running,
+                &WorkflowExecutionStatus::Recompiling,
+            )
+            .is_err()
+        );
 
-        assert!(validate_execution_transition(
-            &WorkflowExecutionStatus::WaitingUserAcceptance,
-            &WorkflowExecutionStatus::Recompiling,
-        )
-        .is_err());
+        assert!(
+            validate_execution_transition(
+                &WorkflowExecutionStatus::WaitingUserAcceptance,
+                &WorkflowExecutionStatus::Recompiling,
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn test_paused_to_cancelled() {
-        assert!(validate_execution_transition(
-            &WorkflowExecutionStatus::Paused,
-            &WorkflowExecutionStatus::Cancelled,
-        )
-        .is_ok());
+        assert!(
+            validate_execution_transition(
+                &WorkflowExecutionStatus::Paused,
+                &WorkflowExecutionStatus::Cancelled,
+            )
+            .is_ok()
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -747,57 +755,54 @@ mod tests {
 
     #[test]
     fn test_step_pending_to_ready() {
-        assert!(validate_step_transition(
-            &WorkflowStepStatus::Pending,
-            &WorkflowStepStatus::Ready,
-        )
-        .is_ok());
+        assert!(
+            validate_step_transition(&WorkflowStepStatus::Pending, &WorkflowStepStatus::Ready,)
+                .is_ok()
+        );
     }
 
     #[test]
     fn test_step_running_to_completed() {
-        assert!(validate_step_transition(
-            &WorkflowStepStatus::Running,
-            &WorkflowStepStatus::Completed,
-        )
-        .is_ok());
+        assert!(
+            validate_step_transition(&WorkflowStepStatus::Running, &WorkflowStepStatus::Completed,)
+                .is_ok()
+        );
     }
 
     #[test]
     fn test_step_running_to_interrupt_requested() {
-        assert!(validate_step_transition(
-            &WorkflowStepStatus::Running,
-            &WorkflowStepStatus::InterruptRequested,
-        )
-        .is_ok());
+        assert!(
+            validate_step_transition(
+                &WorkflowStepStatus::Running,
+                &WorkflowStepStatus::InterruptRequested,
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn test_step_failed_to_ready_retry() {
-        assert!(validate_step_transition(
-            &WorkflowStepStatus::Failed,
-            &WorkflowStepStatus::Ready,
-        )
-        .is_ok());
+        assert!(
+            validate_step_transition(&WorkflowStepStatus::Failed, &WorkflowStepStatus::Ready,)
+                .is_ok()
+        );
     }
 
     #[test]
     fn test_step_completed_terminal() {
-        assert!(validate_step_transition(
-            &WorkflowStepStatus::Completed,
-            &WorkflowStepStatus::Running,
-        )
-        .is_err());
+        assert!(
+            validate_step_transition(&WorkflowStepStatus::Completed, &WorkflowStepStatus::Running,)
+                .is_err()
+        );
     }
 
     #[test]
     fn test_step_pending_to_running_rejected() {
         // Must go through ready first
-        assert!(validate_step_transition(
-            &WorkflowStepStatus::Pending,
-            &WorkflowStepStatus::Running,
-        )
-        .is_err());
+        assert!(
+            validate_step_transition(&WorkflowStepStatus::Pending, &WorkflowStepStatus::Running,)
+                .is_err()
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -806,38 +811,46 @@ mod tests {
 
     #[test]
     fn test_agent_idle_to_running() {
-        assert!(validate_agent_session_transition(
-            &WorkflowAgentSessionState::Idle,
-            &WorkflowAgentSessionState::Running,
-        )
-        .is_ok());
+        assert!(
+            validate_agent_session_transition(
+                &WorkflowAgentSessionState::Idle,
+                &WorkflowAgentSessionState::Running,
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn test_agent_running_to_paused() {
-        assert!(validate_agent_session_transition(
-            &WorkflowAgentSessionState::Running,
-            &WorkflowAgentSessionState::Paused,
-        )
-        .is_ok());
+        assert!(
+            validate_agent_session_transition(
+                &WorkflowAgentSessionState::Running,
+                &WorkflowAgentSessionState::Paused,
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn test_agent_paused_to_idle() {
-        assert!(validate_agent_session_transition(
-            &WorkflowAgentSessionState::Paused,
-            &WorkflowAgentSessionState::Idle,
-        )
-        .is_ok());
+        assert!(
+            validate_agent_session_transition(
+                &WorkflowAgentSessionState::Paused,
+                &WorkflowAgentSessionState::Idle,
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn test_agent_completed_terminal() {
-        assert!(validate_agent_session_transition(
-            &WorkflowAgentSessionState::Completed,
-            &WorkflowAgentSessionState::Running,
-        )
-        .is_err());
+        assert!(
+            validate_agent_session_transition(
+                &WorkflowAgentSessionState::Completed,
+                &WorkflowAgentSessionState::Running,
+            )
+            .is_err()
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -891,32 +904,40 @@ mod tests {
     #[test]
     fn test_replan_path_waiting_user_acceptance_to_paused_to_recompiling_to_resuming_to_running() {
         // waiting_user_acceptance -> paused
-        assert!(validate_execution_transition(
-            &WorkflowExecutionStatus::WaitingUserAcceptance,
-            &WorkflowExecutionStatus::Paused,
-        )
-        .is_ok());
+        assert!(
+            validate_execution_transition(
+                &WorkflowExecutionStatus::WaitingUserAcceptance,
+                &WorkflowExecutionStatus::Paused,
+            )
+            .is_ok()
+        );
 
         // paused -> recompiling
-        assert!(validate_execution_transition(
-            &WorkflowExecutionStatus::Paused,
-            &WorkflowExecutionStatus::Recompiling,
-        )
-        .is_ok());
+        assert!(
+            validate_execution_transition(
+                &WorkflowExecutionStatus::Paused,
+                &WorkflowExecutionStatus::Recompiling,
+            )
+            .is_ok()
+        );
 
         // recompiling -> resuming
-        assert!(validate_execution_transition(
-            &WorkflowExecutionStatus::Recompiling,
-            &WorkflowExecutionStatus::Resuming,
-        )
-        .is_ok());
+        assert!(
+            validate_execution_transition(
+                &WorkflowExecutionStatus::Recompiling,
+                &WorkflowExecutionStatus::Resuming,
+            )
+            .is_ok()
+        );
 
         // resuming -> running
-        assert!(validate_execution_transition(
-            &WorkflowExecutionStatus::Resuming,
-            &WorkflowExecutionStatus::Running,
-        )
-        .is_ok());
+        assert!(
+            validate_execution_transition(
+                &WorkflowExecutionStatus::Resuming,
+                &WorkflowExecutionStatus::Running,
+            )
+            .is_ok()
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -998,21 +1019,9 @@ mod tests {
 
     #[test]
     fn test_wire_format_single_word_enums() {
-        assert_eq!(
-            to_wire_format(&WorkflowExecutionStatus::Running),
-            "running"
-        );
-        assert_eq!(
-            to_wire_format(&WorkflowExecutionStatus::Paused),
-            "paused"
-        );
-        assert_eq!(
-            to_wire_format(&WorkflowStepStatus::Pending),
-            "pending"
-        );
-        assert_eq!(
-            to_wire_format(&WorkflowAgentSessionState::Idle),
-            "idle"
-        );
+        assert_eq!(to_wire_format(&WorkflowExecutionStatus::Running), "running");
+        assert_eq!(to_wire_format(&WorkflowExecutionStatus::Paused), "paused");
+        assert_eq!(to_wire_format(&WorkflowStepStatus::Pending), "pending");
+        assert_eq!(to_wire_format(&WorkflowAgentSessionState::Idle), "idle");
     }
 }
