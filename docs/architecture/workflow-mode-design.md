@@ -554,15 +554,27 @@ MVP 明确限制：一个 `workflow_agent_session` 同时最多只运行一个 s
 - 每个节点当前状态
 - 节点负责人 agent
 - 节点是否被打断、暂停、等待审批
+- 节点摘要、错误态与可操作按钮
 
 图数据完全来自最新 compiled revision。
 
 技术选型建议直接定为：
 
 - 渲染层：`React Flow`，作为 workflow graph 的默认实现
+- 节点层：每个 step 必须渲染为 React 组件卡片，而不是纯文本 label
 - 布局层：MVP 先用 `dagre`，为后续切换 `elkjs` 预留 adapter
 - 数据契约：前端直接消费 `nodes` / `edges` / `viewport` 组成的 JSON，不再额外维护文本转图的浏览器端转换链路
 - 增量刷新：后端按 `node.id` / `edge.id` 推送 patch，前端在 React Flow store 中做局部替换，避免整图重绘
+
+节点卡片在 Phase 2 必须至少展示：
+
+- `step.title`
+- `summary_text` 或最近一次运行摘要
+- 负责人 agent 名称
+- 状态色条或状态徽标，例如 `ready/running/completed/paused/failed`
+- step 处于错误或失败态时的 `Retry` 按钮
+
+这里要求图不只是“状态看板”，而是 workflow window 的主操作平面。用户需要在图上直接理解“谁在执行什么、当前卡在哪一步、哪一个 step 可以重试”。
 
 当 round 被拒绝并进入下一轮时，左侧 graph 默认显示当前 active round，同时允许用户切换查看已归档的历史 round。
 
@@ -573,15 +585,20 @@ MVP 明确限制：一个 `workflow_agent_session` 同时最多只运行一个 s
 分为两种状态：
 
 - 预览态：展示 plan 摘要、lead 规划说明、validation 结果，以及主执行按钮；不展示 running transcript，也不允许发送执行期输入
-- 执行态：展示 agent selector、当前 agent/step transcript、实时 running message、底部输入框，以及 `interrupt` / `retry` / `pause all` / `resume` 控制按钮
+- 执行态：展示 agent selector、当前 agent/step transcript、实时 running message、思考过程消息、底部输入框，以及 `interrupt` / `retry` / `pause all` / `resume` 控制按钮
 
 其中执行态应包含：
 
 - agent selector，例如图里的 `change agent`
 - 当前 agent/step transcript
-- 实时 running message
+- 当前 agent 的执行过程信息与思考过程信息
 - 底部输入框
 - 控制按钮：interrupt、retry、pause all、resume
+
+Phase 2 的交互要求再补充两条：
+
+- 右侧聊天窗必须支持“按 agent 切换和隔离”，用户切到某个 agent 时，只展示该 agent 负责 step 的执行消息、思考消息和待处理交互卡片
+- 底部输入框必须支持把输入明确路由到当前选中的 agent / step，而不是继续挂在 execution 级别
 
 ### 4.3 聊天窗中的确认 UI
 
@@ -589,6 +606,7 @@ MVP 明确限制：一个 `workflow_agent_session` 同时最多只运行一个 s
 
 lead 在 workflow 内产生的以下事项，不能只显示纯文本：
 
+- 用户补充输入请求
 - 决策审批
 - 权限申请
 - 继续执行确认
@@ -596,10 +614,11 @@ lead 在 workflow 内产生的以下事项，不能只显示纯文本：
 
 建议前端渲染为专门的 transcript card：
 
+- `InputRequestCard`
 - `ApprovalCard`
 - `PermissionRequestCard`
+- `ContinueConfirmationCard`
 - `InterruptConfirmCard`
-- `PlanRevisionConfirmCard`
 - `LeadResultDecisionCard`
 
 这些卡的交互结果再写回：
@@ -607,6 +626,8 @@ lead 在 workflow 内产生的以下事项，不能只显示纯文本：
 - `chat_workflow_transcripts`
 - `chat_workflow_events`
 - 对应 execution/step 状态迁移
+
+Phase 2 中的要求是：凡是 step 进入 `waiting_input`、`waiting_approval`、`waiting_permission` 或类似用户确认态，右侧聊天窗必须弹出对应卡片，并允许用户直接在卡片中完成输入、批准、拒绝或继续执行。
 
 其中 `LeadResultDecisionCard` 是本次补充的关键卡片：
 
@@ -999,14 +1020,15 @@ MVP 规则：
 - `POST /workflow-executions`
 - `GET /workflow-executions/:execution_id`
 - `GET /workflow-executions/:execution_id/graph`
-- `GET /workflow-executions/:execution_id/transcripts`
-- `POST /workflow-executions/:execution_id/input`
-- `POST /workflow-executions/:execution_id/interrupt`
 - `POST /workflow-executions/:execution_id/pause-all`
 - `POST /workflow-executions/:execution_id/resume`
-- `POST /workflow-executions/:execution_id/stop`
-- `POST /workflow-executions/:execution_id/approve`
-- `POST /workflow-executions/:execution_id/resolve-permission`
+
+- `GET /workflow-steps/:step_id/transcripts`
+- `POST /workflow-steps/:step_id/input`
+- `POST /workflow-steps/:step_id/interrupt`
+- `POST /workflow-steps/:step_id/stop`
+- `POST /workflow-steps/:step_id/approve`
+- `POST /workflow-steps/:step_id/resolve-permission`
 - `POST /workflow-steps/:step_id/retry`
 
 ### WebSocket 事件
@@ -1024,6 +1046,12 @@ MVP 规则：
 
 其中 `workflow_graph_updated` 很关键，它用于 JSON revision 生效后让前端立即刷新节点图。
 
+Phase 2 进一步约束 `workflow_graph_updated` 的触发语义：
+
+- 当 step 状态、负责 agent、错误态、重试次数或 execution 投影状态影响节点卡片展示时，后端都必须发出 `workflow_graph_updated`
+- 事件 payload 至少包含 `execution_id`、`graph_version`、`reason`、最新 `nodes/edges` 投影，以及可选的 `changed_step_ids`
+- 前端收到事件后必须原位刷新 React Flow 节点卡片，不允许等待整页轮询后再更新
+
 ## 10. 状态机修订
 
 ## 10.1 Execution 状态机
@@ -1040,6 +1068,7 @@ waiting_user_acceptance -> completing -> completed
 waiting_user_acceptance -> paused -> recompiling -> resuming -> running
 running -> completing -> completed
 running -> failed
+failed -> resuming -> running
 paused -> cancelled
 waiting_user -> cancelled
 ```
@@ -1051,6 +1080,7 @@ waiting_user -> cancelled
 - `recompiling` 只能从 `paused` 进入，禁止和 `interrupting` 并发发生
 - 当用户拒绝结果并要求重规划时，必须先让 execution 从 `waiting_user_acceptance` 进入 `paused`，再走 `recompiling -> resuming` 路径创建新 round
 - `resuming` 期间如果再次收到 `pause all`，允许直接回到 `pausing`
+- `failed -> resuming` 只能由用户显式触发，且至少存在一个可恢复入口，例如 step retry、补充输入、审批通过或 permission 解除阻塞
 - `completed` 仅当不存在 `pending/ready/running/blocked/waiting_*` step 时可进入
 
 ## 10.2 Step 状态机
@@ -1094,6 +1124,7 @@ running -> failed
 | `waiting_user_acceptance` | `completed`, `failed`, `interrupted`, `cancelled` | `idle`, `completed`, `failed`, `paused` |
 | `pausing` | `running`, `interrupt_requested`, `completed`, `failed`, `blocked` | `running`, `interrupt_requested`, `paused`, `idle` |
 | `paused` | `pending`, `blocked`, `interrupted`, `completed`, `failed`, `cancelled` | `paused`, `idle`, `completed`, `failed` |
+| `failed` | `failed`, `interrupted`, `waiting_input`, `completed`, `blocked` | `idle`, `failed`, `interrupted`, `waiting_input`, `completed` |
 | `recompiling` | `pending`, `blocked`, `interrupted`, `completed`, `failed`, `cancelled` | `paused`, `idle`, `completed`, `failed` |
 | `waiting_user` | `waiting_input`, `interrupted`, `completed`, `failed`, `blocked` | `waiting_input`, `interrupted`, `idle`, `completed`, `failed` |
 | `completed` | 仅 `completed`, `skipped`, `cancelled`, `failed` | 仅 `idle`, `completed`, `failed`, `expired` |
@@ -1164,18 +1195,31 @@ running -> failed
 
 ### Phase 2
 
-- lead agent 主导的 plan revision + reconcile
-- workflow window 前端页面与交互设计落地，UI 框架图见 `docs/architecture/workflow_window.png`
-- graph 增量刷新与 revision 对比态展示
-- late-output 防污染机制与恢复策略
+Phase 2 聚焦把当前 workflow window 雏形升级为“节点级执行控制台”，重点不再是 plan revision，而是 step 级交互、节点卡片和运行态闭环。
+
+- React Flow 节点卡片化：所有 step 以 React 组件卡片渲染，展示任务摘要、负责人 agent、状态颜色；失败/错误态节点必须提供 `Retry` 按钮
+- 节点级聊天隔离：workflow window 右侧聊天窗支持按 agent 选择与隔离，展示当前 agent 的执行消息、思考消息和待处理交互卡
+- 节点级用户输入：聊天窗底部新增文本输入，输入必须明确路由到当前选中的 agent / step
+- 节点级审批/权限/继续确认：当 step 请求用户输入、审批或权限时，在聊天区弹出对应卡片，并回写到 step 状态机
+- step 级接口替换：除 `POST /workflow-executions/:execution_id/resume` 外，其余 transcript/input/interrupt/stop/approve/permission 控制接口全部下沉到 `workflow-steps/:step_id/*`
+- `workflow_graph_updated` 事件落地：把节点状态刷新从“被动轮询”收敛为“事件推送 + 局部更新”
+- workflow resume 能力：当 workflow 处于 `paused` 或 `failed` 时，前端都显示 `Resume` 按钮；后端在守卫条件满足时支持恢复调度
+
+Phase 2 完成后的基线应是：
+
+- workflow graph 已是可操作的节点卡片面板，而非只读图
+- 聊天窗已成为按 agent 隔离的 step 级工作台
+- 用户与 workflow 的交互入口统一收敛到 step
+- graph 与聊天消息可以通过事件和接口实时反映运行态变化
 
 ### Phase 3
 
-- 权限申请与审批流扩展：将工具审批、权限申请、用户决策统一收敛到 workflow window 中
-- 计划修订建议与自动修复：由 lead agent 基于失败原因、用户拒绝原因、运行结果生成修订建议，并支持系统侧自动补齐可修复字段
-- workflow diff 可视化：对 round 间 plan 变化、step 变化、依赖边变化提供结构化对比视图
-- 用户可手工编辑 workflow JSON 编辑页面
-- 稳定性增强：补偿扫描、异常恢复、迟到消息隔离、重放与审计查询能力
+Phase 3 再继续补 plan revision、round diff、审计恢复和长期稳定性，而不再承接 Phase 2 已经明确下沉的节点级执行交互。
+
+- lead 主导的 plan revision / reconcile 正式闭环
+- round 间 graph diff、历史 round 浏览和 revision 变更解释
+- late-output 隔离、补偿扫描、重放与审计查询
+- 长周期 workflow 的恢复、排障与可观测性增强
 
 ## 最终结论
 
