@@ -80,7 +80,7 @@ fn filter_benign_executor_stderr(text: &str) -> Option<String> {
     let mut suppressed = false;
 
     for line in text.split_inclusive('\n') {
-        if is_benign_codex_rollout_stderr(line) {
+        if is_benign_codex_rollout_stderr(line) || is_benign_codex_tool_router_stderr(line) {
             suppressed = true;
         } else {
             filtered.push_str(line);
@@ -88,7 +88,7 @@ fn filter_benign_executor_stderr(text: &str) -> Option<String> {
     }
 
     if suppressed {
-        (!filtered.is_empty()).then_some(filtered)
+        (!filtered.trim().is_empty()).then_some(filtered)
     } else {
         Some(text.to_string())
     }
@@ -101,6 +101,16 @@ fn is_benign_codex_rollout_stderr(line: &str) -> bool {
     line.contains("ERROR codex_core::session: failed to record rollout items:")
         && line.contains("thread ")
         && line.contains(" not found")
+}
+
+fn is_benign_codex_tool_router_stderr(line: &str) -> bool {
+    // Codex logs failed tool calls to the executor stderr as an internal router
+    // error. The tool result itself is already represented in normalized logs;
+    // forwarding this duplicate stderr line makes the frontend show a false
+    // executor error.
+    line.contains("ERROR codex_core::tools::router:")
+        && line.contains("error=Exit code:")
+        && line.contains("Wall time:")
 }
 
 impl RunLogSpool {
@@ -2496,6 +2506,23 @@ mod tests {
         let text = "ERROR codex_core::session: some other failure\n";
 
         assert_eq!(filter_benign_executor_stderr(text), Some(text.to_string()));
+    }
+
+    #[test]
+    fn filter_benign_executor_stderr_removes_codex_tool_router_noise() {
+        let text = "keep before\n2026-04-28T12:51:49.807787Z ERROR codex_core::tools::router: error=Exit code: 1 Wall time: 0.7 seconds\nkeep after\n";
+
+        assert_eq!(
+            filter_benign_executor_stderr(text),
+            Some("keep before\nkeep after\n".to_string())
+        );
+    }
+
+    #[test]
+    fn filter_benign_executor_stderr_drops_whitespace_only_after_suppression() {
+        let text = "2026-04-28T12:51:49.807787Z ERROR codex_core::tools::router: error=Exit code: 1 Wall time: 0.7 seconds\n\n";
+
+        assert_eq!(filter_benign_executor_stderr(text), None);
     }
 
     #[tokio::test]
