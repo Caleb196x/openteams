@@ -7,7 +7,8 @@ use std::{
 use codex_app_server_protocol::{
     CommandExecutionStatus, JSONRPCNotification, JSONRPCRequest, JSONRPCResponse,
     McpToolCallResult, McpToolCallStatus, PatchApplyStatus, PatchChangeKind, ServerNotification,
-    ServerRequest, ThreadItem, ThreadResumeResponse, ThreadStartResponse, TurnPlanStepStatus,
+    ServerRequest, ThreadItem, ThreadResumeResponse, ThreadStartResponse,
+    TurnCompletedNotification, TurnPlanStepStatus, TurnStatus,
 };
 use codex_protocol::{
     openai_models::ReasoningEffort,
@@ -494,6 +495,19 @@ fn sync_patch_entries(
         let index = add_normalized_entry(msg_store, entry_index, entry.to_normalized_entry());
         entry.index = Some(index);
         patch_state.entries.push(entry);
+    }
+}
+
+fn update_patch_status(
+    patch_state: &mut PatchState,
+    status: ToolStatus,
+    msg_store: &Arc<MsgStore>,
+) {
+    for entry in &mut patch_state.entries {
+        entry.status = status.clone();
+        if let Some(index) = entry.index {
+            replace_normalized_entry(msg_store, index, entry.to_normalized_entry());
+        }
     }
 }
 
@@ -1329,6 +1343,16 @@ fn handle_server_notification(
                 }
             }
         }
+        ServerNotification::FileChangeOutputDelta(payload) => {
+            state.assistant = None;
+            state.thinking = None;
+
+            if payload.delta.trim_start().starts_with("Success.")
+                && let Some(patch_state) = state.patches.get_mut(&payload.item_id)
+            {
+                update_patch_status(patch_state, ToolStatus::Success, msg_store);
+            }
+        }
         ServerNotification::FileChangePatchUpdated(payload) => {
             state.assistant = None;
             state.thinking = None;
@@ -1535,6 +1559,27 @@ fn handle_server_notification(
                     metadata: None,
                 },
             );
+        }
+        ServerNotification::TurnCompleted(TurnCompletedNotification { turn, .. }) => {
+            if matches!(turn.status, TurnStatus::Failed) {
+                let error_message = turn
+                    .error
+                    .as_ref()
+                    .map(|e| e.message.as_str())
+                    .unwrap_or("Agent turn failed with no error message");
+                add_normalized_entry(
+                    msg_store,
+                    entry_index,
+                    NormalizedEntry {
+                        timestamp: None,
+                        entry_type: NormalizedEntryType::ErrorMessage {
+                            error_type: NormalizedEntryError::Other,
+                        },
+                        content: error_message.to_string(),
+                        metadata: None,
+                    },
+                );
+            }
         }
         _ => {}
     }
@@ -2321,6 +2366,65 @@ mod tests {
                         action_type: crate::logs::ActionType::FileEdit { path, .. },
                         ..
                     } if tool_name == "edit" && path == "src/main.rs"
+                )
+            })
+            .await
+        );
+    }
+
+    #[tokio::test]
+    async fn normalize_logs_maps_app_server_file_change_output_delta_to_success() {
+        let msg_store = std::sync::Arc::new(MsgStore::new());
+        super::normalize_logs(
+            msg_store.clone(),
+            std::path::Path::new("/tmp/test-worktree"),
+        );
+        tokio::task::yield_now().await;
+
+        let started = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "item/started",
+            "params": {
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "item": {
+                    "type": "fileChange",
+                    "id": "patch-1",
+                    "changes": [{
+                        "path": "/tmp/test-worktree/src/main.rs",
+                        "kind": { "type": "update", "movePath": null },
+                        "diff": "@@ -1 +1 @@\n-old\n+new\n"
+                    }],
+                    "status": "inProgress"
+                }
+            }
+        })
+        .to_string();
+        let output_delta = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "item/fileChange/outputDelta",
+            "params": {
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "itemId": "patch-1",
+                "delta": "Success. Updated the following files:\nM src/main.rs\n"
+            }
+        })
+        .to_string();
+        msg_store.push_stdout(format!("{started}\n{output_delta}\n"));
+        msg_store.push_finished();
+
+        assert!(
+            eventually_has_normalized_entry(&msg_store, |entry| {
+                matches!(
+                    &entry.entry_type,
+                    NormalizedEntryType::ToolUse {
+                        tool_name,
+                        action_type: crate::logs::ActionType::FileEdit { path, .. },
+                        status,
+                    } if tool_name == "edit"
+                        && path == "src/main.rs"
+                        && matches!(status, crate::logs::ToolStatus::Success)
                 )
             })
             .await

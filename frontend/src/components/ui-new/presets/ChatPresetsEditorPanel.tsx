@@ -3,6 +3,7 @@ import { cloneDeep, isEqual } from 'lodash';
 import { useTranslation } from 'react-i18next';
 import {
   CheckIcon,
+  CaretDownIcon,
   CopyIcon,
   EyeIcon,
   EyeSlashIcon,
@@ -23,10 +24,12 @@ import { cn } from '@/lib/utils';
 import { PromptEditorModal } from '@/pages/ui-new/chat/components/PromptEditorModal';
 import { AgentSkillsSection } from '@/pages/ui-new/chat/components/AgentSkillsSection';
 import { Tooltip } from '@/components/ui-new/primitives/Tooltip';
+import { useToast } from '@/components/ui-new/containers/ToastContainer';
 import {
   formatExecutorModelLabel,
   getVariantModelName,
   getVariantOptions as getExecutorVariantOptions,
+  matchesModelSearch,
 } from '@/utils/executor';
 import { toPrettyCase, replaceWhitespaceWithUnderscores } from '@/utils/string';
 import {
@@ -36,6 +39,7 @@ import {
   SettingsSelect,
 } from '../dialogs/settings/SettingsComponents';
 import { useSettingsDirty } from '../dialogs/settings/SettingsDirtyContext';
+import { SearchableDropdownContainer } from '../containers/SearchableDropdownContainer';
 
 type PresetsTab = 'members' | 'teams';
 
@@ -241,10 +245,8 @@ const presetInlineActionButtonClassName = cn(
   'rounded-[10px] border-[#E2E8F0] bg-white px-3 py-[5px] text-[11px] font-medium text-[#64748B] hover:bg-[#F8FAFC] dark:border-[#2A3445] dark:bg-[#192233] dark:text-[#BAC4D6] dark:hover:bg-[#1A2433]'
 );
 
-const presetDestructiveButtonClassName = cn(
-  presetToolbarButtonClassName,
-  'border-[#FECACA] bg-[#FFF5F5] text-[#EF4444] hover:bg-[#FEF2F2] dark:border-[rgba(248,113,113,0.24)] dark:bg-[rgba(239,68,68,0.12)] dark:text-[#FCA5A5] dark:hover:bg-[rgba(239,68,68,0.18)]'
-);
+const presetDestructiveButtonClassName =
+  'inline-flex items-center justify-center gap-2 rounded-[12px] px-4 py-[9px] text-[13px] font-medium transition-colors duration-200 border-[#fecaca] bg-[#fee2e2] text-[#b91c1c] hover:bg-[#fecaca] dark:border-[rgba(248,113,113,0.24)] dark:bg-[rgba(239,68,68,0.12)] dark:text-[#FCA5A5] dark:hover:bg-[rgba(239,68,68,0.18)] disabled:cursor-not-allowed disabled:opacity-50';
 
 const presetMemberSelectTriggerClassName =
   'preset-member-select-trigger rounded-[14px] border-[#D1D5DB] bg-[#F8FAFC] px-4 py-3 text-[#334155] focus:border-[#3B82F6] focus:bg-white focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)] dark:border-[#2A3445] dark:bg-[#111926] dark:text-[#F3F6FB] dark:focus:border-[#5EA2FF] dark:focus:bg-[#111926] dark:focus:shadow-[0_0_0_3px_rgba(94,162,255,0.15)]';
@@ -275,8 +277,15 @@ export function ChatPresetsEditorPanel({
   const { t } = useTranslation('settings');
   const { t: tChat } = useTranslation('chat');
   const { t: tCommon } = useTranslation('common');
-  const { config, profiles, updateAndSaveConfig, homeDirectory } =
-    useUserSystem();
+  const { toast } = useToast();
+  const {
+    config,
+    profiles,
+    updateAndSaveConfig,
+    homeDirectory,
+    loading: isUserSystemLoading,
+    reloadSystem,
+  } = useUserSystem();
   const { setDirty: setContextDirty } = useSettingsDirty();
 
   const sourcePresets = useMemo(
@@ -296,7 +305,6 @@ export function ChatPresetsEditorPanel({
     useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
   const [memberSearch, setMemberSearch] = useState('');
   const [teamMemberSearch, setTeamMemberSearch] = useState('');
   const [showMemberSearch, setShowMemberSearch] = useState(false);
@@ -388,24 +396,28 @@ export function ChatPresetsEditorPanel({
     [tChat]
   );
 
-  // Filtered members for sidebar list
+  // Filtered members for sidebar list (custom presets before built-in)
   const filteredSidebarMembers = useMemo(() => {
-    if (!memberSearch.trim()) return draft.members;
-    const searchLower = memberSearch.toLowerCase().trim();
-    return draft.members.filter((member) => {
-      const localizedName = member.is_builtin
-        ? replaceWhitespaceWithUnderscores(
-            tChat(`members.presetDisplay.members.${member.id}`, {
-              defaultValue: member.name,
-            })
-          )
-        : replaceWhitespaceWithUnderscores(member.name);
-      return (
-        localizedName.toLowerCase().includes(searchLower) ||
-        member.id.toLowerCase().includes(searchLower) ||
-        member.description.toLowerCase().includes(searchLower)
-      );
-    });
+    const base = !memberSearch.trim()
+      ? draft.members
+      : draft.members.filter((member) => {
+          const searchLower = memberSearch.toLowerCase().trim();
+          const localizedName = member.is_builtin
+            ? replaceWhitespaceWithUnderscores(
+                tChat(`members.presetDisplay.members.${member.id}`, {
+                  defaultValue: member.name,
+                })
+              )
+            : replaceWhitespaceWithUnderscores(member.name);
+          return (
+            localizedName.toLowerCase().includes(searchLower) ||
+            member.id.toLowerCase().includes(searchLower) ||
+            member.description.toLowerCase().includes(searchLower)
+          );
+        });
+    return [...base].sort(
+      (a, b) => Number(a.is_builtin) - Number(b.is_builtin)
+    );
   }, [draft.members, memberSearch, tChat]);
 
   // Filtered members for team member selection
@@ -520,6 +532,14 @@ export function ChatPresetsEditorPanel({
       ...options,
     ];
   }, [getRecommendedModelOptions, selectedMember, t]);
+
+  const selectedRecommendedModelOption = useMemo(
+    () =>
+      recommendedModelOptions.find(
+        (option) => option.value === (selectedMember?.recommended_model ?? '')
+      ) ?? recommendedModelOptions[0],
+    [recommendedModelOptions, selectedMember?.recommended_model]
+  );
 
   const updateMember = useCallback(
     (
@@ -679,7 +699,6 @@ export function ChatPresetsEditorPanel({
 
     setSaving(true);
     setError(null);
-    setSuccess(false);
     try {
       const next = normalizeDraft(draft);
       const ok = await updateAndSaveConfig({ chat_presets: next });
@@ -688,8 +707,7 @@ export function ChatPresetsEditorPanel({
         return;
       }
       setDraft(cloneDeep(next));
-      setSuccess(true);
-      setTimeout(() => setSuccess(false), 3000);
+      toast(t('settings.presets.saveSuccess'));
     } finally {
       setSaving(false);
     }
@@ -698,14 +716,31 @@ export function ChatPresetsEditorPanel({
   const handleDiscard = () => {
     setDraft(cloneDeep(sourcePresets));
     setError(null);
-    setSuccess(false);
   };
 
   if (!config) {
+    if (isUserSystemLoading) {
+      return (
+        <div className="flex items-center justify-center py-12 text-[13px] text-[#64748B] dark:text-[#94A3B8]">
+          {t('settings.presets.loading', {
+            defaultValue: 'Loading presets...',
+          })}
+        </div>
+      );
+    }
     return (
       <div className="py-8">
-        <div className="rounded-[16px] border border-[#FECACA] bg-[#FFF5F5] p-4 text-[13px] text-[#DC2626] dark:border-[rgba(248,113,113,0.24)] dark:bg-[rgba(239,68,68,0.12)] dark:text-[#FCA5A5]">
-          {t('settings.presets.loadError')}
+        <div className="flex flex-col items-start gap-3 rounded-[16px] border border-[#FECACA] bg-[#FFF5F5] p-4 text-[13px] text-[#DC2626] dark:border-[rgba(248,113,113,0.24)] dark:bg-[rgba(239,68,68,0.12)] dark:text-[#FCA5A5]">
+          <span>{t('settings.presets.loadError')}</span>
+          <button
+            type="button"
+            onClick={() => {
+              void reloadSystem();
+            }}
+            className="rounded-[10px] border border-[#FCA5A5] bg-white/70 px-3 py-1 text-[12px] font-medium text-[#DC2626] hover:bg-white dark:border-[rgba(248,113,113,0.4)] dark:bg-[rgba(239,68,68,0.18)] dark:text-[#FCA5A5] dark:hover:bg-[rgba(239,68,68,0.28)]"
+          >
+            {tCommon('buttons.retry', { defaultValue: 'Retry' })}
+          </button>
         </div>
       </div>
     );
@@ -840,20 +875,58 @@ export function ChatPresetsEditorPanel({
           <SettingsField
             label={t('settings.presets.members.fields.recommendedModel')}
           >
-            <SettingsSelect
-              value={selectedMember.recommended_model ?? ''}
-              options={recommendedModelOptions}
-              onChange={(value) =>
+            <SearchableDropdownContainer
+              items={recommendedModelOptions}
+              selectedValue={selectedMember.recommended_model ?? ''}
+              getItemKey={(option) => option.value}
+              getItemLabel={(option) => option.label}
+              filterItem={(option, query) =>
+                option.value.length === 0
+                  ? option.label.toLowerCase().includes(query)
+                  : matchesModelSearch(option.value, option.label, query)
+              }
+              onSelect={(option) =>
                 updateMember(selectedMember.id, (current) => ({
                   ...current,
-                  recommended_model: value.length > 0 ? value : null,
+                  recommended_model:
+                    option.value.length > 0 ? option.value : null,
                 }))
               }
-              disabled={!selectedMember.runner_type}
-              className={presetMemberSelectTriggerClassName}
-              contentClassName={presetMemberSelectContentClassName}
-              itemClassName={presetMemberSelectItemClassName}
-              selectedItemClassName={presetMemberSelectItemSelectedClassName}
+              trigger={
+                <button
+                  type="button"
+                  disabled={!selectedMember.runner_type}
+                  className={cn(
+                    settingsFieldClassName,
+                    presetMemberSelectTriggerClassName,
+                    'flex items-center justify-between gap-2 text-left disabled:cursor-not-allowed disabled:opacity-50'
+                  )}
+                >
+                  <Tooltip
+                    content={selectedRecommendedModelOption?.label ?? ''}
+                    side="bottom"
+                    maxWidth={560}
+                  >
+                    <span className="min-w-0 flex-1 truncate">
+                      {selectedRecommendedModelOption?.label ?? ''}
+                    </span>
+                  </Tooltip>
+                  <CaretDownIcon
+                    className="size-icon-xs shrink-0 text-[#8C8C8C] dark:text-[#7F8AA3]"
+                    weight="fill"
+                  />
+                </button>
+              }
+              contentClassName={`${presetMemberSelectContentClassName} preset-member-model-dropdown w-[var(--radix-dropdown-menu-trigger-width)]`}
+              placeholder={t(
+                'settings.presets.members.fields.recommendedModel'
+              )}
+              emptyMessage={t('settings.presets.members.fields.noModels', {
+                defaultValue: 'No matching models.',
+              })}
+              getItemBadge={null}
+              getItemIcon={null}
+              getItemTooltip={(option) => option.label}
             />
           </SettingsField>
 
@@ -1202,11 +1275,6 @@ export function ChatPresetsEditorPanel({
             {error}
           </div>
         ) : null}
-        {success ? (
-          <div className="mb-4 rounded-[16px] border border-[#BBF7D0] bg-[#F0FDF4] px-5 py-4 text-[13px] font-medium text-[#15803D] dark:border-[rgba(52,211,153,0.24)] dark:bg-[rgba(34,197,94,0.12)] dark:text-[#86EFAC]">
-            {t('settings.presets.saveSuccess')}
-          </div>
-        ) : null}
 
         <div className="flex min-h-0 flex-1 overflow-hidden rounded-[28px] border border-white/80 bg-[rgba(255,255,255,0.92)] shadow-[0_24px_60px_rgba(15,23,42,0.08)] backdrop-blur-xl dark:border-[#2A3445] dark:bg-[#141C28] dark:shadow-[0_24px_60px_rgba(0,0,0,0.3)]">
           <aside className="flex w-[292px] min-w-[292px] flex-col border-r border-[#E2E8F0] bg-[#F8FAFC]/95 dark:border-[#2A3445] dark:bg-[#101722]">
@@ -1344,17 +1412,21 @@ export function ChatPresetsEditorPanel({
                       {t('settings.presets.teams.empty')}
                     </div>
                   ) : (
-                    draft.teams.map((team) => (
-                      <PresetListItem
-                        key={team.id}
-                        title={getLocalizedTeamName(team)}
-                        subtitle={team.description}
-                        selected={selectedTeamId === team.id}
-                        disabled={!team.enabled}
-                        isBuiltin={team.is_builtin}
-                        onClick={() => setSelectedTeamId(team.id)}
-                      />
-                    ))
+                    [...draft.teams]
+                      .sort(
+                        (a, b) => Number(a.is_builtin) - Number(b.is_builtin)
+                      )
+                      .map((team) => (
+                        <PresetListItem
+                          key={team.id}
+                          title={getLocalizedTeamName(team)}
+                          subtitle={team.description}
+                          selected={selectedTeamId === team.id}
+                          disabled={!team.enabled}
+                          isBuiltin={team.is_builtin}
+                          onClick={() => setSelectedTeamId(team.id)}
+                        />
+                      ))
                   )}
                 </div>
               </div>

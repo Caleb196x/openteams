@@ -796,6 +796,11 @@ impl ChatRunner {
             markdown.push_str("- intent_meaning: ");
             markdown.push_str(&meaning);
             markdown.push('\n');
+            if intent == "notify" {
+                markdown.push_str(
+                    "- response_requirement: Notification only. Do not send a reply or acknowledgment to the sender.\n",
+                );
+            }
         }
 
         if let Some(reference) = reference {
@@ -1904,7 +1909,7 @@ impl ChatRunner {
         match intent {
             "request" => Some("Ask for work or information."),
             "reply" => Some("The receiver should reply."),
-            "notify" => Some("Informational only. No reply is required."),
+            "notify" => Some("Informational only. Do not send a reply."),
             "blocker" => Some("Report a blocking issue."),
             "confirm" => Some("Explicit confirmation is required."),
             _ => None,

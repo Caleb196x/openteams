@@ -259,12 +259,15 @@ struct AgentProtocolError {
 
 /// Result of processing agent protocol output.
 /// Distinguishes between successful parse, retryable parse failures, and
-/// exhausted retries that fell back to raw output persistence.
+/// protocol failures that were reported to the chat.
 #[derive(Debug)]
 pub(super) enum ProtocolProcessResult {
     /// Messages were parsed and dispatched successfully. Contains the number of
     /// `send` messages created.
     Success(usize),
+    /// The agent output could not be converted into protocol messages and the
+    /// failure was reported to the chat as a protocol error.
+    ProtocolFailure,
     /// The output could not be parsed as a valid JSON array. The caller should
     /// decide whether to retry based on the current retry attempt count.
     RetryableParseFailure {
@@ -632,6 +635,7 @@ struct PendingMessage {
 
 #[derive(Clone)]
 struct RunLifecycleControl {
+    run_id: Uuid,
     stop: CancellationToken,
 }
 
@@ -1497,9 +1501,10 @@ impl ChatRunner {
         let session_agent_id = session_agent.id;
         let agent_id = agent.id;
         let run_started_at = session_agent.updated_at;
+        let run_id = Uuid::new_v4();
         // Register the stop control before broadcasting the running state so an
         // immediate user stop request cannot miss the active run.
-        let stop = self.register_run_control(session_agent_id);
+        let stop = self.register_run_control(session_agent_id, run_id);
 
         self.emit(
             session_id,
@@ -1532,7 +1537,6 @@ impl ChatRunner {
         let chain_depth = self.extract_chain_depth(&source_message.meta);
         let protocol_retry_attempt = Self::extract_protocol_retry_attempt(&source_message.meta);
 
-        let run_id = Uuid::new_v4();
         let result = async {
             let workspace_path = self
                 .resolve_workspace_path_for_agent(
@@ -1757,6 +1761,7 @@ impl ChatRunner {
                 run_started_at,
                 protocol_retry_attempt,
                 track_source_message,
+                executor_profile_id.executor == BaseCodingAgent::Codex,
             );
 
             self.spawn_exit_watcher(
@@ -1770,6 +1775,7 @@ impl ChatRunner {
                     log_forwarders,
                 },
                 session_agent_id,
+                run_id,
             );
 
             Ok::<(), ChatRunnerError>(())

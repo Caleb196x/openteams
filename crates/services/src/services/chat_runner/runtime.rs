@@ -56,6 +56,12 @@ struct StreamPatchDelta {
     delta: bool,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct StreamPatchFilter {
+    suppress_codex_tool_runtime_details: bool,
+    suppress_error_streaming: bool,
+}
+
 pub(super) struct RunLogSpool {
     path: PathBuf,
     file: Option<fs::File>,
@@ -101,6 +107,30 @@ fn is_benign_codex_rollout_stderr(line: &str) -> bool {
     line.contains("ERROR codex_core::session: failed to record rollout items:")
         && line.contains("thread ")
         && line.contains(" not found")
+}
+
+fn is_codex_tool_call_failure(content: &str) -> bool {
+    let normalized = content.trim().to_lowercase();
+    if normalized.is_empty() {
+        return false;
+    }
+
+    let has_failure = normalized.contains("failed")
+        || normalized.contains("failure")
+        || normalized.contains("error");
+    if !has_failure {
+        return false;
+    }
+
+    normalized.contains("tool")
+        || normalized.contains("mcp")
+        || normalized.contains("dynamic tool call")
+        || normalized.contains("exec")
+        || normalized.contains("command")
+        || normalized.contains("shell")
+        || normalized.contains("bash")
+        || normalized.contains("apply patch")
+        || normalized.contains("patch")
 }
 
 impl RunLogSpool {
@@ -445,10 +475,19 @@ impl ChatRunner {
         .to_string()
     }
 
-    pub(super) fn register_run_control(&self, session_agent_id: Uuid) -> CancellationToken {
+    pub(super) fn register_run_control(
+        &self,
+        session_agent_id: Uuid,
+        run_id: Uuid,
+    ) -> CancellationToken {
         let stop = CancellationToken::new();
-        self.run_controls
-            .insert(session_agent_id, RunLifecycleControl { stop: stop.clone() });
+        self.run_controls.insert(
+            session_agent_id,
+            RunLifecycleControl {
+                run_id,
+                stop: stop.clone(),
+            },
+        );
         stop
     }
 
@@ -709,6 +748,7 @@ impl ChatRunner {
         error_content: &mut String,
         error_update_count: &mut u64,
         error_type: &mut Option<NormalizedEntryError>,
+        stream_filter: StreamPatchFilter,
     ) {
         if let Some(update) = Self::apply_stream_patch_to_state(
             &patch,
@@ -719,6 +759,7 @@ impl ChatRunner {
             error_content,
             error_update_count,
             error_type,
+            stream_filter,
         ) {
             let _ = sender.send(ChatStreamEvent::AgentDelta {
                 session_id,
@@ -743,6 +784,7 @@ impl ChatRunner {
         error_content: &mut String,
         error_update_count: &mut u64,
         error_type: &mut Option<NormalizedEntryError>,
+        stream_filter: StreamPatchFilter,
     ) -> Option<StreamPatchDelta> {
         let (index, entry) = extract_normalized_entry_from_patch(patch)?;
         let stream_type = match &entry.entry_type {
@@ -765,6 +807,9 @@ impl ChatRunner {
         }?;
 
         let current = entry.content;
+        let suppress_stream = stream_filter.suppress_codex_tool_runtime_details
+            && matches!(stream_type, ChatStreamDeltaType::Error)
+            && is_codex_tool_call_failure(&current);
         let previous = last_content.get(&index).cloned().unwrap_or_default();
         let (delta, is_delta) = if current.starts_with(&previous) {
             (current[previous.len()..].to_string(), true)
@@ -779,7 +824,7 @@ impl ChatRunner {
                 *assistant_update_count = assistant_update_count.saturating_add(1);
             }
         }
-        if matches!(stream_type, ChatStreamDeltaType::Error) {
+        if matches!(stream_type, ChatStreamDeltaType::Error) && !suppress_stream {
             if !error_content.is_empty() {
                 error_content.push('\n');
             }
@@ -789,7 +834,11 @@ impl ChatRunner {
             }
         }
 
-        if delta.is_empty() {
+        if suppress_stream
+            || delta.is_empty()
+            || (matches!(stream_type, ChatStreamDeltaType::Error)
+                && stream_filter.suppress_error_streaming)
+        {
             return None;
         }
 
@@ -800,7 +849,10 @@ impl ChatRunner {
         })
     }
 
-    fn rebuild_run_stream_state_from_history(history: &[LogMsg]) -> RunStreamStateSnapshot {
+    fn rebuild_run_stream_state_from_history(
+        history: &[LogMsg],
+        stream_filter: StreamPatchFilter,
+    ) -> RunStreamStateSnapshot {
         let mut snapshot = RunStreamStateSnapshot::default();
         let mut last_content = HashMap::new();
         let mut stdout_line_buffer = String::new();
@@ -830,6 +882,7 @@ impl ChatRunner {
                         &mut snapshot.error_content,
                         &mut snapshot.error_update_count,
                         &mut snapshot.error_type,
+                        stream_filter,
                     );
                 }
                 _ => {}
@@ -843,8 +896,9 @@ impl ChatRunner {
     fn reconcile_run_stream_state_from_history(
         state: &mut RunStreamStateSnapshot,
         history: &[LogMsg],
+        stream_filter: StreamPatchFilter,
     ) {
-        let rebuilt = Self::rebuild_run_stream_state_from_history(history);
+        let rebuilt = Self::rebuild_run_stream_state_from_history(history, stream_filter);
 
         if rebuilt.agent_session_id.is_some() {
             state.agent_session_id = rebuilt.agent_session_id;
@@ -1037,9 +1091,14 @@ impl ChatRunner {
         run_started_at: chrono::DateTime<Utc>,
         protocol_retry_attempt: u32,
         track_source_message: bool,
+        suppress_codex_tool_runtime_details: bool,
     ) {
         let db = self.db.clone();
         let sender = self.sender_for(session_id);
+        let stream_filter = StreamPatchFilter {
+            suppress_codex_tool_runtime_details,
+            suppress_error_streaming: true,
+        };
 
         tracing::debug!(
             session_id = %session_id,
@@ -1111,6 +1170,7 @@ impl ChatRunner {
                             &mut error_content,
                             &mut error_update_count,
                             &mut error_type,
+                            stream_filter,
                         );
                     }
                     Ok(LogMsg::Finished) => {
@@ -1192,6 +1252,7 @@ impl ChatRunner {
                                         &mut error_content,
                                         &mut error_update_count,
                                         &mut error_type,
+                                        stream_filter,
                                     );
                                 }
                                 _ => {}
@@ -1216,6 +1277,7 @@ impl ChatRunner {
                         Self::reconcile_run_stream_state_from_history(
                             &mut reconciled_state,
                             &msg_store.get_history(),
+                            stream_filter,
                         );
                         agent_session_id = reconciled_state.agent_session_id;
                         agent_message_id = reconciled_state.agent_message_id;
@@ -1351,10 +1413,19 @@ impl ChatRunner {
                             "is_estimated": token_usage.is_estimated,
                         });
 
-                        if !error_content.is_empty() {
-                            let summary: String = error_content.chars().take(200).collect();
+                        let visible_error_content =
+                            if matches!(completion_status, RunCompletionStatus::Failed)
+                                && !error_content.is_empty()
+                            {
+                                Some(error_content.as_str())
+                            } else {
+                                None
+                            };
+
+                        if let Some(visible_error_content) = visible_error_content {
+                            let summary: String = visible_error_content.chars().take(200).collect();
                             let mut error_meta = serde_json::json!({
-                                "content": error_content,
+                                "content": visible_error_content,
                                 "summary": summary,
                             });
                             if let Some(ref et) = error_type {
@@ -1368,7 +1439,7 @@ impl ChatRunner {
                                 run_id = %run_id,
                                 agent_id = %agent_id,
                                 error_type = ?error_type,
-                                error_content_len = error_content.len(),
+                                error_content_len = visible_error_content.len(),
                                 summary = %summary,
                                 "[chat_runner] Persisting error info to meta.json"
                             );
@@ -1394,11 +1465,8 @@ impl ChatRunner {
                         let _ = fs::write(&meta_path, serde_json::to_string_pretty(&meta).unwrap())
                             .await;
 
-                        let error_summary = if error_content.is_empty() {
-                            None
-                        } else {
-                            Some(error_content.chars().take(200).collect::<String>())
-                        };
+                        let error_summary = visible_error_content
+                            .map(|content| content.chars().take(200).collect::<String>());
                         let retention_summary = ChatRunRetentionSummary {
                             kind: Some(if error_summary.is_some() {
                                 "failure_stub".to_string()
@@ -1436,12 +1504,6 @@ impl ChatRunner {
                         )
                         .await;
 
-                        let error_content_opt = if error_content.is_empty() {
-                            None
-                        } else {
-                            Some(error_content.as_str())
-                        };
-
                         let process_result = runner
                             .process_agent_protocol_output(
                                 session_id,
@@ -1453,15 +1515,21 @@ impl ChatRunner {
                                 chain_depth,
                                 prompt_language,
                                 &latest_assistant,
-                                error_content_opt,
+                                visible_error_content,
                                 error_type.as_ref(),
                                 Some(&token_usage),
                                 protocol_retry_attempt,
                             )
                             .await;
 
+                        let mut protocol_retry_request: Option<(String, ChatMessage, bool)> = None;
+                        let mut protocol_processing_failed = false;
                         let messages_created = match process_result {
                             Ok(ProtocolProcessResult::Success(count)) => count,
+                            Ok(ProtocolProcessResult::ProtocolFailure) => {
+                                protocol_processing_failed = true;
+                                0
+                            }
                             Ok(ProtocolProcessResult::WorkflowGenerateDetected {
                                 send_count,
                                 plan_check,
@@ -1546,70 +1614,101 @@ impl ChatRunner {
                                 send_count
                             }
                             Ok(ProtocolProcessResult::RetryableParseFailure { code, detail }) => {
-                                tracing::warn!(
-                                    session_id = %session_id,
-                                    run_id = %run_id,
-                                    agent_id = %agent_id,
-                                    agent_name = %agent_name,
-                                    code = ?code,
-                                    detail = ?detail,
-                                    protocol_retry_attempt,
-                                    "protocol parse failure is retryable; retrying without persisting retry feedback"
-                                );
+                                if matches!(completion_status, RunCompletionStatus::Failed) {
+                                    protocol_processing_failed = true;
+                                    tracing::warn!(
+                                        session_id = %session_id,
+                                        run_id = %run_id,
+                                        agent_id = %agent_id,
+                                        agent_name = %agent_name,
+                                        code = ?code,
+                                        detail = ?detail,
+                                        protocol_retry_attempt,
+                                        "retryable protocol parse failure occurred during failed run; skipping retry dispatch"
+                                    );
+                                    if latest_assistant.trim().is_empty() {
+                                        0
+                                    } else if let Err(err) = runner
+                                        .persist_raw_agent_message_and_work_record(
+                                            session_id,
+                                            session_agent_id,
+                                            agent_id,
+                                            run_id,
+                                            &agent_name,
+                                            source_message_id,
+                                            chain_depth,
+                                            prompt_language,
+                                            &latest_assistant,
+                                            visible_error_content
+                                                .map(|content| (content, error_type.as_ref())),
+                                            Some(&token_usage),
+                                        )
+                                        .await
+                                    {
+                                        tracing::warn!(
+                                            session_id = %session_id,
+                                            run_id = %run_id,
+                                            agent_id = %agent_id,
+                                            error = %err,
+                                            "failed to persist raw assistant output for failed retryable protocol parse"
+                                        );
+                                        0
+                                    } else {
+                                        1
+                                    }
+                                } else {
+                                    tracing::warn!(
+                                        session_id = %session_id,
+                                        run_id = %run_id,
+                                        agent_id = %agent_id,
+                                        agent_name = %agent_name,
+                                        code = ?code,
+                                        detail = ?detail,
+                                        protocol_retry_attempt,
+                                        "protocol parse failure is retryable; retrying without persisting retry feedback"
+                                    );
 
-                                let error_desc = detail.as_deref().unwrap_or("Invalid JSON output");
-                                let retry_content = format!(
-                                    "Your previous response was not a valid JSON array.\n\
+                                    let error_desc =
+                                        detail.as_deref().unwrap_or("Invalid JSON output");
+                                    let retry_content = format!(
+                                        "Your previous response was not a valid JSON array.\n\
                                      Error: {error_desc}\n\n\
                                      Retry the same input message below and respond with ONLY a JSON array matching the protocol format.\n\n\
                                      Previous input message:\n\
                                      <BEGIN_INPUT_MESSAGE>\n\
                                      {source_message_content}\n\
                                      <END_INPUT_MESSAGE>"
-                                );
-                                let retry_meta = sqlx::types::Json(serde_json::json!({
-                                    "protocol_retry": {
-                                        "attempt": protocol_retry_attempt + 1,
-                                        "previous_run_id": run_id,
-                                        "error_code": format!("{:?}", code),
-                                    },
-                                    "chain_depth": chain_depth,
-                                    "mentions": [agent_name],
-                                }));
-                                let retry_message = ChatMessage {
-                                    id: Uuid::new_v4(),
-                                    session_id,
-                                    sender_type: ChatSenderType::System,
-                                    sender_id: None,
-                                    content: retry_content,
-                                    mentions: sqlx::types::Json(vec![agent_name.clone()]),
-                                    meta: retry_meta,
-                                    created_at: source_message_created_at,
-                                };
+                                    );
+                                    let retry_meta = sqlx::types::Json(serde_json::json!({
+                                        "protocol_retry": {
+                                            "attempt": protocol_retry_attempt + 1,
+                                            "previous_run_id": run_id,
+                                            "error_code": format!("{:?}", code),
+                                        },
+                                        "chain_depth": chain_depth,
+                                        "mentions": [agent_name],
+                                    }));
+                                    let retry_message = ChatMessage {
+                                        id: source_message_id,
+                                        session_id,
+                                        sender_type: ChatSenderType::System,
+                                        sender_id: None,
+                                        content: retry_content,
+                                        mentions: sqlx::types::Json(vec![agent_name.clone()]),
+                                        meta: retry_meta,
+                                        created_at: source_message_created_at,
+                                    };
 
-                                let retry_runner = runner.clone();
-                                let retry_agent_name = agent_name.clone();
-                                tokio::spawn(async move {
-                                    if let Err(err) = retry_runner
-                                        .run_agent_for_mention_internal(
-                                            session_id,
-                                            &retry_agent_name,
-                                            &retry_message,
-                                            false,
-                                        )
-                                        .await
-                                    {
-                                        tracing::warn!(
-                                            session_id = %session_id,
-                                            agent_name = %retry_agent_name,
-                                            error = %err,
-                                            "protocol retry run failed to dispatch"
-                                        );
-                                    }
-                                });
-                                0
+                                    protocol_retry_request = Some((
+                                        agent_name.clone(),
+                                        retry_message,
+                                        track_source_message,
+                                    ));
+                                    0
+                                }
                             }
                             Err(err) => {
+                                protocol_processing_failed = true;
                                 tracing::warn!(
                                     session_id = %session_id,
                                     run_id = %run_id,
@@ -1622,13 +1721,15 @@ impl ChatRunner {
                         };
 
                         // If there's an error but no messages were created, ensure we persist an error message
-                        if messages_created == 0 && !error_content.is_empty() {
+                        if messages_created == 0
+                            && let Some(visible_error_content) = visible_error_content
+                        {
                             tracing::info!(
                                 session_id = %session_id,
                                 run_id = %run_id,
                                 agent_id = %agent_id,
                                 agent_name = %agent_name,
-                                error_content_len = error_content.len(),
+                                error_content_len = visible_error_content.len(),
                                 "persisting error message for failed agent run with no output"
                             );
                             if let Err(err) = runner
@@ -1639,7 +1740,7 @@ impl ChatRunner {
                                     run_id,
                                     &agent_name,
                                     source_message_id,
-                                    &error_content,
+                                    visible_error_content,
                                     error_type.as_ref(),
                                 )
                                 .await
@@ -1687,16 +1788,18 @@ impl ChatRunner {
                                 .await;
                         }
 
-                        let _ = sender.send(ChatStreamEvent::AgentDelta {
-                            session_id,
-                            session_agent_id,
-                            agent_id,
-                            run_id,
-                            stream_type: ChatStreamDeltaType::Assistant,
-                            content: latest_assistant.clone(),
-                            delta: false,
-                            is_final: true,
-                        });
+                        if !(latest_assistant.is_empty() && visible_error_content.is_some()) {
+                            let _ = sender.send(ChatStreamEvent::AgentDelta {
+                                session_id,
+                                session_agent_id,
+                                agent_id,
+                                run_id,
+                                stream_type: ChatStreamDeltaType::Assistant,
+                                content: latest_assistant.clone(),
+                                delta: false,
+                                is_final: true,
+                            });
+                        }
 
                         let final_state = match completion_status {
                             RunCompletionStatus::Failed => ChatSessionAgentState::Dead,
@@ -1742,10 +1845,13 @@ impl ChatRunner {
                             started_at: None,
                         });
 
-                        if track_source_message {
+                        if track_source_message && protocol_retry_request.is_none() {
                             // Emit MentionAcknowledged completed/failed event
                             let mention_status = match completion_status {
                                 RunCompletionStatus::Failed => MentionStatus::Failed,
+                                RunCompletionStatus::Succeeded if protocol_processing_failed => {
+                                    MentionStatus::Failed
+                                }
                                 RunCompletionStatus::Succeeded | RunCompletionStatus::Stopped => {
                                     MentionStatus::Completed
                                 }
@@ -1806,9 +1912,40 @@ impl ChatRunner {
                             );
                         }
 
-                        // Process any pending messages in the queue for this agent
-                        // Only process if the agent completed successfully (not failed/dead)
                         if final_state == ChatSessionAgentState::Idle {
+                            if let Some((retry_agent_name, retry_message, retry_track_source)) =
+                                protocol_retry_request
+                            {
+                                tracing::info!(
+                                    session_id = %session_id,
+                                    session_agent_id = %session_agent_id,
+                                    agent_id = %agent_id,
+                                    run_id = %run_id,
+                                    agent_name = %retry_agent_name,
+                                    "dispatching protocol retry after current run reached idle"
+                                );
+                                if let Err(err) = runner
+                                    .run_agent_for_mention_internal(
+                                        session_id,
+                                        &retry_agent_name,
+                                        &retry_message,
+                                        retry_track_source,
+                                    )
+                                    .await
+                                {
+                                    tracing::warn!(
+                                        session_id = %session_id,
+                                        agent_name = %retry_agent_name,
+                                        error = %err,
+                                        "protocol retry run failed to dispatch"
+                                    );
+                                }
+                                break;
+                            }
+
+                            // Process any pending messages in the queue for this agent after
+                            // protocol retries so the corrective run is not starved behind later
+                            // user messages.
                             runner
                                 .process_pending_queue(session_id, session_agent_id)
                                 .await;
@@ -1827,7 +1964,12 @@ impl ChatRunner {
         });
     }
 
-    pub(super) fn spawn_exit_watcher(&self, args: ExitWatcherArgs, session_agent_id: Uuid) {
+    pub(super) fn spawn_exit_watcher(
+        &self,
+        args: ExitWatcherArgs,
+        session_agent_id: Uuid,
+        run_id: Uuid,
+    ) {
         let run_controls = self.run_controls.clone();
         tokio::spawn(async move {
             Self::watch_executor_lifecycle_with_timeout(
@@ -1842,7 +1984,12 @@ impl ChatRunner {
                 EXECUTOR_GRACEFUL_STOP_TIMEOUT,
             )
             .await;
-            run_controls.remove(&session_agent_id);
+            let should_remove = run_controls
+                .get(&session_agent_id)
+                .is_some_and(|control| control.run_id == run_id);
+            if should_remove {
+                run_controls.remove(&session_agent_id);
+            }
         });
     }
 
@@ -2295,9 +2442,18 @@ impl ChatRunner {
                 let signaled_failure = matches!(
                     exit_result,
                     executors::executors::ExecutorExitResult::Failure
+                        | executors::executors::ExecutorExitResult::FailureWithError(_)
                 );
                 if signaled_failure {
                     completion = RunCompletionStatus::Failed;
+                }
+
+                // If the exit signal includes an error message, write it to msg_store
+                if let executors::executors::ExecutorExitResult::FailureWithError(ref err_msg) =
+                    exit_result
+                    && !err_msg.is_empty()
+                {
+                    msg_store.push(LogMsg::Stderr(err_msg.clone()));
                 }
 
                 match process::terminate_process_group(&mut child, graceful_timeout).await {
@@ -2581,6 +2737,130 @@ mod tests {
         assert_eq!(filter_benign_executor_stderr(text), Some(text.to_string()));
     }
 
+    #[test]
+    fn stream_patch_filter_keeps_codex_thinking_delta() {
+        let patch = ConversationPatch::add_normalized_entry(
+            0,
+            NormalizedEntry {
+                timestamp: None,
+                entry_type: NormalizedEntryType::Thinking,
+                content: "Running shell command".to_string(),
+                metadata: None,
+            },
+        );
+        let mut last_content = HashMap::new();
+        let mut latest_assistant = String::new();
+        let mut assistant_update_count = 0;
+        let mut last_token_usage = None;
+        let mut error_content = String::new();
+        let mut error_update_count = 0;
+        let mut error_type = None;
+
+        let update = ChatRunner::apply_stream_patch_to_state(
+            &patch,
+            &mut last_content,
+            &mut latest_assistant,
+            &mut assistant_update_count,
+            &mut last_token_usage,
+            &mut error_content,
+            &mut error_update_count,
+            &mut error_type,
+            StreamPatchFilter {
+                suppress_codex_tool_runtime_details: true,
+                ..StreamPatchFilter::default()
+            },
+        );
+
+        let update = update.expect("thinking delta should still be emitted");
+        assert!(matches!(update.stream_type, ChatStreamDeltaType::Thinking));
+        assert_eq!(update.content, "Running shell command");
+        assert!(error_content.is_empty());
+        assert_eq!(assistant_update_count, 0);
+    }
+
+    #[test]
+    fn stream_patch_filter_suppresses_codex_tool_failure_error() {
+        let patch = ConversationPatch::add_normalized_entry(
+            0,
+            NormalizedEntry {
+                timestamp: None,
+                entry_type: NormalizedEntryType::ErrorMessage {
+                    error_type: NormalizedEntryError::Other,
+                },
+                content: "Tool call failed: command exited with code 1".to_string(),
+                metadata: None,
+            },
+        );
+        let mut last_content = HashMap::new();
+        let mut latest_assistant = String::new();
+        let mut assistant_update_count = 0;
+        let mut last_token_usage = None;
+        let mut error_content = String::new();
+        let mut error_update_count = 0;
+        let mut error_type = None;
+
+        let update = ChatRunner::apply_stream_patch_to_state(
+            &patch,
+            &mut last_content,
+            &mut latest_assistant,
+            &mut assistant_update_count,
+            &mut last_token_usage,
+            &mut error_content,
+            &mut error_update_count,
+            &mut error_type,
+            StreamPatchFilter {
+                suppress_codex_tool_runtime_details: true,
+                ..StreamPatchFilter::default()
+            },
+        );
+
+        assert!(update.is_none());
+        assert!(error_content.is_empty());
+        assert_eq!(error_update_count, 0);
+    }
+
+    #[test]
+    fn stream_patch_filter_can_collect_error_without_streaming_it() {
+        let patch = ConversationPatch::add_normalized_entry(
+            0,
+            NormalizedEntry {
+                timestamp: None,
+                entry_type: NormalizedEntryType::ErrorMessage {
+                    error_type: NormalizedEntryError::Other,
+                },
+                content: "stderr warning from executor".to_string(),
+                metadata: None,
+            },
+        );
+        let mut last_content = HashMap::new();
+        let mut latest_assistant = String::new();
+        let mut assistant_update_count = 0;
+        let mut last_token_usage = None;
+        let mut error_content = String::new();
+        let mut error_update_count = 0;
+        let mut error_type = None;
+
+        let update = ChatRunner::apply_stream_patch_to_state(
+            &patch,
+            &mut last_content,
+            &mut latest_assistant,
+            &mut assistant_update_count,
+            &mut last_token_usage,
+            &mut error_content,
+            &mut error_update_count,
+            &mut error_type,
+            StreamPatchFilter {
+                suppress_error_streaming: true,
+                ..StreamPatchFilter::default()
+            },
+        );
+
+        assert!(update.is_none());
+        assert_eq!(error_content, "stderr warning from executor");
+        assert_eq!(error_update_count, 1);
+        assert_eq!(error_type, Some(NormalizedEntryError::Other));
+    }
+
     #[tokio::test]
     async fn persist_tail_keeps_tail_result_when_cleanup_fails() {
         let temp = tempdir().expect("tempdir");
@@ -2681,7 +2961,11 @@ mod tests {
             ..RunStreamStateSnapshot::default()
         };
 
-        ChatRunner::reconcile_run_stream_state_from_history(&mut state, &history);
+        ChatRunner::reconcile_run_stream_state_from_history(
+            &mut state,
+            &history,
+            StreamPatchFilter::default(),
+        );
 
         assert_eq!(
             state.latest_assistant,
@@ -2711,7 +2995,11 @@ mod tests {
             ..RunStreamStateSnapshot::default()
         };
 
-        ChatRunner::reconcile_run_stream_state_from_history(&mut state, &history);
+        ChatRunner::reconcile_run_stream_state_from_history(
+            &mut state,
+            &history,
+            StreamPatchFilter::default(),
+        );
 
         assert_eq!(state.latest_assistant, "newer output");
         assert_eq!(state.assistant_update_count, 2);

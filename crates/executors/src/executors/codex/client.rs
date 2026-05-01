@@ -39,7 +39,7 @@ use super::jsonrpc::{JsonRpcCallbacks, JsonRpcPeer};
 use crate::{
     approvals::{ExecutorApprovalError, ExecutorApprovalService},
     env::RepoContext,
-    executors::{ExecutorError, codex::normalize_logs::Approval},
+    executors::{ExecutorError, ExecutorExitResult, codex::normalize_logs::Approval},
 };
 
 pub struct AppServerClient {
@@ -56,6 +56,7 @@ pub struct AppServerClient {
     commit_reminder_sent: AtomicBool,
     turn_started: AtomicBool,
     cancel: CancellationToken,
+    turn_error: Mutex<Option<String>>,
 }
 
 impl AppServerClient {
@@ -82,6 +83,7 @@ impl AppServerClient {
             commit_reminder_sent: AtomicBool::new(false),
             turn_started: AtomicBool::new(false),
             cancel,
+            turn_error: Mutex::new(None),
         })
     }
 
@@ -95,6 +97,10 @@ impl AppServerClient {
 
     pub fn log_writer(&self) -> &LogWriter {
         &self.log_writer
+    }
+
+    pub async fn take_turn_error(&self) -> Option<String> {
+        self.turn_error.lock().await.take()
     }
 
     pub async fn initialize(&self) -> Result<(), ExecutorError> {
@@ -706,6 +712,19 @@ impl AppServerClient {
                 }
 
                 if has_finished {
+                    // If the turn failed with an error, store it for the exit signal
+                    if matches!(turn.status, TurnStatus::Failed)
+                        && let Some(ref error) = turn.error
+                        && !error.message.is_empty()
+                    {
+                        tracing::warn!(
+                            thread_id = %thread_id,
+                            turn_id = %turn.id,
+                            error_message = %error.message,
+                            "[codex-client] turn failed with error"
+                        );
+                        *self.turn_error.lock().await = Some(error.message.clone());
+                    }
                     tracing::debug!(
                         thread_id = %thread_id,
                         turn_id = %turn.id,
@@ -865,6 +884,13 @@ impl JsonRpcCallbacks for AppServerClient {
         self.log_writer.log_raw(raw).await?;
         Ok(())
     }
+
+    async fn get_exit_result(&self) -> ExecutorExitResult {
+        match self.take_turn_error().await {
+            Some(error_msg) => ExecutorExitResult::FailureWithError(error_msg),
+            None => ExecutorExitResult::Success,
+        }
+    }
 }
 
 async fn send_server_response<T>(
@@ -950,6 +976,7 @@ impl LogWriter {
     }
 
     pub async fn log_raw(&self, raw: &str) -> Result<(), ExecutorError> {
+        let raw = redact_sensitive_raw_log(raw);
         let mut guard = self.writer.lock().await;
         guard
             .write_all(raw.as_bytes())
@@ -961,6 +988,55 @@ impl LogWriter {
     }
 }
 
+const REDACTED_LOG_VALUE: &str = "[redacted]";
+
+fn redact_sensitive_raw_log(raw: &str) -> Cow<'_, str> {
+    let Ok(mut value) = serde_json::from_str::<Value>(raw) else {
+        return Cow::Borrowed(raw);
+    };
+
+    redact_sensitive_value(&mut value);
+
+    match serde_json::to_string(&value) {
+        Ok(redacted) => Cow::Owned(redacted),
+        Err(_) => Cow::Borrowed(raw),
+    }
+}
+
+fn redact_sensitive_value(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            for (key, value) in map.iter_mut() {
+                if is_sensitive_log_key(key) {
+                    *value = Value::String(REDACTED_LOG_VALUE.to_string());
+                } else {
+                    redact_sensitive_value(value);
+                }
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                redact_sensitive_value(value);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn is_sensitive_log_key(key: &str) -> bool {
+    matches!(
+        key,
+        "authToken"
+            | "accessToken"
+            | "refreshToken"
+            | "idToken"
+            | "apiKey"
+            | "api_key"
+            | "authorization"
+            | "Authorization"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use codex_app_server_protocol::{
@@ -969,7 +1045,7 @@ mod tests {
     use tokio::io::sink;
     use tokio_util::sync::CancellationToken;
 
-    use super::{AppServerClient, LogWriter};
+    use super::{AppServerClient, LogWriter, redact_sensitive_raw_log};
     use crate::env::RepoContext;
 
     fn build_client() -> std::sync::Arc<AppServerClient> {
@@ -982,6 +1058,33 @@ mod tests {
             String::new(),
             CancellationToken::new(),
         )
+    }
+
+    #[test]
+    fn raw_log_redaction_removes_auth_tokens() {
+        let raw = serde_json::json!({
+            "id": 2,
+            "result": {
+                "authMethod": "chatgpt",
+                "authToken": "secret-token",
+                "nested": {
+                    "refreshToken": "refresh-secret",
+                    "tokenUsage": {
+                        "totalTokens": 123
+                    }
+                }
+            }
+        })
+        .to_string();
+
+        let redacted = redact_sensitive_raw_log(&raw);
+        let value: serde_json::Value = serde_json::from_str(&redacted).unwrap();
+
+        assert_eq!(value["result"]["authToken"], "[redacted]");
+        assert_eq!(value["result"]["nested"]["refreshToken"], "[redacted]");
+        assert_eq!(value["result"]["nested"]["tokenUsage"]["totalTokens"], 123);
+        assert!(!redacted.contains("secret-token"));
+        assert!(!redacted.contains("refresh-secret"));
     }
 
     #[tokio::test]
