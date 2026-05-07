@@ -348,16 +348,10 @@ jobs:
 
       - name: Install Zig
         if: runner.os == 'Linux' && !contains(matrix.target, 'windows')
-        shell: bash
-        run: |
-          set -euo pipefail
-          zig_version="0.15.2"
-          zig_dir="$RUNNER_TEMP/zig"
-          mkdir -p "$zig_dir"
-          curl -fsSL "https://ziglang.org/download/${zig_version}/zig-x86_64-linux-${zig_version}.tar.xz" -o "$zig_dir/zig.tar.xz"
-          tar -xJf "$zig_dir/zig.tar.xz" -C "$zig_dir" --strip-components=1
-          echo "$zig_dir" >> "$GITHUB_PATH"
-          "$zig_dir/zig" version
+        uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.15.2
+          cache-key: ${{ matrix.target }}
 
       - name: Install cargo zigbuild
         if: runner.os == 'Linux' && !contains(matrix.target, 'windows')
