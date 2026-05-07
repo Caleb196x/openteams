@@ -10,7 +10,8 @@ const STEP_SELECT: &str = r#"
     SELECT id, execution_id, round_id, compiled_revision_id, step_key,
            step_type, title, instructions, assigned_workflow_agent_session_id,
            status, retry_count, max_retry, round_index, display_order,
-           latest_run_id, summary_text, content,
+           latest_run_id, summary_text, content, loop_id, lead_review_required,
+           user_review_required, revision_context,
            created_at, updated_at, started_at, completed_at
     FROM chat_workflow_steps
 "#;
@@ -34,6 +35,10 @@ pub struct WorkflowStep {
     pub latest_run_id: Option<Uuid>,
     pub summary_text: Option<String>,
     pub content: Option<String>,
+    pub loop_id: Option<Uuid>,
+    pub lead_review_required: bool,
+    pub user_review_required: bool,
+    pub revision_context: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub started_at: Option<DateTime<Utc>>,
@@ -53,6 +58,10 @@ pub struct CreateWorkflowStep {
     pub max_retry: i32,
     pub round_index: i32,
     pub display_order: i32,
+    pub loop_id: Option<Uuid>,
+    pub lead_review_required: Option<bool>,
+    pub user_review_required: Option<bool>,
+    pub revision_context: Option<String>,
 }
 
 impl WorkflowStep {
@@ -97,13 +106,18 @@ impl WorkflowStep {
             INSERT INTO chat_workflow_steps (
                 id, execution_id, round_id, compiled_revision_id, step_key,
                 step_type, title, instructions, assigned_workflow_agent_session_id,
-                max_retry, round_index, display_order
+                max_retry, round_index, display_order, loop_id,
+                lead_review_required, user_review_required, revision_context
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                COALESCE(?14, 1), COALESCE(?15, 0), ?16
+            )
             RETURNING id, execution_id, round_id, compiled_revision_id, step_key,
                       step_type, title, instructions, assigned_workflow_agent_session_id,
                       status, retry_count, max_retry, round_index, display_order,
-                      latest_run_id, summary_text, content,
+                      latest_run_id, summary_text, content, loop_id,
+                      lead_review_required, user_review_required, revision_context,
                       created_at, updated_at, started_at, completed_at
             "#,
         )
@@ -119,6 +133,10 @@ impl WorkflowStep {
         .bind(data.max_retry)
         .bind(data.round_index)
         .bind(data.display_order)
+        .bind(data.loop_id)
+        .bind(data.lead_review_required)
+        .bind(data.user_review_required)
+        .bind(&data.revision_context)
         .fetch_one(pool)
         .await
     }
@@ -136,7 +154,8 @@ impl WorkflowStep {
             RETURNING id, execution_id, round_id, compiled_revision_id, step_key,
                       step_type, title, instructions, assigned_workflow_agent_session_id,
                       status, retry_count, max_retry, round_index, display_order,
-                      latest_run_id, summary_text, content,
+                      latest_run_id, summary_text, content, loop_id,
+                      lead_review_required, user_review_required, revision_context,
                       created_at, updated_at, started_at, completed_at
             "#,
         )
@@ -159,7 +178,8 @@ impl WorkflowStep {
             RETURNING id, execution_id, round_id, compiled_revision_id, step_key,
                       step_type, title, instructions, assigned_workflow_agent_session_id,
                       status, retry_count, max_retry, round_index, display_order,
-                      latest_run_id, summary_text, content,
+                      latest_run_id, summary_text, content, loop_id,
+                      lead_review_required, user_review_required, revision_context,
                       created_at, updated_at, started_at, completed_at
             "#,
         )
@@ -183,7 +203,8 @@ impl WorkflowStep {
             RETURNING id, execution_id, round_id, compiled_revision_id, step_key,
                       step_type, title, instructions, assigned_workflow_agent_session_id,
                       status, retry_count, max_retry, round_index, display_order,
-                      latest_run_id, summary_text, content,
+                      latest_run_id, summary_text, content, loop_id,
+                      lead_review_required, user_review_required, revision_context,
                       created_at, updated_at, started_at, completed_at
             "#,
         )
@@ -214,7 +235,8 @@ impl WorkflowStep {
             RETURNING id, execution_id, round_id, compiled_revision_id, step_key,
                       step_type, title, instructions, assigned_workflow_agent_session_id,
                       status, retry_count, max_retry, round_index, display_order,
-                      latest_run_id, summary_text, content,
+                      latest_run_id, summary_text, content, loop_id,
+                      lead_review_required, user_review_required, revision_context,
                       created_at, updated_at, started_at, completed_at
             "#,
         )
@@ -222,6 +244,56 @@ impl WorkflowStep {
         .bind(latest_run_id)
         .bind(summary_text)
         .bind(content)
+        .fetch_one(pool)
+        .await
+    }
+
+    pub async fn update_revision_context(
+        pool: &SqlitePool,
+        id: Uuid,
+        revision_context: Option<String>,
+    ) -> Result<Self, sqlx::Error> {
+        sqlx::query_as::<_, Self>(
+            r#"
+            UPDATE chat_workflow_steps
+            SET revision_context = ?2,
+                updated_at = datetime('now', 'subsec')
+            WHERE id = ?1
+            RETURNING id, execution_id, round_id, compiled_revision_id, step_key,
+                      step_type, title, instructions, assigned_workflow_agent_session_id,
+                      status, retry_count, max_retry, round_index, display_order,
+                      latest_run_id, summary_text, content, loop_id,
+                      lead_review_required, user_review_required, revision_context,
+                      created_at, updated_at, started_at, completed_at
+            "#,
+        )
+        .bind(id)
+        .bind(revision_context)
+        .fetch_one(pool)
+        .await
+    }
+
+    pub async fn update_loop_id(
+        pool: &SqlitePool,
+        id: Uuid,
+        loop_id: Option<Uuid>,
+    ) -> Result<Self, sqlx::Error> {
+        sqlx::query_as::<_, Self>(
+            r#"
+            UPDATE chat_workflow_steps
+            SET loop_id = ?2,
+                updated_at = datetime('now', 'subsec')
+            WHERE id = ?1
+            RETURNING id, execution_id, round_id, compiled_revision_id, step_key,
+                      step_type, title, instructions, assigned_workflow_agent_session_id,
+                      status, retry_count, max_retry, round_index, display_order,
+                      latest_run_id, summary_text, content, loop_id,
+                      lead_review_required, user_review_required, revision_context,
+                      created_at, updated_at, started_at, completed_at
+            "#,
+        )
+        .bind(id)
+        .bind(loop_id)
         .fetch_one(pool)
         .await
     }
@@ -241,7 +313,8 @@ impl WorkflowStep {
             RETURNING id, execution_id, round_id, compiled_revision_id, step_key,
                       step_type, title, instructions, assigned_workflow_agent_session_id,
                       status, retry_count, max_retry, round_index, display_order,
-                      latest_run_id, summary_text, content,
+                      latest_run_id, summary_text, content, loop_id,
+                      lead_review_required, user_review_required, revision_context,
                       created_at, updated_at, started_at, completed_at
             "#,
         )

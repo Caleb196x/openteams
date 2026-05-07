@@ -9,6 +9,8 @@ import {
 } from '@phosphor-icons/react';
 import type { WorkflowCardData } from '@/lib/api';
 import { ChatMarkdown } from '@/components/ui-new/primitives/conversation/ChatMarkdown';
+import { WorkflowIterationFeedbackCard } from './WorkflowIterationFeedbackCard';
+import { WorkflowPendingReviewCard } from './WorkflowPendingReviewCard';
 import { WorkflowGraphBoard } from './WorkflowGraphBoard';
 import {
   type WorkflowFinalReviewActionData,
@@ -20,74 +22,11 @@ import {
   isWorkflowExecutionRecompiling,
 } from './workflowControlContract';
 
-type WorkflowCardNode = {
-  id: string;
-  position: { x: number; y: number };
-  data: {
-    stepType: string;
-    title: string;
-    instructions: string;
-    agentId?: string | null;
-    status?: string | null;
-  };
-};
-
-type WorkflowCardEdge = {
-  id: string;
-  source: string;
-  target: string;
-};
-
 export type WorkflowCardProjection = WorkflowCardData;
 type WorkflowCardType =
   | 'workflow_execution'
   | 'workflow_plan'
   | 'workflow_plan_generation';
-
-type WorkflowCardProjectionInternal = {
-  execution_id?: string | null;
-  plan_id?: string;
-  revision_id?: string;
-  title: string;
-  goal: string;
-  state:
-    | 'preview_ready'
-    | 'preview_invalid'
-    | 'pending'
-    | 'running'
-    | 'waiting'
-    | 'completed'
-    | 'failed'
-    | 'paused';
-  execution_status: string;
-  error_message?: string | null;
-  completed_step_count: number;
-  total_step_count: number;
-  result_summary?: string | null;
-  outputs: string[];
-  steps: Array<{
-    id: string;
-    step_key: string;
-    title: string;
-    step_type: string;
-    status: string;
-    agent_name?: string | null;
-    summary_text?: string | null;
-    content?: string | null;
-  }>;
-  agents?: Array<{
-    session_agent_id: string;
-    workflow_agent_session_id?: string | null;
-    agent_id: string;
-    name: string;
-  }>;
-  plan: {
-    nodes: WorkflowCardNode[];
-    edges: WorkflowCardEdge[];
-    viewport?: { x?: number; y?: number; zoom?: number };
-  };
-  validation_errors?: string | null;
-};
 
 type WorkflowPlanGenerationMeta = {
   status?: string;
@@ -96,6 +35,12 @@ type WorkflowPlanGenerationMeta = {
   retry_endpoint?: string;
   error_message?: string | null;
 };
+
+const REVIEW_READY_STEP_STATUSES = new Set([
+  'completed',
+  'skipped',
+  'cancelled',
+]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
@@ -132,7 +77,7 @@ const extractWorkflowPlanGenerationMeta = (
 
 export function extractWorkflowCardProjection(
   meta: unknown
-): WorkflowCardProjectionInternal | null {
+): WorkflowCardProjection | null {
   const cardType = extractWorkflowCardType(meta);
   if (!cardType) {
     return null;
@@ -143,7 +88,7 @@ export function extractWorkflowCardProjection(
     return null;
   }
 
-  return workflowCard as unknown as WorkflowCardProjectionInternal;
+  return workflowCard as unknown as WorkflowCardProjection;
 }
 
 type ChatWorkflowCardProps = {
@@ -163,6 +108,21 @@ type ChatWorkflowCardProps = {
     transcriptId: string,
     action: 'accepted' | 'rejected'
   ) => void;
+  onRespondPendingReview?: (
+    reviewId: string,
+    action: 'approve' | 'reject',
+    feedback?: string
+  ) => void;
+  onSubmitIterationFeedback?: (payload: {
+    executionId: string;
+    action: 'accept' | 'reject';
+    feedback?: {
+      what_wrong: string;
+      expected: string;
+      priority: 'high' | 'medium' | 'low';
+      additional_notes?: string;
+    };
+  }) => void;
   pendingActionId?: string | null;
 };
 
@@ -179,6 +139,8 @@ export function ChatWorkflowCard({
   retryPlanGenerationError,
   finalReviewAction,
   onResolveFinalReview,
+  onRespondPendingReview,
+  onSubmitIterationFeedback,
   pendingActionId,
 }: ChatWorkflowCardProps) {
   const projection =
@@ -212,6 +174,14 @@ export function ChatWorkflowCard({
   const isExecutionRecompiling = isWorkflowExecutionRecompiling(projection);
   const canPauseExecution = canPauseWorkflowExecution(projection);
   const canResumeExecution = canResumeWorkflowExecution(projection);
+  const allStepViewsCompleted =
+    projection.steps.length > 0 &&
+    projection.steps.every((step) => REVIEW_READY_STEP_STATUSES.has(step.status));
+  const canReviewCurrentRound =
+    !!finalReviewAction ||
+    (allStepViewsCompleted &&
+      (projection.state === 'waiting' ||
+        projection.execution_status === 'waiting'));
   const showRetryPlanGenerationButton =
     isPlanGenerationFailed &&
     generationMeta?.retryable !== false &&
@@ -325,6 +295,8 @@ export function ChatWorkflowCard({
             nodes={projection.plan.nodes}
             edges={projection.plan.edges}
             steps={projection.steps}
+            loops={projection.loops ?? []}
+            planLoops={projection.plan.loops}
             agents={projection.agents}
             onRetryStep={onRetryStep}
             pendingActionId={pendingActionId}
@@ -442,6 +414,48 @@ export function ChatWorkflowCard({
               )
             }
             disabled={pendingActionId === finalReviewAction.transcriptId}
+          />
+        </div>
+      )}
+
+      {projection.pending_review && (
+        <div className="mt-4">
+          <WorkflowPendingReviewCard
+            pendingReview={projection.pending_review}
+            pendingActionId={pendingActionId}
+            onSubmit={(action, feedback) =>
+              onRespondPendingReview?.(
+                projection.pending_review!.review_id,
+                action,
+                feedback
+              )
+            }
+          />
+        </div>
+      )}
+
+      {!projection.pending_review &&
+        projection.execution_id &&
+        (projection.iteration_history.length > 0 || finalReviewAction) && (
+        <div className="mt-4">
+          <WorkflowIterationFeedbackCard
+            currentRound={projection.current_round}
+            iterationHistory={projection.iteration_history}
+            canReviewCurrentRound={canReviewCurrentRound}
+            pendingActionId={pendingActionId}
+            onSubmit={(payload) => {
+              if (
+                !onSubmitIterationFeedback ||
+                !projection.execution_id
+              ) {
+                return;
+              }
+              onSubmitIterationFeedback({
+                executionId: projection.execution_id,
+                action: payload.action,
+                feedback: payload.feedback,
+              });
+            }}
           />
         </div>
       )}

@@ -150,6 +150,47 @@ impl WorkflowPlan {
         .await
     }
 
+    pub async fn update_plan_json(
+        pool: &SqlitePool,
+        id: Uuid,
+        title: &str,
+        summary_text: Option<String>,
+        plan_json: &str,
+        plan_schema_version: i32,
+        plan_hash: &str,
+        validation_status: WorkflowValidationStatus,
+        validation_errors_json: Option<String>,
+    ) -> Result<Self, sqlx::Error> {
+        sqlx::query_as::<_, Self>(
+            r#"
+            UPDATE chat_workflow_plans
+            SET title = ?2,
+                summary_text = ?3,
+                plan_json = ?4,
+                plan_schema_version = ?5,
+                plan_hash = ?6,
+                validation_status = ?7,
+                validation_errors_json = ?8,
+                updated_at = datetime('now', 'subsec')
+            WHERE id = ?1
+            RETURNING id, session_id, source_message_id, created_by_session_agent_id,
+                      status, title, summary_text, plan_json, plan_schema_version,
+                      plan_hash, validation_status, validation_errors_json,
+                      workflow_card_message_id, created_at, updated_at
+            "#,
+        )
+        .bind(id)
+        .bind(title)
+        .bind(summary_text)
+        .bind(plan_json)
+        .bind(plan_schema_version)
+        .bind(plan_hash)
+        .bind(validation_status)
+        .bind(validation_errors_json)
+        .fetch_one(pool)
+        .await
+    }
+
     pub async fn update_workflow_card_message_id(
         pool: &SqlitePool,
         id: Uuid,

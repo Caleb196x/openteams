@@ -1221,6 +1221,7 @@ export function ChatSessions() {
     const entries = workflowTranscriptData ?? [];
     return entries.map((e) => ({
       id: e.id,
+      round_id: e.round_id,
       step_id: e.step_id,
       step_key: e.step_key,
       workflow_agent_session_id: e.workflow_agent_session_id,
@@ -1336,6 +1337,70 @@ export function ChatSessions() {
     },
   });
 
+  const respondWorkflowReviewMutation = useMutation({
+    mutationFn: async (variables: {
+      reviewId: string;
+      action: 'approve' | 'reject';
+      feedback?: string;
+    }) =>
+      chatApi.respondToWorkflowReview({
+        review_id: variables.reviewId,
+        action: variables.action,
+        feedback: variables.feedback ?? null,
+      }),
+    onSuccess: () => {
+      if (!activeSessionId) return;
+      queryClient.invalidateQueries({
+        queryKey: ['chatMessages', activeSessionId],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ['workflowTranscripts', activeSessionId],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ['workflowStepTranscripts', activeSessionId],
+      });
+      setWorkflowCardRefreshNonce((prev) => prev + 1);
+    },
+  });
+
+  const submitWorkflowIterationFeedbackMutation = useMutation({
+    mutationFn: async (variables: {
+      executionId: string;
+      action: 'accept' | 'reject';
+      feedback?: {
+        what_wrong: string;
+        expected: string;
+        priority: 'high' | 'medium' | 'low';
+        additional_notes?: string;
+      };
+    }) =>
+      chatApi.submitWorkflowIterationFeedback({
+        execution_id: variables.executionId,
+        action: variables.action,
+        feedback: variables.feedback
+          ? {
+              what_wrong: variables.feedback.what_wrong,
+              expected: variables.feedback.expected,
+              priority: variables.feedback.priority,
+              additional_notes: variables.feedback.additional_notes ?? null,
+            }
+          : null,
+      }),
+    onSuccess: () => {
+      if (!activeSessionId) return;
+      queryClient.invalidateQueries({
+        queryKey: ['chatMessages', activeSessionId],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ['workflowTranscripts', activeSessionId],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ['workflowStepTranscripts', activeSessionId],
+      });
+      setWorkflowCardRefreshNonce((prev) => prev + 1);
+    },
+  });
+
   const handleOpenWorkflowWindow = useCallback(
     (projection: WorkflowWindowProjection) => {
       const cardMsgId =
@@ -1387,6 +1452,27 @@ export function ChatSessions() {
     },
     [resolveActionMutation]
   );
+  const handleRespondPendingWorkflowReview = useCallback(
+    (reviewId: string, action: 'approve' | 'reject', feedback?: string) => {
+      respondWorkflowReviewMutation.mutate({ reviewId, action, feedback });
+    },
+    [respondWorkflowReviewMutation]
+  );
+  const handleSubmitWorkflowIterationFeedback = useCallback(
+    (payload: {
+      executionId: string;
+      action: 'accept' | 'reject';
+      feedback?: {
+        what_wrong: string;
+        expected: string;
+        priority: 'high' | 'medium' | 'low';
+        additional_notes?: string;
+      };
+    }) => {
+      submitWorkflowIterationFeedbackMutation.mutate(payload);
+    },
+    [submitWorkflowIterationFeedbackMutation]
+  );
 
   useEffect(() => {
     const pendingWorkflowCard = [...messages].reverse().find((message) => {
@@ -1435,12 +1521,22 @@ export function ChatSessions() {
     if (retryWorkflowStepMutation.isPending) {
       return retryWorkflowStepMutation.variables ?? null;
     }
+    if (respondWorkflowReviewMutation.isPending) {
+      return respondWorkflowReviewMutation.variables?.reviewId ?? null;
+    }
+    if (submitWorkflowIterationFeedbackMutation.isPending) {
+      return submitWorkflowIterationFeedbackMutation.variables?.executionId ?? null;
+    }
     return null;
   }, [
     resolveActionMutation.isPending,
     resolveActionMutation.variables,
+    respondWorkflowReviewMutation.isPending,
+    respondWorkflowReviewMutation.variables,
     retryWorkflowStepMutation.isPending,
     retryWorkflowStepMutation.variables,
+    submitWorkflowIterationFeedbackMutation.isPending,
+    submitWorkflowIterationFeedbackMutation.variables,
     submitWorkflowStepInputMutation.isPending,
     submitWorkflowStepInputMutation.variables,
   ]);
@@ -5051,6 +5147,12 @@ export function ChatSessions() {
                           onResolveWorkflowFinalReview={
                             handleResolveWorkflowFinalReview
                           }
+                          onRespondPendingReview={
+                            handleRespondPendingWorkflowReview
+                          }
+                          onSubmitWorkflowIterationFeedback={
+                            handleSubmitWorkflowIterationFeedback
+                          }
                           pendingWorkflowActionId={pendingWorkflowActionId}
                           onOpenWorkflowWindow={(proj) =>
                             handleOpenWorkflowWindow(
@@ -5393,6 +5495,8 @@ export function ChatSessions() {
           }
           onApproval={handleResolveWorkflowAction}
           onResolveFinalReview={handleResolveWorkflowFinalReview}
+          onRespondPendingReview={handleRespondPendingWorkflowReview}
+          onSubmitIterationFeedback={handleSubmitWorkflowIterationFeedback}
           pendingActionId={pendingWorkflowActionId}
         />
       )}

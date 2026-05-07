@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use axum::{
     Extension, Json,
+    body::Bytes,
     extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Json as ResponseJson, Response},
@@ -17,7 +18,7 @@ use db::models::{
     workflow_step::WorkflowStep,
     workflow_transcript::WorkflowTranscript,
     workflow_types::{
-        WorkflowExecutionStatus, WorkflowPlanStatus, WorkflowRevisionEditor,
+        WorkflowExecutionStatus, WorkflowPlanJson, WorkflowPlanStatus, WorkflowRevisionEditor,
         WorkflowValidationStatus,
     },
 };
@@ -382,10 +383,31 @@ pub struct ExecutePlanResponse {
     pub execution_id: Uuid,
 }
 
+#[derive(Debug, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutePlanReviewOverride {
+    #[serde(alias = "stepKey", alias = "id")]
+    pub step_id: String,
+    #[serde(default)]
+    pub lead_review: Option<bool>,
+    #[serde(default)]
+    pub user_review: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutePlanRequest {
+    #[serde(default)]
+    pub plan: Option<WorkflowPlanJson>,
+    #[serde(default)]
+    pub step_review_overrides: Vec<ExecutePlanReviewOverride>,
+}
+
 pub async fn execute_plan(
     Extension(session): Extension<ChatSession>,
     State(deployment): State<DeploymentImpl>,
     axum::extract::Path((_session_id, plan_id)): axum::extract::Path<(Uuid, Uuid)>,
+    body: Bytes,
 ) -> Result<Response, ApiError> {
     let pool = &deployment.db().pool;
 
@@ -397,6 +419,11 @@ pub async fn execute_plan(
         return Err(ApiError::BadRequest(
             "Plan not found in this session.".to_string(),
         ));
+    }
+
+    let payload = parse_optional_execute_plan_request(&body)?;
+    if let Some(payload) = payload {
+        apply_execute_plan_review_overrides(pool, &session, &plan, payload).await?;
     }
 
     let bootstrap = WorkflowOrchestrator::execute_plan(pool, deployment.chat_runner(), plan_id)
@@ -427,6 +454,18 @@ pub async fn execute_plan(
         )),
     )
         .into_response())
+}
+
+fn parse_optional_execute_plan_request(
+    body: &Bytes,
+) -> Result<Option<ExecutePlanRequest>, ApiError> {
+    if body.iter().all(|byte| byte.is_ascii_whitespace()) {
+        return Ok(None);
+    }
+
+    serde_json::from_slice::<ExecutePlanRequest>(body)
+        .map(Some)
+        .map_err(|err| ApiError::BadRequest(format!("Invalid execute plan payload: {err}")))
 }
 
 // -----------------------------------------------------------------------
@@ -746,6 +785,145 @@ pub async fn retry_step(
         )),
     )
         .into_response())
+}
+
+async fn apply_execute_plan_review_overrides(
+    pool: &sqlx::SqlitePool,
+    session: &ChatSession,
+    plan: &WorkflowPlan,
+    payload: ExecutePlanRequest,
+) -> Result<WorkflowPlan, ApiError> {
+    let overrides = collect_execute_plan_review_overrides(payload);
+    if overrides.is_empty() {
+        return Ok(plan.clone());
+    }
+
+    let latest_revision = WorkflowPlanRevision::find_latest_by_plan(pool, plan.id)
+        .await?
+        .ok_or_else(|| ApiError::BadRequest("Plan revision not found.".to_string()))?;
+    let mut plan_json: WorkflowPlanJson = serde_json::from_str(&latest_revision.plan_json)
+        .map_err(|err| {
+            ApiError::BadRequest(format!(
+                "Plan revision contains invalid workflow JSON: {err}"
+            ))
+        })?;
+
+    let mut changed = false;
+    for node in &mut plan_json.nodes {
+        let Some(override_item) = overrides.get(&node.id) else {
+            continue;
+        };
+
+        if let Some(lead_review) = override_item.lead_review {
+            if node.data.lead_review != Some(lead_review) {
+                node.data.lead_review = Some(lead_review);
+                changed = true;
+            }
+        }
+        if let Some(user_review) = override_item.user_review {
+            if node.data.user_review != Some(user_review) {
+                node.data.user_review = Some(user_review);
+                changed = true;
+            }
+        }
+    }
+
+    if !changed {
+        return Ok(plan.clone());
+    }
+
+    let session_agents = ChatSessionAgent::find_all_for_session(pool, session.id).await?;
+    let agents = load_agents_for_route(pool, &session_agents).await?;
+    let valid_agent_ids = agents
+        .iter()
+        .map(|agent| agent.id.to_string())
+        .collect::<Vec<_>>();
+    let validation = workflow_validator::validate_plan(&plan_json, &valid_agent_ids);
+    if !validation.is_valid {
+        let validation_message = validation
+            .errors
+            .iter()
+            .map(|error| format!("{}: {}", error.field, error.message))
+            .collect::<Vec<_>>()
+            .join("; ");
+        return Err(ApiError::BadRequest(validation_message));
+    }
+
+    let plan_string = serde_json::to_string(&plan_json).map_err(|err| {
+        ApiError::BadRequest(format!("Failed to serialize workflow plan JSON: {err}"))
+    })?;
+    let plan_hash = WorkflowCompiler::compute_hash(&plan_json);
+    let plan_schema_version = plan_json
+        .plan_schema_version()
+        .map_err(ApiError::BadRequest)?;
+
+    let revision = WorkflowPlanRevision::create(
+        pool,
+        &CreateWorkflowPlanRevision {
+            plan_id: plan.id,
+            revision_no: latest_revision.revision_no + 1,
+            edited_by: WorkflowRevisionEditor::System,
+            editor_session_agent_id: None,
+            reason: Some("execute-plan-review-overrides".to_string()),
+            plan_json: plan_string.clone(),
+            plan_hash: plan_hash.clone(),
+            validation_status: WorkflowValidationStatus::Valid,
+            validation_errors_json: None,
+        },
+        Uuid::new_v4(),
+    )
+    .await?;
+
+    let updated_plan = WorkflowPlan::update_plan_json(
+        pool,
+        plan.id,
+        &plan_json.title,
+        Some(plan_json.goal.clone()),
+        &plan_string,
+        plan_schema_version,
+        &plan_hash,
+        WorkflowValidationStatus::Valid,
+        None,
+    )
+    .await?;
+
+    tracing::info!(
+        plan_id = %plan.id,
+        revision_id = %revision.id,
+        "applied workflow plan review overrides before execution"
+    );
+
+    Ok(updated_plan)
+}
+
+fn collect_execute_plan_review_overrides(
+    payload: ExecutePlanRequest,
+) -> HashMap<String, ExecutePlanReviewOverride> {
+    let mut overrides = HashMap::new();
+    if let Some(plan) = payload.plan {
+        for node in plan.nodes {
+            if node.data.lead_review.is_none() && node.data.user_review.is_none() {
+                continue;
+            }
+            overrides.insert(
+                node.id.clone(),
+                ExecutePlanReviewOverride {
+                    step_id: node.id,
+                    lead_review: node.data.lead_review,
+                    user_review: node.data.user_review,
+                },
+            );
+        }
+    }
+
+    for override_item in payload.step_review_overrides {
+        if override_item.lead_review.is_none() && override_item.user_review.is_none() {
+            continue;
+        }
+        overrides.insert(override_item.step_id.clone(), override_item);
+    }
+
+    overrides
 }
 
 async fn resolve_step_action(

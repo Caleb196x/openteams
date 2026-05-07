@@ -7,49 +7,34 @@ import {
 } from '@phosphor-icons/react';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { WorkflowCardData, WorkflowCardLoopData } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { isRetryableWorkflowStepStatus } from './workflowControlContract';
+import {
+  workflowLatestReviewFeedback,
+  workflowLatestReviewLabel,
+  workflowLoopStatusMeta,
+  workflowReviewPhaseMeta,
+  workflowReviewVerdictMeta,
+  workflowStatusLabel,
+  workflowStatusTone,
+} from './workflowStepPresentation';
 
-type WorkflowGraphStep = {
-  id: string;
-  step_key: string;
-  title: string;
-  step_type: string;
-  status: string;
-  agent_name?: string | null;
-  summary_text?: string | null;
-  content?: string | null;
-};
-
-type WorkflowGraphNode = {
-  id: string;
-  position: { x: number; y: number };
-  data: {
-    stepType: string;
-    title: string;
-    instructions: string;
-    agentId?: string | null;
-    status?: string | null;
-  };
-};
-
-type WorkflowGraphAgent = {
-  session_agent_id: string;
-  workflow_agent_session_id?: string | null;
-  agent_id: string;
-  name: string;
-};
-
-type WorkflowGraphEdge = {
-  id: string;
-  source: string;
-  target: string;
-};
+type WorkflowGraphStep = WorkflowCardData['steps'][number];
+type WorkflowGraphNode = WorkflowCardData['plan']['nodes'][number];
+type WorkflowGraphAgent = NonNullable<WorkflowCardData['agents']>[number];
+type WorkflowGraphEdge = WorkflowCardData['plan']['edges'][number];
+type WorkflowGraphLoop = WorkflowCardLoopData;
+type WorkflowGraphPlanLoop = NonNullable<
+  WorkflowCardData['plan']['loops']
+>[number];
 
 type WorkflowGraphBoardProps = {
   nodes: WorkflowGraphNode[];
   edges: WorkflowGraphEdge[];
   steps: WorkflowGraphStep[];
+  loops?: WorkflowGraphLoop[];
+  planLoops?: WorkflowGraphPlanLoop[] | null;
   agents?: WorkflowGraphAgent[];
   selectedStepId?: string | null;
   onSelectStep?: (id: string) => void;
@@ -74,72 +59,23 @@ type RenderEdge = {
   path: string;
 };
 
+type LoopRegion = {
+  id: string;
+  loop: WorkflowGraphLoop | WorkflowGraphPlanLoop;
+  loopKey: string;
+  status: string | null;
+  userReviewRequired: boolean;
+  rejectionReason: string | null;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  containsSelectedStep: boolean;
+};
+
 const MIN_NODE_SCALE = 0.82;
 const MAX_NODE_SCALE = 1.36;
 const NODE_SCALE_STEP = 0.09;
-
-function statusTone(status?: string | null, selected?: boolean) {
-  const base = (() => {
-    switch (status) {
-      case 'completed':
-        return {
-          badge: 'bg-[#DCFCE7] text-[#166534]',
-          border: '#16A34A',
-          accent: 'rgba(34,197,94,0.18)',
-          glow: 'shadow-[0_20px_40px_rgba(34,197,94,0.10)]',
-        };
-      case 'running':
-        return {
-          badge: 'bg-[#DBEAFE] text-[#1D4ED8]',
-          border: '#2563EB',
-          accent: 'rgba(59,130,246,0.18)',
-          glow: 'shadow-[0_20px_40px_rgba(37,99,235,0.14)]',
-        };
-      case 'failed':
-      case 'interrupted':
-        return {
-          badge: 'bg-[#FEE2E2] text-[#991B1B]',
-          border: '#DC2626',
-          accent: 'rgba(239,68,68,0.18)',
-          glow: 'shadow-[0_20px_40px_rgba(220,38,38,0.12)]',
-        };
-      case 'interrupt_requested':
-        return {
-          badge: 'bg-[#FEF3C7] text-[#92400E]',
-          border: '#D97706',
-          accent: 'rgba(245,158,11,0.18)',
-          glow: 'shadow-[0_20px_40px_rgba(217,119,6,0.12)]',
-        };
-      case 'ready':
-        return {
-          badge: 'bg-[#FEF3C7] text-[#92400E]',
-          border: '#D97706',
-          accent: 'rgba(245,158,11,0.16)',
-          glow: 'shadow-[0_20px_40px_rgba(217,119,6,0.12)]',
-        };
-      case 'waiting_input':
-      case 'waiting_review':
-        return {
-          badge: 'bg-[#E0E7FF] text-[#4338CA]',
-          border: '#6366F1',
-          accent: 'rgba(99,102,241,0.16)',
-          glow: 'shadow-[0_20px_40px_rgba(99,102,241,0.12)]',
-        };
-      default:
-        return {
-          badge: 'bg-[#E2E8F0] text-[#334155]',
-          border: '#CBD5E1',
-          accent: 'rgba(148,163,184,0.14)',
-          glow: 'shadow-[0_16px_34px_rgba(15,23,42,0.08)]',
-        };
-    }
-  })();
-
-  return {
-    ...base,
-    border: selected ? '#1D4ED8' : base.border,
-  };
-}
 
 function layoutGraph(
   nodes: WorkflowGraphNode[],
@@ -152,8 +88,8 @@ function layoutGraph(
     return null;
   }
 
-  const cardWidth = Math.round((compact ? 184 : 208) * nodeScale);
-  const cardHeight = Math.round((compact ? 104 : 118) * nodeScale);
+  const cardWidth = Math.round((compact ? 198 : 224) * nodeScale);
+  const cardHeight = Math.round((compact ? 156 : 176) * nodeScale);
   const horizontalGap = Math.round((compact ? 44 : 60) * nodeScale);
   const verticalGap = Math.round((compact ? 18 : 24) * nodeScale);
   const paddingX = Math.round((compact ? 24 : 36) * nodeScale);
@@ -369,10 +305,119 @@ function clampNodeScale(value: number) {
   return Math.min(MAX_NODE_SCALE, Math.max(MIN_NODE_SCALE, value));
 }
 
+function buildLoopRegions({
+  loops,
+  planLoops,
+  steps,
+  layoutNodes,
+  cardWidth,
+  cardHeight,
+  selectedStepId,
+}: {
+  loops: WorkflowGraphLoop[];
+  planLoops: WorkflowGraphPlanLoop[];
+  steps: WorkflowGraphStep[];
+  layoutNodes: LayoutNode[];
+  cardWidth: number;
+  cardHeight: number;
+  selectedStepId?: string | null;
+}): LoopRegion[] {
+  const stepById = new Map(steps.map((step) => [step.id, step]));
+  const layoutNodeById = new Map(layoutNodes.map((node) => [node.id, node]));
+  const runtimeLoopKeys = new Set(loops.map((loop) => loop.loop_key));
+  const loopEntries = [
+    ...loops.map((loop) => ({
+      id: loop.id,
+      loop,
+      loopKey: loop.loop_key,
+      status: loop.status,
+      userReviewRequired: loop.user_review_required,
+      rejectionReason: loop.rejection_reason,
+      memberStepIds: loop.member_step_ids,
+      memberStepKeys: [] as string[],
+      reviewStepId: loop.review_step_id,
+      reviewStepKey: null as string | null,
+    })),
+    ...planLoops
+      .filter((loop) => !runtimeLoopKeys.has(loop.loop_key))
+      .map((loop) => ({
+        id: loop.loop_key,
+        loop,
+        loopKey: loop.loop_key,
+        status: null,
+        userReviewRequired: loop.user_review_required,
+        rejectionReason: null,
+        memberStepIds: [] as string[],
+        memberStepKeys: loop.member_step_keys,
+        reviewStepId: null as string | null,
+        reviewStepKey: loop.review_step_key,
+      })),
+  ];
+
+  return loopEntries
+    .map((entry) => {
+      const nodeIdsFromStepIds = [...entry.memberStepIds, entry.reviewStepId]
+        .filter((value): value is string => !!value)
+        .map((stepId) => stepById.get(stepId)?.step_key ?? null)
+        .filter((value): value is string => !!value);
+      const nodeIds = [
+        ...nodeIdsFromStepIds,
+        ...entry.memberStepKeys,
+        entry.reviewStepKey,
+      ]
+        .filter((value): value is string => !!value)
+        .filter((value, index, values) => values.indexOf(value) === index);
+
+      const relatedNodes = nodeIds
+        .map((nodeId) => layoutNodeById.get(nodeId) ?? null)
+        .filter((node): node is LayoutNode => !!node);
+
+      if (relatedNodes.length === 0) {
+        return null;
+      }
+
+      const minX = Math.min(...relatedNodes.map((node) => node.x));
+      const maxX = Math.max(...relatedNodes.map((node) => node.x + cardWidth));
+      const minY = Math.min(...relatedNodes.map((node) => node.y));
+      const maxY = Math.max(...relatedNodes.map((node) => node.y + cardHeight));
+      const left = Math.max(minX - 16, 8);
+      const top = Math.max(minY - 32, 8);
+      const right = maxX + 16;
+      const bottom = maxY + 16;
+      const selectedStep =
+        selectedStepId != null
+          ? steps.find((step) => step.step_key === selectedStepId)
+          : null;
+
+      return {
+        id: entry.id,
+        loop: entry.loop,
+        loopKey: entry.loopKey,
+        status: entry.status,
+        userReviewRequired: entry.userReviewRequired,
+        rejectionReason: entry.rejectionReason,
+        left,
+        top,
+        width: right - left,
+        height: bottom - top,
+        containsSelectedStep:
+          !!selectedStep &&
+          (entry.memberStepIds.includes(selectedStep.id) ||
+            entry.reviewStepId === selectedStep.id ||
+            entry.memberStepKeys.includes(selectedStep.step_key) ||
+            entry.reviewStepKey === selectedStep.step_key),
+      } satisfies LoopRegion;
+    })
+    .filter((loop): loop is LoopRegion => !!loop)
+    .sort((left, right) => right.width * right.height - left.width * left.height);
+}
+
 export function WorkflowGraphBoard({
   nodes,
   edges,
   steps,
+  loops = [],
+  planLoops = [],
   agents = [],
   selectedStepId = null,
   onSelectStep,
@@ -488,6 +533,21 @@ export function WorkflowGraphBoard({
 
     return next;
   }, [compact, edges, layout, nodeById]);
+  const loopRegions = useMemo(() => {
+    if (!layout || (loops.length === 0 && (planLoops?.length ?? 0) === 0)) {
+      return [];
+    }
+
+    return buildLoopRegions({
+      loops,
+      planLoops: planLoops ?? [],
+      steps,
+      layoutNodes: layout.nodes,
+      cardWidth: layout.cardWidth,
+      cardHeight: layout.cardHeight,
+      selectedStepId,
+    });
+  }, [layout, loops, planLoops, selectedStepId, steps]);
 
   if (!layout) {
     return null;
@@ -551,8 +611,61 @@ export function WorkflowGraphBoard({
         className="relative"
         style={{ width: layout.width, height: layout.height }}
       >
+        {loopRegions.map((region) => {
+          const loopTone = workflowLoopStatusMeta(region.status);
+          const rejectionReason = region.rejectionReason?.trim() || null;
+
+          return (
+            <div
+              key={region.id}
+              className={cn(
+                'pointer-events-none absolute rounded-[26px] border border-dashed backdrop-blur-[1px]',
+                loopTone.surfaceClass,
+                region.containsSelectedStep && 'ring-2 ring-[#60A5FA]/40'
+              )}
+              style={{
+                left: region.left,
+                top: region.top,
+                width: region.width,
+                height: region.height,
+                borderColor: loopTone.borderColor,
+              }}
+            >
+              <div className="flex flex-wrap items-start gap-2 px-3 pb-2 pt-3">
+                <span className="rounded-full border border-white/70 bg-white/90 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[#0F172A] shadow-sm dark:border-[#1E293B] dark:bg-[rgba(15,23,42,0.92)] dark:text-white">
+                  {region.loopKey}
+                </span>
+                <span
+                  className={cn(
+                    'rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em]',
+                    loopTone.badgeClass
+                  )}
+                >
+                  {loopTone.label}
+                </span>
+                {region.userReviewRequired && (
+                  <span className="rounded-full border border-[#DDD6FE] bg-[#F5F3FF] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[#6D28D9]">
+                    User Review
+                  </span>
+                )}
+              </div>
+              {rejectionReason && (
+                <div
+                  className={cn(
+                    'line-clamp-2 px-3 pb-3 text-[11px] leading-5',
+                    compact ? 'max-w-[220px]' : 'max-w-[360px]',
+                    loopTone.textClass
+                  )}
+                  title={rejectionReason}
+                >
+                  {rejectionReason}
+                </div>
+              )}
+            </div>
+          );
+        })}
         <svg
-          className="pointer-events-none absolute inset-0"
+          className="pointer-events-none absolute inset-0 z-[1]"
           width={layout.width}
           height={layout.height}
           viewBox={`0 0 ${layout.width} ${layout.height}`}
@@ -607,10 +720,17 @@ export function WorkflowGraphBoard({
             isRetryableWorkflowStepStatus(step?.status);
           const isRetryPending =
             !!retryStepId && pendingActionId === retryStepId;
-          const tone = statusTone(
+          const tone = workflowStatusTone(
             step?.status ?? node.data.status,
             node.id === selectedStepId
           );
+          const reviewPhase = workflowReviewPhaseMeta(step?.review_phase);
+          const latestReview = step?.latest_review ?? null;
+          const latestReviewTone = workflowReviewVerdictMeta(
+            latestReview?.verdict
+          );
+          const latestReviewLabel = workflowLatestReviewLabel(latestReview);
+          const latestReviewFeedback = workflowLatestReviewFeedback(latestReview);
           const stepAgentLabel = step?.agent_name?.trim();
           const agentName =
             (stepAgentLabel
@@ -645,10 +765,10 @@ export function WorkflowGraphBoard({
                 setHoveredNodeId((prev) => (prev === node.id ? null : prev))
               }
               className={cn(
-                'absolute flex flex-col rounded-[26px] border bg-white/92 text-left transition-all duration-200 hover:-translate-y-0.5 hover:bg-white dark:bg-[rgba(15,23,42,0.92)] dark:hover:bg-[rgba(15,23,42,0.98)]',
+                'absolute z-[2] flex flex-col rounded-[26px] border bg-white/92 text-left transition-all duration-200 hover:-translate-y-0.5 hover:bg-white dark:bg-[rgba(15,23,42,0.92)] dark:hover:bg-[rgba(15,23,42,0.98)]',
                 compact ? 'p-3' : 'p-3.5',
                 onSelectStep && 'cursor-pointer',
-                tone.glow,
+                tone.glowClass,
                 (node.id === selectedStepId || node.id === hoveredNodeId) &&
                   'ring-2 ring-[#60A5FA]/70'
               )}
@@ -657,8 +777,8 @@ export function WorkflowGraphBoard({
                 top: node.y,
                 width: layout.cardWidth,
                 height: layout.cardHeight,
-                borderColor: tone.border,
-                boxShadow: `inset 0 1px 0 rgba(255,255,255,0.7), 0 0 0 1px ${tone.accent}`,
+                borderColor: tone.borderColor,
+                boxShadow: `inset 0 1px 0 rgba(255,255,255,0.7), 0 0 0 1px ${tone.accentColor}`,
               }}
             >
               <div className="flex items-start justify-between gap-2">
@@ -670,12 +790,49 @@ export function WorkflowGraphBoard({
                 <span
                   className={cn(
                     'shrink-0 rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-[0.16em]',
-                    tone.badge
+                    tone.badgeClass
                   )}
                 >
-                  {step?.status ?? node.data.status ?? 'pending'}
+                  {workflowStatusLabel(step?.status ?? node.data.status)}
                 </span>
               </div>
+
+              {(reviewPhase || latestReviewLabel) && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {reviewPhase && (
+                    <span
+                      className={cn(
+                        'rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]',
+                        reviewPhase.badgeClass
+                      )}
+                    >
+                      {reviewPhase.label}
+                    </span>
+                  )}
+                  {latestReviewLabel && (
+                    <span
+                      className={cn(
+                        'rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]',
+                        latestReviewTone.badgeClass
+                      )}
+                    >
+                      {latestReviewLabel}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {latestReviewFeedback && (
+                <div
+                  className={cn(
+                    'mt-2 line-clamp-2 text-[11px] leading-5',
+                    latestReviewTone.textClass
+                  )}
+                  title={latestReviewFeedback}
+                >
+                  {latestReviewFeedback}
+                </div>
+              )}
 
               <div className="mt-auto flex items-end justify-between gap-2">
                 <div className="min-w-0 flex-1">

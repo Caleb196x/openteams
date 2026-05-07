@@ -433,6 +433,10 @@ mod tests {
                         interruptible: true,
                         max_retry: None,
                         status: None,
+                        loop_key: None,
+                        review_scope: None,
+                        lead_review: None,
+                        user_review: None,
                     },
                 },
                 WorkflowPlanNode {
@@ -449,6 +453,10 @@ mod tests {
                         interruptible: true,
                         max_retry: None,
                         status: None,
+                        loop_key: None,
+                        review_scope: None,
+                        lead_review: None,
+                        user_review: None,
                     },
                 },
             ],
@@ -459,6 +467,7 @@ mod tests {
                 edge_type: Some("workflowEdge".into()),
                 data: None,
             }],
+            loops: None,
             policies: None,
         }
     }
@@ -558,6 +567,10 @@ mod tests {
                 interruptible: true,
                 max_retry: None,
                 status: None,
+                loop_key: None,
+                review_scope: None,
+                lead_review: None,
+                user_review: None,
             },
         });
         let result = validate_semantics(&plan, &valid_agents());
@@ -581,6 +594,10 @@ mod tests {
                 interruptible: true,
                 max_retry: None,
                 status: None,
+                loop_key: None,
+                review_scope: None,
+                lead_review: None,
+                user_review: None,
             },
         });
         plan.edges.push(WorkflowPlanEdge {

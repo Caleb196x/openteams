@@ -142,6 +142,9 @@ pub enum WorkflowStepStatus {
     Pending,
     Ready,
     Running,
+    #[sqlx(rename = "pre_completed")]
+    #[serde(rename = "pre_completed")]
+    PreCompleted,
     #[sqlx(rename = "interrupt_requested")]
     #[serde(rename = "interrupt_requested")]
     InterruptRequested,
@@ -153,10 +156,44 @@ pub enum WorkflowStepStatus {
     #[serde(rename = "waiting_review")]
     WaitingReview,
     Blocked,
+    Revising,
     Completed,
     Failed,
     Skipped,
     Cancelled,
+}
+
+#[derive(Debug, Clone, Type, Serialize, Deserialize, PartialEq, TS)]
+#[sqlx(type_name = "workflow_loop_status", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
+#[ts(use_ts_enum)]
+pub enum WorkflowLoopStatus {
+    Pending,
+    Running,
+    WaitingReview,
+    Passed,
+    Rejected,
+    WaitingUser,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone, Type, Serialize, Deserialize, PartialEq, TS)]
+#[sqlx(type_name = "review_verdict", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
+#[ts(use_ts_enum)]
+pub enum ReviewVerdict {
+    Approved,
+    Rejected,
+}
+
+#[derive(Debug, Clone, Type, Serialize, Deserialize, PartialEq, TS)]
+#[sqlx(type_name = "reviewer_type", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
+#[ts(use_ts_enum)]
+pub enum ReviewerType {
+    Lead,
+    User,
 }
 
 #[derive(Debug, Clone, Type, Serialize, Deserialize, PartialEq, TS)]
@@ -223,6 +260,18 @@ pub enum WorkflowEventType {
     PlanRecompiled,
     StepStatusChanged,
     AgentSessionStateChanged,
+    StepLeadReviewStarted,
+    StepLeadReviewPassed,
+    StepLeadReviewRejected,
+    StepUserReviewStarted,
+    StepUserReviewPassed,
+    StepUserReviewRejected,
+    LoopStarted,
+    LoopRetrying,
+    LoopPassed,
+    LoopFailed,
+    IterationFeedbackReceived,
+    IterationNewPlanGenerated,
 }
 
 // ---------------------------------------------------------------------------
@@ -242,6 +291,8 @@ pub struct WorkflowPlanJson {
     pub viewport: Option<WorkflowPlanViewport>,
     pub nodes: Vec<WorkflowPlanNode>,
     pub edges: Vec<WorkflowPlanEdge>,
+    #[serde(default)]
+    pub loops: Option<Vec<WorkflowLoopDef>>,
     #[serde(default)]
     pub policies: Option<WorkflowPlanPolicies>,
 }
@@ -349,6 +400,26 @@ pub struct WorkflowNodeData {
     pub max_retry: Option<u32>,
     #[serde(default)]
     pub status: Option<String>,
+    #[serde(default)]
+    pub loop_key: Option<String>,
+    #[serde(default)]
+    pub review_scope: Option<Vec<String>>,
+    #[serde(default)]
+    pub lead_review: Option<bool>,
+    #[serde(default)]
+    pub user_review: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowLoopDef {
+    pub loop_key: String,
+    pub member_steps: Vec<String>,
+    pub review_step: String,
+    #[serde(default)]
+    pub max_retry: Option<u32>,
+    #[serde(default)]
+    pub user_review_required: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
@@ -388,16 +459,18 @@ pub struct WorkflowPlanPolicies {
 // Compiled graph DTOs
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 pub struct CompiledGraph {
     pub plan_hash: String,
     pub compiled_graph_hash: String,
     pub steps: Vec<CompiledStep>,
     pub edges: Vec<CompiledEdge>,
     pub ready_step_keys: Vec<String>,
+    #[serde(default)]
+    pub loops: Option<Vec<CompiledLoopDef>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 pub struct CompiledStep {
     pub step_key: String,
     pub step_type: WorkflowStepType,
@@ -409,12 +482,31 @@ pub struct CompiledStep {
     pub interruptible: bool,
     pub max_retry: u32,
     pub display_order: i32,
+    #[serde(default)]
+    pub loop_key: Option<String>,
+    #[serde(default)]
+    pub review_scope: Option<Vec<String>>,
+    #[serde(default)]
+    pub lead_review: Option<bool>,
+    #[serde(default)]
+    pub user_review: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 pub struct CompiledEdge {
     pub edge_id: String,
     pub from_step_key: String,
     pub to_step_key: String,
     pub edge_kind: WorkflowEdgeKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+pub struct CompiledLoopDef {
+    pub loop_key: String,
+    pub member_step_keys: Vec<String>,
+    pub review_step_key: String,
+    #[serde(default)]
+    pub review_scope_step_keys: Vec<String>,
+    pub max_retry: u32,
+    pub user_review_required: bool,
 }

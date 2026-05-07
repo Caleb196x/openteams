@@ -10,10 +10,22 @@ import {
   PauseIcon,
   StopIcon,
 } from '@phosphor-icons/react';
+import type { WorkflowCardData } from '@/lib/api';
 import { chatApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { ChatMarkdown } from '@/components/ui-new/primitives/conversation/ChatMarkdown';
+import { WorkflowIterationFeedbackCard } from './WorkflowIterationFeedbackCard';
+import { WorkflowPendingReviewCard } from './WorkflowPendingReviewCard';
 import { WorkflowGraphBoard } from './WorkflowGraphBoard';
+import {
+  workflowLatestReviewFeedback,
+  workflowLatestReviewLabel,
+  workflowLoopStatusMeta,
+  workflowReviewPhaseMeta,
+  workflowReviewVerdictMeta,
+  workflowStatusBadgeClass,
+  workflowStatusLabel,
+} from './workflowStepPresentation';
 import {
   parseWorkflowTranscriptMeta,
   toWorkflowFinalReviewAction,
@@ -25,66 +37,14 @@ import {
   isWorkflowExecutionRecompiling,
 } from './workflowControlContract';
 
-type WorkflowCardStep = {
-  id: string;
-  step_key: string;
-  title: string;
-  step_type: string;
-  status: string;
-  agent_name?: string | null;
-  summary_text?: string | null;
-  content?: string | null;
-};
+type WorkflowCardStep = WorkflowCardData['steps'][number];
+type WorkflowCardAgent = NonNullable<WorkflowCardData['agents']>[number];
 
-type WorkflowCardAgent = {
-  session_agent_id: string;
-  workflow_agent_session_id?: string | null;
-  agent_id: string;
-  name: string;
-};
-
-type WorkflowCardNode = {
-  id: string;
-  position: { x: number; y: number };
-  data: {
-    stepType: string;
-    title: string;
-    instructions: string;
-    agentId?: string | null;
-    status?: string | null;
-  };
-};
-
-type WorkflowCardEdge = {
-  id: string;
-  source: string;
-  target: string;
-};
-
-export type WorkflowWindowProjection = {
-  execution_id?: string | null;
-  plan_id?: string;
-  title: string;
-  goal: string;
-  state: string;
-  execution_status: string;
-  error_message?: string | null;
-  completed_step_count: number;
-  total_step_count: number;
-  result_summary?: string | null;
-  outputs: string[];
-  steps: WorkflowCardStep[];
-  agents?: WorkflowCardAgent[];
-  plan: {
-    nodes: WorkflowCardNode[];
-    edges: WorkflowCardEdge[];
-    viewport?: { x?: number; y?: number; zoom?: number };
-  };
-  validation_errors?: string | null;
-};
+export type WorkflowWindowProjection = WorkflowCardData;
 
 type WorkflowTranscriptEntry = {
   id: string;
+  round_id?: string | null;
   step_id?: string | null;
   step_key?: string | null;
   workflow_agent_session_id?: string | null;
@@ -126,6 +86,11 @@ const WORKFLOW_TERMINAL_STEP_STATUSES = new Set([
 const WORKFLOW_FAILURE_STEP_STATUSES = new Set([
   'failed',
   'interrupted',
+  'cancelled',
+]);
+const REVIEW_READY_STEP_STATUSES = new Set([
+  'completed',
+  'skipped',
   'cancelled',
 ]);
 
@@ -449,6 +414,21 @@ export type WorkflowWindowProps = {
     transcriptId: string,
     action: 'accepted' | 'rejected'
   ) => void;
+  onRespondPendingReview?: (
+    reviewId: string,
+    action: 'approve' | 'reject',
+    feedback?: string
+  ) => void;
+  onSubmitIterationFeedback?: (payload: {
+    executionId: string;
+    action: 'accept' | 'reject';
+    feedback?: {
+      what_wrong: string;
+      expected: string;
+      priority: 'high' | 'medium' | 'low';
+      additional_notes?: string;
+    };
+  }) => void;
   pendingActionId?: string | null;
 };
 
@@ -708,27 +688,6 @@ export function InputRequestCard({
       </div>
     </div>
   );
-}
-
-function workflowStatusBadgeClass(status?: string | null) {
-  switch (status) {
-    case 'completed':
-      return 'border-[#86EFAC] bg-[#DCFCE7] text-[#166534]';
-    case 'running':
-      return 'border-[#93C5FD] bg-[#DBEAFE] text-[#1D4ED8]';
-    case 'failed':
-    case 'interrupted':
-      return 'border-[#FCA5A5] bg-[#FEE2E2] text-[#991B1B]';
-    case 'interrupt_requested':
-      return 'border-[#FCD34D] bg-[#FEF3C7] text-[#92400E]';
-    case 'ready':
-      return 'border-[#FCD34D] bg-[#FEF3C7] text-[#92400E]';
-    case 'waiting_input':
-    case 'waiting_review':
-      return 'border-[#C7D2FE] bg-[#E0E7FF] text-[#4338CA]';
-    default:
-      return 'border-[#CBD5E1] bg-[#F1F5F9] text-[#334155]';
-  }
 }
 
 function WorkflowTranscriptFeed({
@@ -1043,6 +1002,8 @@ export function WorkflowWindow({
   onSubmitStepInput,
   onApproval,
   onResolveFinalReview,
+  onRespondPendingReview,
+  onSubmitIterationFeedback,
   pendingActionId,
 }: WorkflowWindowProps) {
   const { t } = useTranslation('chat');
@@ -1141,6 +1102,11 @@ export function WorkflowWindow({
     () => new Map(projection.plan.nodes.map((node) => [node.id, node])),
     [projection.plan.nodes]
   );
+  const workflowLoops = projection.loops ?? [];
+  const loopByKey = useMemo(
+    () => new Map(workflowLoops.map((loop) => [loop.loop_key, loop])),
+    [workflowLoops]
+  );
   const orderedActionableSteps = useMemo(
     () =>
       [...projection.steps].sort((left, right) => {
@@ -1148,13 +1114,16 @@ export function WorkflowWindow({
           switch (status) {
             case 'running':
               return 0;
+            case 'revising':
+              return 1;
             case 'waiting_input':
             case 'waiting_review':
-              return 1;
-            case 'failed':
+            case 'pre_completed':
               return 2;
-            case 'ready':
+            case 'failed':
               return 3;
+            case 'ready':
+              return 4;
             default:
               return 10;
           }
@@ -1368,6 +1337,21 @@ export function WorkflowWindow({
   }, [selectedAgent, selectedStep, selectedStepInputRequest]);
   const detailStep = projection.steps.find((s) => s.step_key === detailStepId);
   const detailStepNode = detailStepId ? planNodeById.get(detailStepId) : null;
+  const detailStepLoop = detailStep?.loop_key
+    ? (loopByKey.get(detailStep.loop_key) ?? null)
+    : null;
+  const detailStepLoopTone = workflowLoopStatusMeta(detailStepLoop?.status);
+  const detailStepReviewPhase = workflowReviewPhaseMeta(detailStep?.review_phase);
+  const detailStepLatestReview = detailStep?.latest_review ?? null;
+  const detailStepLatestReviewTone = workflowReviewVerdictMeta(
+    detailStepLatestReview?.verdict
+  );
+  const detailStepLatestReviewLabel = workflowLatestReviewLabel(
+    detailStepLatestReview
+  );
+  const detailStepLatestReviewFeedback = workflowLatestReviewFeedback(
+    detailStepLatestReview
+  );
   const detailAgentSessionId = detailStep?.agent_name
     ? (agentSessionIdByLookup.get(detailStep.agent_name.trim()) ?? leadAgentId)
     : leadAgentId;
@@ -1500,6 +1484,7 @@ export function WorkflowWindow({
     const entries = detailStepTranscriptData ?? [];
     const remoteEntries = entries.map((entry) => ({
       id: entry.id,
+      round_id: entry.round_id,
       step_id: entry.step_id,
       step_key: entry.step_key,
       workflow_agent_session_id: entry.workflow_agent_session_id,
@@ -1548,6 +1533,14 @@ export function WorkflowWindow({
     () => toWorkflowFinalReviewAction(projection.execution_id, transcript),
     [projection.execution_id, transcript]
   );
+  const allStepViewsCompleted =
+    projection.steps.length > 0 &&
+    projection.steps.every((step) => REVIEW_READY_STEP_STATUSES.has(step.status));
+  const canReviewCurrentRound =
+    !!workflowFinalReviewAction ||
+    (allStepViewsCompleted &&
+      (projection.state === 'waiting' ||
+        projection.execution_status === 'waiting'));
   const handleSelectStep = useCallback(
     (id: string) => {
       const nextStep = stepByKey.get(id);
@@ -1680,6 +1673,8 @@ export function WorkflowWindow({
               nodes={projection.plan.nodes}
               edges={projection.plan.edges}
               steps={projection.steps}
+              loops={workflowLoops}
+              planLoops={projection.plan.loops}
               agents={agents}
               selectedStepId={selectedStepId}
               onSelectStep={handleSelectStep}
@@ -1753,6 +1748,47 @@ export function WorkflowWindow({
                 )}
               </div>
             </div>
+
+            {workflowLoops.length > 0 && (
+              <div className="mt-4 rounded-[22px] border border-white/70 bg-white/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] dark:border-[#243041] dark:bg-[rgba(15,23,42,0.78)]">
+                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#94A3B8]">
+                  Loop Overview
+                </div>
+                <div className="mt-3 grid gap-3 xl:grid-cols-2">
+                  {workflowLoops.map((loop) => {
+                    const loopTone = workflowLoopStatusMeta(loop.status);
+                    const rejectionReason = loop.rejection_reason?.trim() || null;
+
+                    return (
+                      <div
+                        key={loop.id}
+                        className="rounded-[18px] border p-3"
+                        style={{ borderColor: loopTone.borderColor }}
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-full border border-[#CBD5E1] bg-white px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[#0F172A] dark:border-[#334155] dark:bg-[rgba(15,23,42,0.86)] dark:text-white">
+                            {loop.loop_key}
+                          </span>
+                          <span
+                            className={cn(
+                              'rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.16em]',
+                              loopTone.badgeClass
+                            )}
+                          >
+                            {loopTone.label}
+                          </span>
+                        </div>
+                        {rejectionReason && (
+                          <div className={cn('mt-2 text-xs leading-5', loopTone.textClass)}>
+                            {rejectionReason}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Right pane: Panel */}
@@ -1801,6 +1837,21 @@ export function WorkflowWindow({
                 )}
                 <div className="flex min-h-0 flex-1 flex-col">
                   <div className="min-h-0 flex-1 overflow-auto px-5 pt-4 md:px-6">
+                    {projection.pending_review && (
+                      <div className="mb-5">
+                        <WorkflowPendingReviewCard
+                          pendingReview={projection.pending_review}
+                          pendingActionId={pendingActionId}
+                          onSubmit={(action, feedback) =>
+                            onRespondPendingReview?.(
+                              projection.pending_review!.review_id,
+                              action,
+                              feedback
+                            )
+                          }
+                        />
+                      </div>
+                    )}
                     {workflowFinalReviewAction && onResolveFinalReview && (
                       <div className="mb-5 flex gap-3">
                         <div className="mt-1 h-4 w-1 shrink-0 rounded-full bg-[#7C3AED]" />
@@ -1858,6 +1909,32 @@ export function WorkflowWindow({
                             </button>
                           </div>
                         </div>
+                      </div>
+                    )}
+                    {!projection.pending_review &&
+                      (projection.iteration_history.length > 0 ||
+                        workflowFinalReviewAction) && (
+                      <div className="mb-5">
+                        <WorkflowIterationFeedbackCard
+                          currentRound={projection.current_round}
+                          iterationHistory={projection.iteration_history}
+                          canReviewCurrentRound={canReviewCurrentRound}
+                          pendingActionId={pendingActionId}
+                          onSubmit={(payload) => {
+                            if (
+                              !projection.execution_id ||
+                              !onSubmitIterationFeedback
+                            ) {
+                              return;
+                            }
+
+                            onSubmitIterationFeedback({
+                              executionId: projection.execution_id,
+                              action: payload.action,
+                              feedback: payload.feedback,
+                            });
+                          }}
+                        />
                       </div>
                     )}
                     <WorkflowTranscriptFeed
@@ -1945,12 +2022,22 @@ export function WorkflowWindow({
                     </div>
                     <span
                       className={cn(
-                        'select-text rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em]',
-                        workflowStatusBadgeClass(detailStep.status)
-                      )}
+                          'select-text rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em]',
+                          workflowStatusBadgeClass(detailStep.status)
+                        )}
                     >
-                      {detailStep.status}
+                      {workflowStatusLabel(detailStep.status)}
                     </span>
+                    {detailStepReviewPhase && (
+                      <span
+                        className={cn(
+                          'select-text rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em]',
+                          detailStepReviewPhase.badgeClass
+                        )}
+                      >
+                        {detailStepReviewPhase.label}
+                      </span>
+                    )}
                     {detailStep.status === 'running' &&
                       (onInterruptStep || onStopStep) && (
                         <button
@@ -2063,9 +2150,99 @@ export function WorkflowWindow({
                             workflowStatusBadgeClass(detailStep.status)
                           )}
                         >
-                          {detailStep.status}
+                          {workflowStatusLabel(detailStep.status)}
                         </span>
                       </div>
+                    </div>
+                    <div className="rounded-[22px] border border-white/70 bg-white/82 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.68)] dark:border-[#243041] dark:bg-[rgba(15,23,42,0.72)]">
+                      <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#94A3B8]">
+                        Review Phase
+                      </div>
+                      <div className="mt-2">
+                        {detailStepReviewPhase ? (
+                          <span
+                            className={cn(
+                              'inline-flex select-text rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em]',
+                              detailStepReviewPhase.badgeClass
+                            )}
+                          >
+                            {detailStepReviewPhase.label}
+                          </span>
+                        ) : (
+                          <span className="select-text text-sm text-[#64748B] dark:text-[#94A3B8]">
+                            No active review phase
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="rounded-[22px] border border-white/70 bg-white/82 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.68)] dark:border-[#243041] dark:bg-[rgba(15,23,42,0.72)]">
+                      <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#94A3B8]">
+                        Latest Review
+                      </div>
+                      {detailStepLatestReviewLabel ? (
+                        <>
+                          <div className="mt-2">
+                            <span
+                              className={cn(
+                                'inline-flex select-text rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em]',
+                                detailStepLatestReviewTone.badgeClass
+                              )}
+                            >
+                              {detailStepLatestReviewLabel}
+                            </span>
+                          </div>
+                          {detailStepLatestReviewFeedback && (
+                            <div
+                              className={cn(
+                                'mt-2 whitespace-pre-wrap select-text text-sm leading-6',
+                                detailStepLatestReviewTone.textClass
+                              )}
+                            >
+                              {detailStepLatestReviewFeedback}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="mt-2 select-text text-sm text-[#64748B] dark:text-[#94A3B8]">
+                          No review recorded yet.
+                        </div>
+                      )}
+                    </div>
+                    <div className="rounded-[22px] border border-white/70 bg-white/82 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.68)] dark:border-[#243041] dark:bg-[rgba(15,23,42,0.72)]">
+                      <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#94A3B8]">
+                        Loop Context
+                      </div>
+                      {detailStepLoop ? (
+                        <>
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <span className="inline-flex select-text rounded-full border border-[#CBD5E1] bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-[#0F172A] dark:border-[#334155] dark:bg-[rgba(15,23,42,0.88)] dark:text-white">
+                              {detailStepLoop.loop_key}
+                            </span>
+                            <span
+                              className={cn(
+                                'inline-flex select-text rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em]',
+                                detailStepLoopTone.badgeClass
+                              )}
+                            >
+                              {detailStepLoopTone.label}
+                            </span>
+                          </div>
+                          {detailStepLoop.rejection_reason?.trim() && (
+                            <div
+                              className={cn(
+                                'mt-2 whitespace-pre-wrap select-text text-sm leading-6',
+                                detailStepLoopTone.textClass
+                              )}
+                            >
+                              {detailStepLoop.rejection_reason.trim()}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="mt-2 select-text text-sm text-[#64748B] dark:text-[#94A3B8]">
+                          This step is not currently assigned to a loop.
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

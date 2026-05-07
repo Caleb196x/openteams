@@ -72,8 +72,26 @@ const workflowPlan = {
 
 type WorkflowStepFixture = WorkflowCardData['steps'][number];
 
-function createStep(step: WorkflowStepFixture): WorkflowStepFixture {
-  return step;
+function createStep(
+  step: Omit<
+    WorkflowStepFixture,
+    'review_phase' | 'retry_count' | 'max_retry' | 'loop_key' | 'latest_review'
+  > &
+    Partial<
+      Pick<
+        WorkflowStepFixture,
+        'review_phase' | 'retry_count' | 'max_retry' | 'loop_key' | 'latest_review'
+      >
+    >
+): WorkflowStepFixture {
+  return {
+    review_phase: null,
+    retry_count: 0,
+    max_retry: 0,
+    loop_key: null,
+    latest_review: null,
+    ...step,
+  };
 }
 
 function createProjection(
@@ -98,12 +116,16 @@ function createProjection(
     total_step_count: 3,
     result_summary: null,
     outputs: [],
+    current_round: 1,
+    loops: [],
+    iteration_history: [],
     steps,
     agents: workflowAgents,
     plan: workflowPlan,
-    validation_errors: null,
-    ...rest,
-  };
+    pending_review: null,
+     validation_errors: null,
+     ...rest,
+   };
 }
 
 export const workflowProjectionFixtures = {
@@ -224,6 +246,20 @@ export const workflowProjectionFixtures = {
     error_message:
       'A running step was interrupted and needs an explicit retry.',
     completed_step_count: 1,
+    loops: [
+      {
+        id: 'loop-main',
+        loop_key: 'main_revision_loop',
+        status: 'rejected',
+        retry_count: 1,
+        max_retry: 2,
+        user_review_required: true,
+        rejection_reason:
+          'Lead reviewer requested another pass to tighten the empty-state copy.',
+        member_step_ids: ['step-update-controls'],
+        review_step_id: 'step-final-review',
+      },
+    ],
     steps: [
       createStep({
         id: 'step-collect-context',
@@ -241,6 +277,7 @@ export const workflowProjectionFixtures = {
         title: 'Update workflow controls',
         step_type: 'task',
         status: 'interrupted',
+        loop_key: 'main_revision_loop',
         agent_name: 'Lead',
         summary_text: 'Interrupted while applying UI fixes.',
         content: null,
@@ -251,6 +288,7 @@ export const workflowProjectionFixtures = {
         title: 'Final review',
         step_type: 'final_review',
         status: 'blocked',
+        loop_key: 'main_revision_loop',
         agent_name: 'Reviewer',
         summary_text: null,
         content: null,

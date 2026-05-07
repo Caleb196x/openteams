@@ -1,33 +1,45 @@
 //! Workflow Orchestrator 骨架
 //!
-//! Phase 1a 职责：
-//! - command handler: 接收 bootstrap 命令
-//! - state reducer: 集中管理执行/步骤/agent session 状态迁移
-//! - scheduler loop 骨架: 接口预留
+//! 核心职责：
+//! - command handler: 接收 bootstrap 命令并创建 execution 图
+//! - scheduler loop: 协调 step 与 loop 的执行
+//! - state reducer: 集中管理执行/步骤/agent session 状态迁移（见 `reducer`）
 //! - event projector: 审计事件由 reducer 自动写入
+//!
+//! 其余功能（projection 刷新、retry/resume、step 输入处理、review 流程、
+//! 计划/卡片创建、step executor 等）位于本目录下的同级子模块中。
 
 pub mod reducer;
 
-use std::collections::HashMap;
+mod plan_control;
+mod projection;
+mod retry_resume;
+mod review;
+mod step_executor;
+mod step_input;
+mod transcript_actions;
+
+#[cfg(test)]
+mod tests;
+
+use std::collections::{HashMap, HashSet};
 
 use chrono::Utc;
 use db::{
     DBService,
     models::{
         chat_agent::ChatAgent,
-        chat_message::{ChatMessage, ChatSenderType},
         chat_session::ChatSession,
         chat_session_agent::ChatSessionAgent,
-        chat_work_item::{ChatWorkItem, ChatWorkItemType},
         workflow_agent_session::{CreateWorkflowAgentSession, WorkflowAgentSession},
         workflow_event::{CreateWorkflowEvent, WorkflowEvent},
         workflow_execution::{CreateWorkflowExecution, WorkflowExecution},
-        workflow_plan::{CreateWorkflowPlan, WorkflowPlan},
-        workflow_plan_revision::{CreateWorkflowPlanRevision, WorkflowPlanRevision},
+        workflow_loop::{CreateWorkflowLoop, WorkflowLoop},
+        workflow_plan::WorkflowPlan,
+        workflow_plan_revision::WorkflowPlanRevision,
         workflow_round::{CreateWorkflowRound, WorkflowRound},
         workflow_step::{CreateWorkflowStep, WorkflowStep},
         workflow_step_edge::{CreateWorkflowStepEdge, WorkflowStepEdge},
-        workflow_transcript::{CreateWorkflowTranscript, WorkflowTranscript},
         workflow_types::*,
     },
 };
@@ -35,15 +47,10 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use super::{
-    chat,
     chat_runner::{ChatRunner, ChatRunnerError},
     workflow_compiler::WorkflowCompiler,
-    workflow_runtime::{
-        SummaryPayload, WorkflowRuntimeError, WorkflowStepProtocolMessage, WorkflowStepRunResult,
-        build_step_execution_prompt, build_workflow_card_projection, cancel_running_step,
-        parse_summary_payload, predecessor_summaries, run_workflow_step_agent_follow_up,
-        run_workflow_step_agent_prompt,
-    },
+    workflow_loop_executor::{LoopExecutor, LoopOutcome},
+    workflow_runtime::WorkflowRuntimeError,
 };
 
 /// Orchestrator 错误
@@ -73,6 +80,67 @@ impl From<reducer::TransitionError> for OrchestratorError {
     }
 }
 
+/// Bootstrap 结果
+#[derive(Debug)]
+pub struct BootstrapResult {
+    pub execution: WorkflowExecution,
+    pub round: Option<WorkflowRound>,
+    pub steps: Vec<WorkflowStep>,
+    pub edges: Vec<WorkflowStepEdge>,
+    pub agent_sessions: Vec<WorkflowAgentSession>,
+    pub events: Vec<WorkflowEvent>,
+    pub failed: bool,
+    pub failure_reason: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct ResolvedTranscriptAction {
+    pub transcript: db::models::workflow_transcript::WorkflowTranscript,
+    pub execution: WorkflowExecution,
+    pub should_wake_scheduler: bool,
+}
+
+#[derive(Debug)]
+pub struct IterationFeedbackOutcome {
+    pub execution: WorkflowExecution,
+    pub should_wake_scheduler: bool,
+}
+
+/// Outcome of a single step execution within the scheduler.
+/// Step-level state transitions are handled internally; execution-level
+/// transitions are deferred to the caller.
+pub(crate) enum StepOutcome {
+    /// Step completed with a final result
+    Completed,
+    /// Step parked waiting for user action (approval/permission/continue/input)
+    Parked,
+    /// Step failed with the given error message
+    Failed(String),
+}
+
+enum SchedulerWorkItem {
+    Step(WorkflowStep),
+    LoopReview {
+        workflow_loop: WorkflowLoop,
+        loop_def: CompiledLoopDef,
+    },
+}
+
+struct SchedulerCandidate {
+    session_id: Uuid,
+    priority_order: i32,
+    tie_order: i32,
+    work_item: SchedulerWorkItem,
+}
+
+enum SchedulerWorkOutcome {
+    Step {
+        step: WorkflowStep,
+        outcome: StepOutcome,
+    },
+    Loop(LoopOutcome),
+}
+
 /// Orchestrator 是 workflow mode 的核心调度组件
 pub struct WorkflowOrchestrator;
 
@@ -82,15 +150,6 @@ impl WorkflowOrchestrator {
     // -----------------------------------------------------------------------
 
     /// 从一个已校验的 plan revision 创建 execution 并 bootstrap
-    ///
-    /// 流程:
-    /// 1. 创建 execution (pending)
-    /// 2. 编译 plan → compiled graph
-    /// 3. 创建 agent sessions, round, steps, edges
-    /// 4. 通过 reducer 迁移 ready steps
-    /// 5. 基于 step 状态同步 execution
-    ///
-    /// `agent_id_map`: 将 plan JSON 中的 string agent_id 映射到实际的 session_agent UUID
     pub async fn bootstrap_execution(
         pool: &SqlitePool,
         plan: &WorkflowPlan,
@@ -225,12 +284,20 @@ impl WorkflowOrchestrator {
         }
 
         // 6. 创建 steps 并绑定 agent session
-        let mut step_id_map: HashMap<String, Uuid> = HashMap::new();
+        let step_id_map: HashMap<String, Uuid> = compiled
+            .steps
+            .iter()
+            .map(|step| (step.step_key.clone(), Uuid::new_v4()))
+            .collect();
         let mut created_steps = Vec::new();
 
         for compiled_step in &compiled.steps {
-            let step_id = Uuid::new_v4();
-            step_id_map.insert(compiled_step.step_key.clone(), step_id);
+            let step_id = *step_id_map.get(&compiled_step.step_key).ok_or_else(|| {
+                OrchestratorError::NotFound(format!(
+                    "step {} missing preallocated id",
+                    compiled_step.step_key
+                ))
+            })?;
 
             let assigned_ws_id = compiled_step
                 .assigned_agent_id
@@ -253,12 +320,69 @@ impl WorkflowOrchestrator {
                     max_retry: compiled_step.max_retry as i32,
                     round_index: 1,
                     display_order: compiled_step.display_order,
+                    loop_id: None,
+                    lead_review_required: compiled_step.lead_review,
+                    user_review_required: compiled_step.user_review,
+                    revision_context: None,
                 },
                 step_id,
             )
             .await?;
 
             created_steps.push(step);
+        }
+
+        let mut _created_loops = Vec::new();
+        if let Some(loop_defs) = compiled.loops.as_ref() {
+            for loop_def in loop_defs {
+                let review_step_id =
+                    *step_id_map.get(&loop_def.review_step_key).ok_or_else(|| {
+                        OrchestratorError::NotFound(format!(
+                            "loop review step {} not found",
+                            loop_def.review_step_key
+                        ))
+                    })?;
+                let member_step_ids = loop_def
+                    .member_step_keys
+                    .iter()
+                    .map(|step_key| {
+                        step_id_map.get(step_key).copied().ok_or_else(|| {
+                            OrchestratorError::NotFound(format!(
+                                "loop member step {} not found",
+                                step_key
+                            ))
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let workflow_loop = WorkflowLoop::create(
+                    pool,
+                    &CreateWorkflowLoop {
+                        execution_id: execution.id,
+                        round_id: round.id,
+                        loop_key: loop_def.loop_key.clone(),
+                        review_step_id,
+                        member_step_ids_json: serde_json::to_string(&member_step_ids)?,
+                        max_retry: Some(loop_def.max_retry as i32),
+                        user_review_required: Some(loop_def.user_review_required),
+                        rejection_reason: None,
+                    },
+                    Uuid::new_v4(),
+                )
+                .await?;
+
+                for step_id in member_step_ids
+                    .into_iter()
+                    .chain(std::iter::once(review_step_id))
+                {
+                    let updated_step =
+                        WorkflowStep::update_loop_id(pool, step_id, Some(workflow_loop.id)).await?;
+                    if let Some(step) = created_steps.iter_mut().find(|step| step.id == step_id) {
+                        *step = updated_step;
+                    }
+                }
+
+                _created_loops.push(workflow_loop);
+            }
         }
 
         // 7. 创建 edges
@@ -293,14 +417,32 @@ impl WorkflowOrchestrator {
         }
 
         // 8. 将无前驱的 step 标记为 ready（通过 reducer，含组合约束校验 + 审计事件）
+        let loop_step_keys = compiled
+            .loops
+            .as_ref()
+            .map(|loops| {
+                loops
+                    .iter()
+                    .flat_map(|loop_def| {
+                        loop_def
+                            .member_step_keys
+                            .iter()
+                            .chain(std::iter::once(&loop_def.review_step_key))
+                    })
+                    .cloned()
+                    .collect::<std::collections::HashSet<_>>()
+            })
+            .unwrap_or_default();
         for ready_key in &compiled.ready_step_keys {
+            if loop_step_keys.contains(ready_key) {
+                continue;
+            }
             if let Some(&step_id) = step_id_map.get(ready_key) {
                 let step = created_steps.iter().find(|s| s.id == step_id);
                 if let Some(step) = step {
                     let tr =
                         reducer::transition_step(pool, &execution, step, WorkflowStepStatus::Ready)
                             .await?;
-                    // 更新 created_steps 中的 step 状态
                     if let Some(s) = created_steps.iter_mut().find(|s| s.id == step_id) {
                         *s = tr.entity;
                     }
@@ -343,10 +485,8 @@ impl WorkflowOrchestrator {
     }
 
     // -----------------------------------------------------------------------
-    // Scheduler Loop 骨架 (Phase 1b 实现)
+    // workflow 核心调度循环
     // -----------------------------------------------------------------------
-
-    /// Phase 1b: 唤醒调度循环，找到 ready steps 并触发 agent run
     pub async fn wake_scheduler(
         db: &DBService,
         chat_runner: &ChatRunner,
@@ -382,12 +522,56 @@ impl WorkflowOrchestrator {
                     OrchestratorError::NotFound(format!("session {} 未找到", execution.session_id))
                 })?;
             let session_agents = ChatSessionAgent::find_all_for_session(pool, session.id).await?;
-            let workflow_agent_sessions =
+            let mut workflow_agent_sessions =
                 WorkflowAgentSession::find_by_execution(pool, execution.id).await?;
             let steps = WorkflowStep::find_by_execution(pool, execution.id).await?;
-            let edges = WorkflowStepEdge::find_by_execution(pool, execution.id).await?;
+            let mut edges = WorkflowStepEdge::find_by_execution(pool, execution.id).await?;
             let agents = load_agents_for_session(pool, &session_agents).await?;
+            let mut workflow_loops = if let Some(round_id) = execution.active_round_id {
+                WorkflowLoop::find_by_round(pool, round_id).await?
+            } else {
+                WorkflowLoop::find_by_execution(pool, execution.id).await?
+            };
+            let valid_agent_ids = agents
+                .iter()
+                .map(|agent| agent.id.to_string())
+                .collect::<Vec<_>>();
+            let compiled_graph =
+                WorkflowCompiler::compile_from_json(&revision.plan_json, &valid_agent_ids)?;
+
+            edges = Self::scheduler_step_edges_from_compiled(
+                &execution,
+                &steps,
+                &edges,
+                &compiled_graph,
+            )?;
+
+            let loop_def_by_key = compiled_graph
+                .loops
+                .clone()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|loop_def| (loop_def.loop_key.clone(), loop_def))
+                .collect::<HashMap<_, _>>();
             execution = Self::synchronize_runtime_state(pool, execution.id, false).await?;
+
+            let recovered_loops =
+                Self::restore_recovered_failed_loops(pool, &execution, &steps, &mut workflow_loops)
+                    .await?;
+            if !recovered_loops.is_empty() {
+                for workflow_loop in &recovered_loops {
+                    LoopExecutor::emit_loop_event(
+                        pool,
+                        &execution,
+                        workflow_loop,
+                        WorkflowEventType::LoopRetrying,
+                        Some(serde_json::json!({
+                            "reason": "loop_recovered_without_failed_steps",
+                        })),
+                    )
+                    .await?;
+                }
+            }
 
             if execution.status == WorkflowExecutionStatus::Completed {
                 let workflow_agent_sessions =
@@ -425,29 +609,130 @@ impl WorkflowOrchestrator {
                 return Ok(());
             }
 
+            let mut current_steps = steps;
+            let completed_loop_ids = workflow_loops
+                .iter()
+                .filter(|workflow_loop| {
+                    matches!(
+                        workflow_loop.status,
+                        WorkflowLoopStatus::Completed | WorkflowLoopStatus::Passed
+                    )
+                })
+                .map(|workflow_loop| workflow_loop.id)
+                .collect::<std::collections::HashSet<_>>();
+
+            let mut schedulable_loops = workflow_loops
+                .iter()
+                .filter(|workflow_loop| {
+                    matches!(
+                        workflow_loop.status,
+                        WorkflowLoopStatus::Pending
+                            | WorkflowLoopStatus::Running
+                            | WorkflowLoopStatus::Rejected
+                    ) && Self::is_loop_ready_for_execution(workflow_loop, &current_steps, &edges)
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            schedulable_loops.sort_by_key(|workflow_loop| {
+                Self::loop_review_display_order(workflow_loop, &current_steps).unwrap_or(i32::MAX)
+            });
+
+            tracing::debug!(
+                "调度循环: execution_id={}, schedulable_loops={:?}, completed_loop_ids={:?}",
+                execution.id,
+                schedulable_loops
+                    .iter()
+                    .map(|l| (l.id, &l.loop_key, &l.status))
+                    .collect::<Vec<_>>(),
+                completed_loop_ids
+            );
+
+            for workflow_loop in &mut schedulable_loops {
+                let Some(_loop_def) = loop_def_by_key.get(&workflow_loop.loop_key) else {
+                    continue;
+                };
+
+                if workflow_loop.status == WorkflowLoopStatus::Pending {
+                    let started_loop = WorkflowLoop::update_status(
+                        pool,
+                        workflow_loop.id,
+                        WorkflowLoopStatus::Running,
+                        workflow_loop.rejection_reason.clone(),
+                    )
+                    .await?;
+                    LoopExecutor::emit_loop_event(
+                        pool,
+                        &execution,
+                        &started_loop,
+                        WorkflowEventType::LoopStarted,
+                        None,
+                    )
+                    .await?;
+                    if let Some(existing_loop) = workflow_loops
+                        .iter_mut()
+                        .find(|item| item.id == started_loop.id)
+                    {
+                        *existing_loop = started_loop.clone();
+                    }
+                    *workflow_loop = started_loop;
+                }
+
+                let loop_executor = LoopExecutor {
+                    db,
+                    pool,
+                    chat_runner,
+                    execution: &execution,
+                    workflow_agent_sessions: &workflow_agent_sessions,
+                    session: &session,
+                    session_agents: &session_agents,
+                    agents: &agents,
+                    plan: &plan,
+                };
+                for reset_step in loop_executor.reset_loop_steps(workflow_loop).await? {
+                    if let Some(existing) = current_steps
+                        .iter_mut()
+                        .find(|step| step.id == reset_step.id)
+                    {
+                        *existing = reset_step;
+                    }
+                }
+            }
+
+            let workflow_loop_by_id = workflow_loops
+                .iter()
+                .map(|workflow_loop| (workflow_loop.id, workflow_loop))
+                .collect::<HashMap<_, _>>();
             let mut ready_promotions = Vec::new();
-            for step in &steps {
+            for step in &current_steps {
                 if step.status != WorkflowStepStatus::Pending {
                     continue;
                 }
 
-                let blocked = edges
-                    .iter()
-                    .filter(|edge| edge.to_step_id == step.id)
-                    .any(|edge| {
-                        steps
-                            .iter()
-                            .find(|candidate| candidate.id == edge.from_step_id)
-                            .map(|candidate| candidate.status != WorkflowStepStatus::Completed)
-                            .unwrap_or(true)
-                    });
+                if let Some(loop_id) = step.loop_id {
+                    let Some(workflow_loop) = workflow_loop_by_id.get(&loop_id) else {
+                        continue;
+                    };
+                    if step.id == workflow_loop.review_step_id
+                        || !matches!(
+                            workflow_loop.status,
+                            WorkflowLoopStatus::Running | WorkflowLoopStatus::Rejected
+                        )
+                        || !Self::is_loop_ready_for_execution(workflow_loop, &current_steps, &edges)
+                    {
+                        continue;
+                    }
+                }
 
-                if !blocked {
+                if Self::are_step_dependencies_completed(
+                    step,
+                    &current_steps,
+                    &edges,
+                    &completed_loop_ids,
+                ) {
                     ready_promotions.push(step.id);
                 }
             }
 
-            let mut current_steps = steps;
             for step_id in ready_promotions {
                 if let Some(step) = current_steps
                     .iter()
@@ -468,28 +753,139 @@ impl WorkflowOrchestrator {
                 }
             }
             execution = Self::synchronize_runtime_state(pool, execution.id, false).await?;
+            workflow_agent_sessions =
+                WorkflowAgentSession::find_by_execution(pool, execution.id).await?;
 
             // Collect ready steps: one per workflow agent session for parallel execution.
-            // When multiple ready steps share the same agent session, pick the one
-            // with the lowest display_order (preserving the original sequential priority).
-            let mut ready_by_session: HashMap<Uuid, WorkflowStep> = HashMap::new();
+            let mut candidates_by_session: HashMap<Uuid, SchedulerCandidate> = HashMap::new();
+
+            // 优先调度无 loop 约束的 ready 步骤，后续再调度 loop review 步骤
             for step in current_steps
                 .iter()
-                .filter(|s| s.status == WorkflowStepStatus::Ready)
+                .filter(|s| s.status == WorkflowStepStatus::Ready && s.loop_id.is_none())
             {
-                let ws = resolve_step_workflow_session(&execution, &workflow_agent_sessions, step)?;
-                ready_by_session
-                    .entry(ws.id)
-                    .and_modify(|existing| {
-                        if step.display_order < existing.display_order {
-                            *existing = step.clone();
-                        }
-                    })
-                    .or_insert(step.clone());
-            }
-            let parallel_steps: Vec<WorkflowStep> = ready_by_session.into_values().collect();
+                if !Self::are_step_dependencies_completed(
+                    step,
+                    &current_steps,
+                    &edges,
+                    &completed_loop_ids,
+                ) {
+                    tracing::debug!("步骤 {} 依赖未完成，跳过调度", step.id);
 
-            if parallel_steps.is_empty() {
+                    continue;
+                }
+
+                let ws = resolve_step_workflow_session(&execution, &workflow_agent_sessions, step)?;
+                if !Self::is_workflow_session_available(ws) {
+                    continue;
+                }
+
+                Self::insert_scheduler_candidate(
+                    &mut candidates_by_session,
+                    SchedulerCandidate {
+                        session_id: ws.id,
+                        priority_order: step.display_order,
+                        tie_order: step.display_order,
+                        work_item: SchedulerWorkItem::Step(step.clone()),
+                    },
+                );
+            }
+
+            for step in current_steps
+                .iter()
+                .filter(|s| s.status == WorkflowStepStatus::Ready && s.loop_id.is_some())
+            {
+                let Some(loop_id) = step.loop_id else {
+                    continue;
+                };
+                let Some(workflow_loop) = workflow_loop_by_id.get(&loop_id) else {
+                    continue;
+                };
+                if step.id == workflow_loop.review_step_id
+                    || !matches!(
+                        workflow_loop.status,
+                        WorkflowLoopStatus::Running | WorkflowLoopStatus::Rejected
+                    )
+                    || !Self::is_loop_ready_for_execution(workflow_loop, &current_steps, &edges)
+                    || !Self::are_step_dependencies_completed(
+                        step,
+                        &current_steps,
+                        &edges,
+                        &completed_loop_ids,
+                    )
+                {
+                    continue;
+                }
+                let ws = resolve_step_workflow_session(&execution, &workflow_agent_sessions, step)?;
+                if !Self::is_workflow_session_available(ws) {
+                    continue;
+                }
+
+                // let loop_order = Self::loop_review_display_order(workflow_loop, &current_steps)
+                //     .unwrap_or(step.display_order);
+                Self::insert_scheduler_candidate(
+                    &mut candidates_by_session,
+                    SchedulerCandidate {
+                        session_id: ws.id,
+                        priority_order: step.display_order,
+                        tie_order: step.display_order,
+                        work_item: SchedulerWorkItem::Step(step.clone()),
+                    },
+                );
+            }
+
+            for workflow_loop in schedulable_loops {
+                let Some(loop_def) = loop_def_by_key.get(&workflow_loop.loop_key) else {
+                    continue;
+                };
+                if !Self::loop_members_completed(&workflow_loop, &current_steps)? {
+                    continue;
+                }
+                let Some(review_step) = current_steps
+                    .iter()
+                    .find(|step| step.id == workflow_loop.review_step_id)
+                else {
+                    continue;
+                };
+                if !Self::is_loop_review_step_runnable(review_step)
+                    || !Self::are_step_dependencies_completed(
+                        review_step,
+                        &current_steps,
+                        &edges,
+                        &completed_loop_ids,
+                    )
+                {
+                    continue;
+                }
+                let ws = resolve_step_workflow_session(
+                    &execution,
+                    &workflow_agent_sessions,
+                    review_step,
+                )?;
+                if !Self::is_workflow_session_available(ws) {
+                    continue;
+                }
+
+                Self::insert_scheduler_candidate(
+                    &mut candidates_by_session,
+                    SchedulerCandidate {
+                        session_id: ws.id,
+                        priority_order: review_step.display_order,
+                        tie_order: review_step.display_order,
+                        work_item: SchedulerWorkItem::LoopReview {
+                            workflow_loop,
+                            loop_def: loop_def.clone(),
+                        },
+                    },
+                );
+            }
+
+            let parallel_work: Vec<SchedulerWorkItem> = candidates_by_session
+                .into_values()
+                .map(|candidate| candidate.work_item)
+                .collect();
+
+            if parallel_work.is_empty() {
                 execution = Self::synchronize_runtime_state(pool, execution.id, false).await?;
                 Self::refresh_workflow_card(
                     pool,
@@ -518,37 +914,144 @@ impl WorkflowOrchestrator {
             }
 
             // --- Parallel execution: run all selected steps concurrently ---
-            let step_futures: Vec<_> = parallel_steps
+            let work_futures: Vec<
+                std::pin::Pin<
+                    Box<
+                        dyn std::future::Future<
+                                Output = Result<SchedulerWorkOutcome, OrchestratorError>,
+                            > + Send,
+                    >,
+                >,
+            > = parallel_work
                 .iter()
-                .map(|step| {
-                    Self::prepare_and_run_step(
-                        db,
-                        pool,
-                        chat_runner,
-                        &execution,
-                        step,
-                        &workflow_agent_sessions,
-                        &session,
-                        &session_agents,
-                        &agents,
-                        &plan,
-                        &current_steps,
-                        &edges,
-                    )
+                .map(|work_item| match work_item {
+                    SchedulerWorkItem::Step(step) => {
+                        let step_for_outcome = step.clone();
+                        let execution_ref = &execution;
+                        let workflow_agent_sessions_ref = &workflow_agent_sessions;
+                        let session_ref = &session;
+                        let session_agents_ref = &session_agents;
+                        let agents_ref = &agents;
+                        let plan_ref = &plan;
+                        let current_steps_ref = &current_steps;
+                        let edges_ref = &edges;
+                        Box::pin(async move {
+                            Self::prepare_and_run_step(
+                                db,
+                                pool,
+                                chat_runner,
+                                execution_ref,
+                                step,
+                                workflow_agent_sessions_ref,
+                                session_ref,
+                                session_agents_ref,
+                                agents_ref,
+                                plan_ref,
+                                current_steps_ref,
+                                edges_ref,
+                            )
+                            .await
+                            .map(|outcome| {
+                                SchedulerWorkOutcome::Step {
+                                    step: step_for_outcome,
+                                    outcome,
+                                }
+                            })
+                        })
+                            as std::pin::Pin<
+                                Box<
+                                    dyn std::future::Future<
+                                            Output = Result<
+                                                SchedulerWorkOutcome,
+                                                OrchestratorError,
+                                            >,
+                                        > + Send,
+                                >,
+                            >
+                    }
+                    SchedulerWorkItem::LoopReview {
+                        workflow_loop,
+                        loop_def,
+                    } => {
+                        let execution_ref = &execution;
+                        let workflow_agent_sessions_ref = &workflow_agent_sessions;
+                        let session_ref = &session;
+                        let session_agents_ref = &session_agents;
+                        let agents_ref = &agents;
+                        let plan_ref = &plan;
+                        Box::pin(async move {
+                            let loop_executor = LoopExecutor {
+                                db,
+                                pool,
+                                chat_runner,
+                                execution: execution_ref,
+                                workflow_agent_sessions: workflow_agent_sessions_ref,
+                                session: session_ref,
+                                session_agents: session_agents_ref,
+                                agents: agents_ref,
+                                plan: plan_ref,
+                            };
+                            loop_executor
+                                .execute_ready_review(workflow_loop, loop_def)
+                                .await
+                                .map(SchedulerWorkOutcome::Loop)
+                        })
+                            as std::pin::Pin<
+                                Box<
+                                    dyn std::future::Future<
+                                            Output = Result<
+                                                SchedulerWorkOutcome,
+                                                OrchestratorError,
+                                            >,
+                                        > + Send,
+                                >,
+                            >
+                    }
                 })
                 .collect();
-            let outcomes = futures::future::join_all(step_futures).await;
+            let outcomes = futures::future::join_all(work_futures).await;
 
             // Process outcomes: collect parked/failed results
             let mut any_parked = false;
             let mut first_failure: Option<String> = None;
             for outcome in outcomes {
                 match outcome? {
-                    StepOutcome::Completed => {}
-                    StepOutcome::Parked => {
+                    SchedulerWorkOutcome::Step {
+                        outcome: StepOutcome::Completed,
+                        ..
+                    }
+                    | SchedulerWorkOutcome::Loop(LoopOutcome::Progressed)
+                    | SchedulerWorkOutcome::Loop(LoopOutcome::Completed) => {}
+                    SchedulerWorkOutcome::Step {
+                        outcome: StepOutcome::Parked,
+                        ..
+                    }
+                    | SchedulerWorkOutcome::Loop(LoopOutcome::Parked) => {
                         any_parked = true;
                     }
-                    StepOutcome::Failed(reason) => {
+                    SchedulerWorkOutcome::Step {
+                        step,
+                        outcome: StepOutcome::Failed(reason),
+                    } => {
+                        if let Some(loop_id) = step.loop_id {
+                            if let Some(workflow_loop) = workflow_loop_by_id.get(&loop_id) {
+                                let failed_loop = WorkflowLoop::update_status(
+                                    pool,
+                                    workflow_loop.id,
+                                    WorkflowLoopStatus::Failed,
+                                    Some(reason.clone()),
+                                )
+                                .await?;
+                                LoopExecutor::emit_loop_event(
+                                    pool,
+                                    &execution,
+                                    &failed_loop,
+                                    WorkflowEventType::LoopFailed,
+                                    Some(serde_json::json!({ "reason": reason.clone() })),
+                                )
+                                .await?;
+                            }
+                        }
                         if first_failure.is_none() {
                             first_failure = Some(reason);
                         }
@@ -640,231 +1143,12 @@ impl WorkflowOrchestrator {
                 })?;
         }
     }
-}
 
-fn resolve_step_workflow_session<'a>(
-    execution: &WorkflowExecution,
-    workflow_sessions: &'a [WorkflowAgentSession],
-    step: &WorkflowStep,
-) -> Result<&'a WorkflowAgentSession, OrchestratorError> {
-    if let Some(workflow_session_id) = step.assigned_workflow_agent_session_id {
-        return workflow_sessions
-            .iter()
-            .find(|session| session.id == workflow_session_id)
-            .ok_or_else(|| {
-                OrchestratorError::NotFound(format!(
-                    "workflow agent session {} 未找到",
-                    workflow_session_id
-                ))
-            });
-    }
+    // -----------------------------------------------------------------------
+    // 状态同步 / 状态迁移辅助
+    // -----------------------------------------------------------------------
 
-    let lead_session_agent_id = execution.lead_session_agent_id.ok_or_else(|| {
-        OrchestratorError::NotFound(format!(
-            "execution {} 缺少 lead session agent",
-            execution.id
-        ))
-    })?;
-
-    workflow_sessions
-        .iter()
-        .find(|session| session.session_agent_id == lead_session_agent_id)
-        .ok_or_else(|| {
-            OrchestratorError::NotFound(format!(
-                "execution {} 的 lead workflow session 未找到",
-                execution.id
-            ))
-        })
-}
-
-async fn load_agents_for_session(
-    pool: &SqlitePool,
-    session_agents: &[ChatSessionAgent],
-) -> Result<Vec<ChatAgent>, OrchestratorError> {
-    let mut agents = Vec::new();
-    for session_agent in session_agents {
-        let agent = ChatAgent::find_by_id(pool, session_agent.agent_id)
-            .await?
-            .ok_or_else(|| {
-                OrchestratorError::NotFound(format!("agent {} 未找到", session_agent.agent_id))
-            })?;
-        agents.push(agent);
-    }
-    Ok(agents)
-}
-
-impl WorkflowOrchestrator {
-    const FINAL_REVIEW_CONTENT: &'static str = "任务已完成，是否接受结果？";
-    const FINAL_REVIEW_DESCRIPTION: &'static str = "所有任务步骤已执行完毕，等待用户确认最终结果。";
-
-    fn parse_step_output_message(
-        execution_id: Uuid,
-        step: &WorkflowStep,
-        raw_output: &str,
-    ) -> Result<WorkflowStepProtocolMessage, OrchestratorError> {
-        super::workflow_runtime::parse_step_protocol_output(
-            execution_id,
-            &step.step_key,
-            raw_output,
-        )
-        .map_err(OrchestratorError::from)
-    }
-
-    fn step_message_error(message: String, content: Option<String>) -> OrchestratorError {
-        OrchestratorError::Runtime(WorkflowRuntimeError::Validation(
-            content
-                .filter(|value| !value.trim().is_empty())
-                .map(|value| format!("{message}: {value}"))
-                .unwrap_or(message),
-        ))
-    }
-
-    pub async fn refresh_workflow_card(
-        pool: &SqlitePool,
-        chat_runner: &ChatRunner,
-        execution: &WorkflowExecution,
-        plan: &WorkflowPlan,
-        revision: &WorkflowPlanRevision,
-        session_agents: &[ChatSessionAgent],
-        agents: &[ChatAgent],
-        error_message: Option<String>,
-    ) -> Result<(), OrchestratorError> {
-        Self::refresh_workflow_card_with_reason(
-            pool,
-            chat_runner,
-            execution,
-            plan,
-            revision,
-            session_agents,
-            agents,
-            error_message,
-            "projection_refreshed",
-            Vec::new(),
-        )
-        .await
-    }
-
-    async fn refresh_workflow_card_with_reason(
-        pool: &SqlitePool,
-        chat_runner: &ChatRunner,
-        execution: &WorkflowExecution,
-        plan: &WorkflowPlan,
-        revision: &WorkflowPlanRevision,
-        session_agents: &[ChatSessionAgent],
-        agents: &[ChatAgent],
-        error_message: Option<String>,
-        reason: &str,
-        changed_step_ids: Vec<String>,
-    ) -> Result<(), OrchestratorError> {
-        let Some(message_id) = execution.workflow_card_message_id else {
-            return Ok(());
-        };
-
-        let message = ChatMessage::find_by_id(pool, message_id)
-            .await?
-            .ok_or_else(|| OrchestratorError::NotFound(format!("message {} 未找到", message_id)))?;
-        let workflow_sessions = WorkflowAgentSession::find_by_execution(pool, execution.id).await?;
-        let steps = WorkflowStep::find_by_execution(pool, execution.id).await?;
-        let edges = WorkflowStepEdge::find_by_execution(pool, execution.id).await?;
-
-        let projection = build_workflow_card_projection(
-            execution,
-            plan,
-            revision,
-            &steps,
-            &edges,
-            &workflow_sessions,
-            session_agents,
-            agents,
-            error_message,
-        )?;
-        let mut meta = message.meta.0.clone();
-        meta["card_type"] = serde_json::json!("workflow_execution");
-        meta["workflow_card"] = serde_json::to_value(&projection)?;
-
-        let updated =
-            ChatMessage::update_content_and_meta(pool, message.id, "Workflow execution", meta)
-                .await?;
-        chat_runner.emit_message_updated(updated.session_id, updated);
-        chat_runner.emit_workflow_execution_updated(execution.session_id, execution.id);
-        chat_runner.emit_workflow_graph_updated(
-            execution.session_id,
-            execution.id,
-            execution.updated_at.to_rfc3339(),
-            reason.to_string(),
-            projection.plan.nodes.clone(),
-            projection.plan.edges.clone(),
-            changed_step_ids,
-        );
-        Ok(())
-    }
-
-    pub async fn refresh_execution_projection(
-        pool: &SqlitePool,
-        chat_runner: &ChatRunner,
-        execution_id: Uuid,
-        error_message: Option<String>,
-    ) -> Result<WorkflowExecution, OrchestratorError> {
-        Self::refresh_execution_projection_with_reason(
-            pool,
-            chat_runner,
-            execution_id,
-            error_message,
-            "projection_refreshed",
-            Vec::new(),
-        )
-        .await
-    }
-
-    pub async fn refresh_execution_projection_with_reason(
-        pool: &SqlitePool,
-        chat_runner: &ChatRunner,
-        execution_id: Uuid,
-        error_message: Option<String>,
-        reason: &str,
-        changed_step_ids: Vec<String>,
-    ) -> Result<WorkflowExecution, OrchestratorError> {
-        let execution = WorkflowExecution::find_by_id(pool, execution_id)
-            .await?
-            .ok_or_else(|| {
-                OrchestratorError::NotFound(format!("execution {} 未找到", execution_id))
-            })?;
-        Self::ensure_waiting_final_review_invariant(pool, &execution).await?;
-        let plan = WorkflowPlan::find_by_id(pool, execution.plan_id)
-            .await?
-            .ok_or_else(|| {
-                OrchestratorError::NotFound(format!("plan {} 未找到", execution.plan_id))
-            })?;
-        let revision_id = execution.active_revision_id.ok_or_else(|| {
-            OrchestratorError::NotFound(format!("execution {} 缺少 active revision", execution.id))
-        })?;
-        let revision = WorkflowPlanRevision::find_by_id(pool, revision_id)
-            .await?
-            .ok_or_else(|| {
-                OrchestratorError::NotFound(format!("revision {} 未找到", revision_id))
-            })?;
-        let session_agents =
-            ChatSessionAgent::find_all_for_session(pool, execution.session_id).await?;
-        let agents = load_agents_for_session(pool, &session_agents).await?;
-
-        Self::refresh_workflow_card_with_reason(
-            pool,
-            chat_runner,
-            &execution,
-            &plan,
-            &revision,
-            &session_agents,
-            &agents,
-            error_message,
-            reason,
-            changed_step_ids,
-        )
-        .await?;
-
-        Ok(execution)
-    }
-
-    async fn synchronize_runtime_state(
+    pub(crate) async fn synchronize_runtime_state(
         pool: &SqlitePool,
         execution_id: Uuid,
         preserve_recompiling: bool,
@@ -942,7 +1226,7 @@ impl WorkflowOrchestrator {
             })
     }
 
-    async fn transition_execution_and_sync(
+    pub(super) async fn transition_execution_and_sync(
         pool: &SqlitePool,
         chat_runner: &ChatRunner,
         execution: &WorkflowExecution,
@@ -970,7 +1254,7 @@ impl WorkflowOrchestrator {
         .await
     }
 
-    async fn transition_step_and_sync(
+    pub(crate) async fn transition_step_and_sync(
         pool: &SqlitePool,
         chat_runner: &ChatRunner,
         execution: &WorkflowExecution,
@@ -997,7 +1281,7 @@ impl WorkflowOrchestrator {
     /// Like `transition_step_and_sync` but uses a CAS guard at the DB level.
     /// Returns `Ok(None)` if the step was already claimed by another caller
     /// (stale transition), allowing the caller to skip without error.
-    async fn guarded_transition_step_and_sync(
+    pub(crate) async fn guarded_transition_step_and_sync(
         pool: &SqlitePool,
         chat_runner: &ChatRunner,
         execution: &WorkflowExecution,
@@ -1031,2694 +1315,319 @@ impl WorkflowOrchestrator {
         }
     }
 
-    pub async fn retry_step(
-        db: &DBService,
-        chat_runner: &ChatRunner,
-        step_id: Uuid,
-    ) -> Result<(WorkflowExecution, WorkflowStep), OrchestratorError> {
-        let pool = &db.pool;
-        let (execution, ready_step) = Self::prepare_step_retry(pool, chat_runner, step_id).await?;
+    // -----------------------------------------------------------------------
+    // Scheduler helpers (used in `wake_scheduler`)
+    // -----------------------------------------------------------------------
 
-        let execution =
-            Self::activate_execution_for_step_retry(pool, chat_runner, &execution).await?;
-        let execution =
-            Self::retry_single_step_only(db, chat_runner, &execution, &ready_step).await?;
+    fn is_loop_ready_for_execution(
+        workflow_loop: &WorkflowLoop,
+        steps: &[WorkflowStep],
+        edges: &[WorkflowStepEdge],
+    ) -> bool {
+        let Ok(mut loop_step_ids) =
+            serde_json::from_str::<Vec<Uuid>>(&workflow_loop.member_step_ids_json)
+        else {
+            return false;
+        };
+        loop_step_ids.push(workflow_loop.review_step_id);
+        let loop_step_ids = loop_step_ids
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>();
+        let step_by_id = steps
+            .iter()
+            .map(|step| (step.id, step))
+            .collect::<HashMap<_, _>>();
 
-        let latest_execution = WorkflowExecution::find_by_id(pool, execution.id)
-            .await?
-            .ok_or_else(|| {
-                OrchestratorError::NotFound(format!("execution {} 未找到", execution.id))
-            })?;
-        let latest_step = WorkflowStep::find_by_id(pool, ready_step.id)
-            .await?
-            .ok_or_else(|| OrchestratorError::NotFound(format!("step {} 未找到", ready_step.id)))?;
-
-        Ok((latest_execution, latest_step))
-    }
-
-    async fn activate_execution_for_step_retry(
-        pool: &SqlitePool,
-        chat_runner: &ChatRunner,
-        execution: &WorkflowExecution,
-    ) -> Result<WorkflowExecution, OrchestratorError> {
-        if execution.status == WorkflowExecutionStatus::Running {
-            Ok(execution.clone())
-        } else {
-            Self::transition_execution_and_sync(
-                pool,
-                chat_runner,
-                execution,
-                WorkflowExecutionStatus::Running,
-                "execution_running",
-                None,
-            )
-            .await
-        }
-    }
-
-    async fn prepare_step_retry(
-        pool: &SqlitePool,
-        chat_runner: &ChatRunner,
-        step_id: Uuid,
-    ) -> Result<(WorkflowExecution, WorkflowStep), OrchestratorError> {
-        let step = WorkflowStep::find_by_id(pool, step_id)
-            .await?
-            .ok_or_else(|| OrchestratorError::NotFound(format!("step {} 未找到", step_id)))?;
-        let execution = WorkflowExecution::find_by_id(pool, step.execution_id)
-            .await?
-            .ok_or_else(|| {
-                OrchestratorError::NotFound(format!("execution {} 未找到", step.execution_id))
-            })?;
-
-        Self::validate_step_retry_candidate(&step)?;
-
-        let prepared_step = WorkflowStep::prepare_retry(pool, step.id).await?;
-        let ready_step = Self::transition_step_and_sync(
-            pool,
-            chat_runner,
-            &execution,
-            &prepared_step,
-            WorkflowStepStatus::Ready,
-            "step_retry_prepared",
-        )
-        .await?;
-
-        Ok((execution, ready_step))
-    }
-
-    fn validate_step_retry_candidate(step: &WorkflowStep) -> Result<(), OrchestratorError> {
-        if !matches!(
-            step.status,
-            WorkflowStepStatus::Failed | WorkflowStepStatus::Interrupted
-        ) {
-            return Err(OrchestratorError::IllegalTransition(format!(
-                "step {} is {:?}, expected failed or interrupted",
-                step.id, step.status
-            )));
-        }
-        if step.retry_count >= step.max_retry {
-            return Err(OrchestratorError::IllegalTransition(format!(
-                "step {} exceeded max retry {}",
-                step.id, step.max_retry
-            )));
+        if loop_step_ids.iter().any(|step_id| {
+            step_by_id
+                .get(step_id)
+                .map(|step| {
+                    matches!(
+                        step.status,
+                        WorkflowStepStatus::Running
+                            | WorkflowStepStatus::WaitingInput
+                            | WorkflowStepStatus::WaitingReview
+                            | WorkflowStepStatus::PreCompleted
+                    )
+                })
+                .unwrap_or(true)
+        }) {
+            return false;
         }
 
-        Ok(())
-    }
-
-    fn all_steps_completed_like(steps: &[WorkflowStep]) -> bool {
-        !steps.is_empty()
-            && steps.iter().all(|step| {
-                matches!(
-                    step.status,
-                    WorkflowStepStatus::Completed
-                        | WorkflowStepStatus::Skipped
-                        | WorkflowStepStatus::Cancelled
-                )
+        edges
+            .iter()
+            .filter(|edge| loop_step_ids.contains(&edge.to_step_id))
+            .filter(|edge| !loop_step_ids.contains(&edge.from_step_id))
+            .all(|edge| {
+                step_by_id
+                    .get(&edge.from_step_id)
+                    .map(|step| step.status == WorkflowStepStatus::Completed)
+                    .unwrap_or(false)
             })
     }
 
-    async fn ensure_waiting_final_review_invariant(
-        pool: &SqlitePool,
-        execution: &WorkflowExecution,
-    ) -> Result<Option<WorkflowTranscript>, OrchestratorError> {
-        if execution.status != WorkflowExecutionStatus::Waiting {
-            return Ok(None);
-        }
-
-        let steps = WorkflowStep::find_by_execution(pool, execution.id).await?;
-        if !Self::all_steps_completed_like(&steps) {
-            return Ok(None);
-        }
-
-        Self::ensure_unresolved_final_review(pool, execution.id)
-            .await
-            .map(Some)
-    }
-
-    async fn ensure_unresolved_final_review(
-        pool: &SqlitePool,
-        execution_id: Uuid,
-    ) -> Result<WorkflowTranscript, OrchestratorError> {
-        WorkflowTranscript::create_unresolved_final_review_if_missing(
-            pool,
-            execution_id,
-            Self::FINAL_REVIEW_CONTENT,
-            Self::FINAL_REVIEW_DESCRIPTION,
-            Uuid::new_v4(),
-        )
-        .await
-        .map_err(OrchestratorError::Database)
-    }
-
-    async fn retry_single_step_only(
-        db: &DBService,
-        chat_runner: &ChatRunner,
-        execution: &WorkflowExecution,
+    fn are_step_dependencies_completed(
         step: &WorkflowStep,
-    ) -> Result<WorkflowExecution, OrchestratorError> {
-        let pool = &db.pool;
-        let plan = WorkflowPlan::find_by_id(pool, execution.plan_id)
-            .await?
-            .ok_or_else(|| {
-                OrchestratorError::NotFound(format!("plan {} 未找到", execution.plan_id))
-            })?;
-        let session = ChatSession::find_by_id(pool, execution.session_id)
-            .await?
-            .ok_or_else(|| {
-                OrchestratorError::NotFound(format!("session {} 未找到", execution.session_id))
-            })?;
-        let session_agents = ChatSessionAgent::find_all_for_session(pool, session.id).await?;
-        let workflow_agent_sessions =
-            WorkflowAgentSession::find_by_execution(pool, execution.id).await?;
-        let current_steps = WorkflowStep::find_by_execution(pool, execution.id).await?;
-        let edges = WorkflowStepEdge::find_by_execution(pool, execution.id).await?;
-        let agents = load_agents_for_session(pool, &session_agents).await?;
-
-        let outcome = Self::prepare_and_run_step(
-            db,
-            pool,
-            chat_runner,
-            execution,
-            step,
-            &workflow_agent_sessions,
-            &session,
-            &session_agents,
-            &agents,
-            &plan,
-            &current_steps,
-            &edges,
-        )
-        .await?;
-
-        match outcome {
-            StepOutcome::Completed => {
-                Self::finalize_single_step_retry_completion(pool, chat_runner, execution, step.id)
-                    .await
-            }
-            StepOutcome::Parked => {
-                let waiting_execution =
-                    Self::synchronize_runtime_state(pool, execution.id, false).await?;
-                Self::refresh_execution_projection_with_reason(
-                    pool,
-                    chat_runner,
-                    waiting_execution.id,
-                    None,
-                    "step_retry_waiting",
-                    vec![step.id.to_string()],
-                )
-                .await
-            }
-            StepOutcome::Failed(reason) => {
-                let failed_execution =
-                    Self::synchronize_runtime_state(pool, execution.id, false).await?;
-                Self::refresh_execution_projection_with_reason(
-                    pool,
-                    chat_runner,
-                    failed_execution.id,
-                    Some(reason),
-                    "step_retry_failed",
-                    vec![step.id.to_string()],
-                )
-                .await
-            }
-        }
-    }
-
-    async fn finalize_single_step_retry_completion(
-        pool: &SqlitePool,
-        chat_runner: &ChatRunner,
-        execution: &WorkflowExecution,
-        step_id: Uuid,
-    ) -> Result<WorkflowExecution, OrchestratorError> {
-        let refreshed_execution =
-            Self::synchronize_runtime_state(pool, execution.id, false).await?;
-        let steps = WorkflowStep::find_by_execution(pool, refreshed_execution.id).await?;
-        let workflow_agent_sessions =
-            WorkflowAgentSession::find_by_execution(pool, refreshed_execution.id).await?;
-        if refreshed_execution.status == WorkflowExecutionStatus::Completed {
-            let plan = WorkflowPlan::find_by_id(pool, refreshed_execution.plan_id)
-                .await?
-                .ok_or_else(|| {
-                    OrchestratorError::NotFound(format!(
-                        "plan {} 未找到",
-                        refreshed_execution.plan_id
-                    ))
-                })?;
-            let revision_id = refreshed_execution.active_revision_id.ok_or_else(|| {
-                OrchestratorError::NotFound(format!(
-                    "execution {} 缺少 active revision",
-                    refreshed_execution.id
-                ))
-            })?;
-            let revision = WorkflowPlanRevision::find_by_id(pool, revision_id)
-                .await?
-                .ok_or_else(|| {
-                    OrchestratorError::NotFound(format!("revision {} 未找到", revision_id))
-                })?;
-            let session_agents =
-                ChatSessionAgent::find_all_for_session(pool, refreshed_execution.session_id)
-                    .await?;
-            let agents = load_agents_for_session(pool, &session_agents).await?;
-            let completed = Self::refresh_execution_projection_with_reason(
-                pool,
-                chat_runner,
-                refreshed_execution.id,
-                None,
-                "execution_completed",
-                Vec::new(),
-            )
-            .await?;
-
-            Self::persist_completion_work_items(
-                pool,
-                chat_runner,
-                &completed,
-                &steps,
-                &workflow_agent_sessions,
-                &session_agents,
-                &agents,
-            )
-            .await?;
-            Self::refresh_workflow_card_with_reason(
-                pool,
-                chat_runner,
-                &completed,
-                &plan,
-                &revision,
-                &session_agents,
-                &agents,
-                None,
-                "step_retry_completed",
-                vec![step_id.to_string()],
-            )
-            .await?;
-
-            return Ok(completed);
-        }
-
-        Self::refresh_execution_projection_with_reason(
-            pool,
-            chat_runner,
-            refreshed_execution.id,
-            None,
-            "step_retry_completed",
-            vec![step_id.to_string()],
-        )
-        .await
-    }
-
-    pub async fn resume_execution(
-        pool: &SqlitePool,
-        chat_runner: &ChatRunner,
-        execution_id: Uuid,
-    ) -> Result<WorkflowExecution, OrchestratorError> {
-        let execution = WorkflowExecution::find_by_id(pool, execution_id)
-            .await?
-            .ok_or_else(|| {
-                OrchestratorError::NotFound(format!("execution {} 未找到", execution_id))
-            })?;
-
-        if !matches!(
-            execution.status,
-            WorkflowExecutionStatus::Paused | WorkflowExecutionStatus::Failed
-        ) {
-            return Err(OrchestratorError::IllegalTransition(format!(
-                "execution {} is {:?}, expected paused or failed",
-                execution.id, execution.status
-            )));
-        }
-
-        let steps = WorkflowStep::find_by_execution(pool, execution.id).await?;
-        let edges = WorkflowStepEdge::find_by_execution(pool, execution.id).await?;
-        let has_ready_step = steps
+        steps: &[WorkflowStep],
+        edges: &[WorkflowStepEdge],
+        completed_loop_ids: &HashSet<Uuid>,
+    ) -> bool {
+        edges
             .iter()
-            .any(|step| step.status == WorkflowStepStatus::Ready);
-        let has_promotable_pending = steps.iter().any(|step| {
-            step.status == WorkflowStepStatus::Pending
-                && !edges
+            .filter(|edge| edge.to_step_id == step.id)
+            .all(|edge| {
+                steps
                     .iter()
-                    .filter(|edge| edge.to_step_id == step.id)
-                    .any(|edge| {
-                        steps
-                            .iter()
-                            .find(|candidate| candidate.id == edge.from_step_id)
-                            .map(|candidate| candidate.status != WorkflowStepStatus::Completed)
-                            .unwrap_or(true)
+                    .find(|candidate| candidate.id == edge.from_step_id)
+                    .map(|candidate| {
+                        let same_loop = step.loop_id.is_some() && candidate.loop_id == step.loop_id;
+                        candidate.status == WorkflowStepStatus::Completed
+                            && (same_loop
+                                || candidate
+                                    .loop_id
+                                    .map_or(true, |loop_id| completed_loop_ids.contains(&loop_id)))
                     })
-        });
-
-        if execution.status == WorkflowExecutionStatus::Failed
-            && !has_ready_step
-            && !has_promotable_pending
-        {
-            return Err(OrchestratorError::IllegalTransition(
-                "failed workflow has no recoverable steps to resume".to_string(),
-            ));
-        }
-
-        let resumed = match execution.status {
-            WorkflowExecutionStatus::Failed => {
-                Self::transition_execution_and_sync(
-                    pool,
-                    chat_runner,
-                    &execution,
-                    WorkflowExecutionStatus::Paused,
-                    "execution_resumed",
-                    None,
-                )
-                .await?
-            }
-            _ => execution,
-        };
-
-        Self::refresh_execution_projection_with_reason(
-            pool,
-            chat_runner,
-            resumed.id,
-            None,
-            "execution_resumed",
-            Vec::new(),
-        )
-        .await
+                    .unwrap_or(false)
+            })
     }
 
-    fn is_step_ready_input(status: &WorkflowStepStatus) -> bool {
-        matches!(
-            status,
-            WorkflowStepStatus::WaitingInput
-                | WorkflowStepStatus::Failed
-                | WorkflowStepStatus::WaitingReview
-        )
-    }
-
-    fn derive_failed_step_follow_up_context(
-        step: &WorkflowStep,
-        transcripts: &[WorkflowTranscript],
-    ) -> FailedStepFollowUpContext {
-        if let Some(entry) = transcripts
-            .iter()
-            .rev()
-            .find(|entry| entry.sender_type != "user" && !entry.content.trim().is_empty())
-        {
-            return FailedStepFollowUpContext {
-                source_transcript_id: Some(entry.id),
-                previous_message_content: entry.content.trim().to_string(),
-            };
-        }
-
-        if let Some(payload) = parse_summary_payload(step.summary_text.as_deref()) {
-            if let Some(content) = payload
-                .content
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-            {
-                return FailedStepFollowUpContext {
-                    source_transcript_id: None,
-                    previous_message_content: content.to_string(),
-                };
-            }
-            let summary = payload.summary.trim();
-            if !summary.is_empty() {
-                return FailedStepFollowUpContext {
-                    source_transcript_id: None,
-                    previous_message_content: summary.to_string(),
-                };
-            }
-        }
-
-        FailedStepFollowUpContext {
-            source_transcript_id: None,
-            previous_message_content: format!(
-                "Step \"{}\" failed without a persisted agent reply. Continue from the latest user guidance and recover the same task.",
-                step.title
-            ),
-        }
-    }
-
-    async fn prepare_failed_step_input_follow_up(
-        pool: &SqlitePool,
-        chat_runner: &ChatRunner,
-        step: &WorkflowStep,
-        input_text: &str,
-    ) -> Result<
-        (
-            WorkflowExecution,
-            WorkflowStep,
-            WorkflowTranscript,
-            FailedStepFollowUpContext,
-        ),
-        OrchestratorError,
-    > {
-        let transcripts = WorkflowTranscript::find_by_step(pool, step.id).await?;
-        let follow_up_context = Self::derive_failed_step_follow_up_context(step, &transcripts);
-        let (execution, ready_step) = Self::prepare_step_retry(pool, chat_runner, step.id).await?;
-        let workflow_sessions = WorkflowAgentSession::find_by_execution(pool, execution.id).await?;
-        let workflow_session =
-            resolve_step_workflow_session(&execution, &workflow_sessions, &ready_step)?;
-        let transcript_meta = serde_json::json!({
-            "source_step_status": "failed",
-            "source_transcript_id": follow_up_context.source_transcript_id,
-            "action": "submitted",
-            "restart_mode": "follow_up",
-        })
-        .to_string();
-        let input_transcript = Self::write_transcript(
-            pool,
-            execution.id,
-            Some(ready_step.round_id),
-            Some(workflow_session.id),
-            Some(ready_step.id),
-            "user",
-            "message",
-            input_text,
-            Some(&transcript_meta),
-        )
-        .await?;
-        Ok((execution, ready_step, input_transcript, follow_up_context))
-    }
-
-    pub async fn submit_step_input(
-        db: &DBService,
-        chat_runner: &ChatRunner,
-        step_id: Uuid,
-        input_text: &str,
-    ) -> Result<ResolvedTranscriptAction, OrchestratorError> {
-        let pool = &db.pool;
-        let step = WorkflowStep::find_by_id(pool, step_id)
-            .await?
-            .ok_or_else(|| OrchestratorError::NotFound(format!("step {} 未找到", step_id)))?;
-        let execution = WorkflowExecution::find_by_id(pool, step.execution_id)
-            .await?
-            .ok_or_else(|| {
-                OrchestratorError::NotFound(format!("execution {} 未找到", step.execution_id))
-            })?;
-
-        let input_text = input_text.trim();
-        if input_text.is_empty() {
-            return Err(OrchestratorError::IllegalTransition(
-                "step input requires non-empty text".to_string(),
-            ));
-        }
-
-        if Self::is_step_ready_input(&step.status) {
-            let (ready_step, input_transcript, previous_message_content, retry_execution, mode) =
-                if step.status == WorkflowStepStatus::Failed {
-                    let (prepared_execution, prepared_step, recorded_input, follow_up_context) =
-                        Self::prepare_failed_step_input_follow_up(
-                            pool,
-                            chat_runner,
-                            &step,
-                            input_text,
-                        )
-                        .await?;
-                    (
-                        prepared_step,
-                        recorded_input,
-                        follow_up_context.previous_message_content,
-                        prepared_execution,
-                        StepFollowUpMode::Failed,
-                    )
-                } else {
-                    let transcript = WorkflowTranscript::find_by_step(pool, step.id)
-                        .await?
-                        .into_iter()
-                        .rev()
-                        .find(|entry| {
-                            entry.entry_type == "input_request"
-                                && entry.meta_json.as_deref().map_or(true, |meta_json| {
-                                    serde_json::from_str::<serde_json::Value>(meta_json)
-                                        .ok()
-                                        .and_then(|value| {
-                                            value
-                                                .get("resolved")
-                                                .and_then(|resolved| resolved.as_bool())
-                                        })
-                                        != Some(true)
-                                })
-                        })
-                        .ok_or_else(|| {
-                            OrchestratorError::NotFound(format!(
-                                "step {} 缺少待处理的 input_request transcript",
-                                step.id
-                            ))
-                        })?;
-                    let previous_message_content = transcript.content.clone();
-                    let resolved = Self::resolve_transcript_action(
-                        pool,
-                        chat_runner,
-                        transcript.id,
-                        "submitted",
-                        Some(input_text),
-                    )
-                    .await?;
-                    let ready_step =
-                        WorkflowStep::find_by_id(pool, step.id)
-                            .await?
-                            .ok_or_else(|| {
-                                OrchestratorError::NotFound(format!("step {} 未找到", step.id))
-                            })?;
-                    (
-                        ready_step,
-                        resolved.transcript,
-                        previous_message_content,
-                        resolved.execution,
-                        StepFollowUpMode::Paused,
-                    )
-                };
-            if ready_step.status != WorkflowStepStatus::Ready {
-                return Err(OrchestratorError::IllegalTransition(format!(
-                    "step {} is {:?}, expected ready after input submission",
-                    ready_step.id, ready_step.status
-                )));
-            }
-
-            let active_execution =
-                Self::activate_execution_for_step_retry(pool, chat_runner, &retry_execution)
-                    .await?;
-            let session = ChatSession::find_by_id(pool, active_execution.session_id)
-                .await?
-                .ok_or_else(|| {
-                    OrchestratorError::NotFound(format!(
-                        "session {} 未找到",
-                        active_execution.session_id
-                    ))
-                })?;
-            let session_agents = ChatSessionAgent::find_all_for_session(pool, session.id).await?;
-            let workflow_sessions =
-                WorkflowAgentSession::find_by_execution(pool, active_execution.id).await?;
-            let workflow_session =
-                resolve_step_workflow_session(&active_execution, &workflow_sessions, &ready_step)?;
-            let session_agent = session_agents
-                .iter()
-                .find(|item| item.id == workflow_session.session_agent_id)
-                .ok_or_else(|| {
-                    OrchestratorError::NotFound(format!(
-                        "session agent {} 未找到",
-                        workflow_session.session_agent_id
-                    ))
-                })?;
-            let agents = load_agents_for_session(pool, &session_agents).await?;
-            let agent = agents
-                .iter()
-                .find(|item| item.id == session_agent.agent_id)
-                .ok_or_else(|| {
-                    OrchestratorError::NotFound(format!("agent {} 未找到", session_agent.agent_id))
-                })?;
-            if workflow_session.agent_session_id.is_none()
-                && session_agent.agent_session_id.is_none()
-            {
-                return Err(OrchestratorError::IllegalTransition(format!(
-                    "step {} cannot resume input because no persisted agent session id was found",
-                    ready_step.id
-                )));
-            }
-            let running_step = Self::transition_step_and_sync(
-                pool,
-                chat_runner,
-                &active_execution,
-                &ready_step,
-                WorkflowStepStatus::Running,
-                "step_resumed",
-            )
-            .await?;
-            let follow_up_prompt = Self::build_step_follow_up_prompt(
-                &running_step,
-                &previous_message_content,
-                input_text,
-                mode,
-            );
-            tracing::debug!(
-                follow_up_prompt = follow_up_prompt,
-                "submit step input for following up prompt"
-            );
-
-            let protocol_message = match run_workflow_step_agent_follow_up(
-                db,
-                chat_runner,
-                &session,
-                agent,
-                session_agent,
-                workflow_session,
-                &follow_up_prompt,
-                &running_step,
-            )
-            .await
-            {
-                Ok(raw_output) => {
-                    match Self::parse_step_output_message(
-                        active_execution.id,
-                        &running_step,
-                        &raw_output,
-                    ) {
-                        Ok(message) => message,
-                        Err(err) => {
-                            let failed_step = WorkflowStep::record_execution_result(
-                                pool,
-                                running_step.id,
-                                Uuid::new_v4(),
-                                Some(
-                                    serde_json::to_string(&SummaryPayload {
-                                        summary: err.to_string(),
-                                        content: Some(raw_output),
-                                        outputs: vec![],
-                                    })
-                                    .unwrap_or_else(|_| err.to_string()),
-                                ),
-                                None,
-                            )
-                            .await?;
-                            Self::transition_step_and_sync(
-                                pool,
-                                chat_runner,
-                                &active_execution,
-                                &failed_step,
-                                WorkflowStepStatus::Failed,
-                                "step_failed",
-                            )
-                            .await?;
-                            let _ = Self::write_transcript(
-                                pool,
-                                active_execution.id,
-                                failed_step.round_id.into(),
-                                Some(workflow_session.id),
-                                Some(failed_step.id),
-                                "system",
-                                "message",
-                                &format!("Step \"{}\" failed: {}", failed_step.title, err),
-                                None,
-                            )
-                            .await;
-                            let execution = Self::refresh_execution_projection_with_reason(
-                                pool,
-                                chat_runner,
-                                active_execution.id,
-                                Some(err.to_string()),
-                                "step_input_failed",
-                                vec![running_step.id.to_string()],
-                            )
-                            .await?;
-                            return Ok(ResolvedTranscriptAction {
-                                transcript: input_transcript.clone(),
-                                execution,
-                                should_wake_scheduler: false,
-                            });
-                        }
-                    }
-                }
-                Err(WorkflowRuntimeError::Interrupted(reason)) => {
-                    let _ = Self::write_transcript(
-                        pool,
-                        active_execution.id,
-                        running_step.round_id.into(),
-                        Some(workflow_session.id),
-                        Some(running_step.id),
-                        "system",
-                        "message",
-                        &format!("Step \"{}\" interrupted: {}", running_step.title, reason),
-                        None,
-                    )
-                    .await;
-                    let execution = Self::refresh_execution_projection_with_reason(
-                        pool,
-                        chat_runner,
-                        active_execution.id,
-                        Some(reason.clone()),
-                        "step_input_failed",
-                        vec![running_step.id.to_string()],
-                    )
-                    .await?;
-                    return Ok(ResolvedTranscriptAction {
-                        transcript: input_transcript.clone(),
-                        execution,
-                        should_wake_scheduler: false,
-                    });
-                }
-                Err(err) => {
-                    let failed_step = WorkflowStep::record_execution_result(
-                        pool,
-                        running_step.id,
-                        Uuid::new_v4(),
-                        Some(
-                            serde_json::to_string(&SummaryPayload {
-                                summary: err.to_string(),
-                                content: None,
-                                outputs: vec![],
-                            })
-                            .unwrap_or_else(|_| err.to_string()),
-                        ),
-                        None,
-                    )
-                    .await?;
-                    Self::transition_step_and_sync(
-                        pool,
-                        chat_runner,
-                        &active_execution,
-                        &failed_step,
-                        WorkflowStepStatus::Failed,
-                        "step_failed",
-                    )
-                    .await?;
-                    let _ = Self::write_transcript(
-                        pool,
-                        active_execution.id,
-                        failed_step.round_id.into(),
-                        Some(workflow_session.id),
-                        Some(failed_step.id),
-                        "system",
-                        "message",
-                        &format!("Step \"{}\" failed: {}", failed_step.title, err),
-                        None,
-                    )
-                    .await;
-                    let execution = Self::refresh_execution_projection_with_reason(
-                        pool,
-                        chat_runner,
-                        active_execution.id,
-                        Some(err.to_string()),
-                        "step_input_failed",
-                        vec![running_step.id.to_string()],
-                    )
-                    .await?;
-                    return Ok(ResolvedTranscriptAction {
-                        transcript: input_transcript.clone(),
-                        execution,
-                        should_wake_scheduler: false,
-                    });
-                }
-            };
-
-            let outcome = Self::handle_step_protocol_message(
-                pool,
-                chat_runner,
-                &active_execution,
-                &running_step,
-                workflow_session,
-                protocol_message,
-            )
-            .await?;
-            let execution = match outcome {
-                StepOutcome::Completed => {
-                    Self::finalize_single_step_retry_completion(
-                        pool,
-                        chat_runner,
-                        &active_execution,
-                        running_step.id,
-                    )
-                    .await?
-                }
-                StepOutcome::Parked => {
-                    Self::refresh_execution_projection_with_reason(
-                        pool,
-                        chat_runner,
-                        active_execution.id,
-                        None,
-                        "step_input_waiting",
-                        vec![running_step.id.to_string()],
-                    )
-                    .await?
-                }
-                StepOutcome::Failed(reason) => {
-                    Self::refresh_execution_projection_with_reason(
-                        pool,
-                        chat_runner,
-                        active_execution.id,
-                        Some(reason),
-                        "step_input_failed",
-                        vec![running_step.id.to_string()],
-                    )
-                    .await?
-                }
-            };
-
-            return Ok(ResolvedTranscriptAction {
-                transcript: input_transcript,
-                execution,
-                should_wake_scheduler: false,
-            });
-        }
-
-        let workflow_sessions = WorkflowAgentSession::find_by_execution(pool, execution.id).await?;
-        let workflow_session =
-            resolve_step_workflow_session(&execution, &workflow_sessions, &step)?;
-
-        Self::write_transcript(
-            pool,
-            execution.id,
-            Some(step.round_id),
-            Some(workflow_session.id),
-            Some(step.id),
-            "user",
-            "message",
-            input_text,
-            None,
-        )
-        .await?;
-
-        let execution = Self::refresh_execution_projection_with_reason(
-            pool,
-            chat_runner,
-            execution.id,
-            None,
-            "step_input_recorded",
-            vec![step.id.to_string()],
-        )
-        .await?;
-
-        Ok(ResolvedTranscriptAction {
-            transcript: WorkflowTranscript::find_by_step(pool, step.id)
-                .await?
-                .into_iter()
-                .last()
-                .ok_or_else(|| {
-                    OrchestratorError::NotFound(format!("step {} input transcript 未找到", step.id))
-                })?,
-            execution,
-            should_wake_scheduler: false,
-        })
-    }
-
-    async fn park_for_user_action(
-        pool: &SqlitePool,
-        chat_runner: &ChatRunner,
-        execution: &WorkflowExecution,
-        step: &WorkflowStep,
-        workflow_session: &WorkflowAgentSession,
-        entry_type: &str,
-        content: &str,
-        description: Option<String>,
-        waiting_step_status: WorkflowStepStatus,
-        waiting_agent_state: WorkflowAgentSessionState,
-        extra_meta: Option<serde_json::Value>,
-    ) -> Result<WorkflowTranscript, OrchestratorError> {
-        let waiting_step = Self::transition_step_and_sync(
-            pool,
-            chat_runner,
-            execution,
-            step,
-            waiting_step_status,
-            "step_waiting",
-        )
-        .await?;
-        let waiting_execution = Self::synchronize_runtime_state(pool, execution.id, false).await?;
-        let waiting_session = WorkflowAgentSession::find_by_id(pool, workflow_session.id)
-            .await?
-            .ok_or_else(|| {
-                OrchestratorError::NotFound(format!(
-                    "workflow agent session {} not found",
-                    workflow_session.id
-                ))
-            })?;
-        let _ = waiting_agent_state;
-
-        let mut meta_json = serde_json::json!({
-            "description": description,
-            "resolved": false,
-        });
-        if let Some(extra_meta) = extra_meta
-            && let Some(extra_meta_obj) = extra_meta.as_object()
-            && let Some(meta_json_obj) = meta_json.as_object_mut()
-        {
-            for (key, value) in extra_meta_obj {
-                meta_json_obj.insert(key.clone(), value.clone());
-            }
-        }
-        let meta_json = meta_json.to_string();
-
-        let transcript = Self::write_transcript(
-            pool,
-            waiting_execution.id,
-            Some(waiting_step.round_id),
-            Some(waiting_session.id),
-            Some(waiting_step.id),
-            "control",
-            entry_type,
-            content,
-            Some(&meta_json),
-        )
-        .await?;
-
-        Self::refresh_execution_projection(pool, chat_runner, waiting_execution.id, None).await?;
-
-        Ok(transcript)
-    }
-
-    /// Park execution for final user review after all steps have completed.
-    /// Writes a "final_review" transcript card and transitions execution to Waiting.
-    async fn park_for_final_review(
-        pool: &SqlitePool,
-        chat_runner: &ChatRunner,
-        execution: &WorkflowExecution,
-    ) -> Result<WorkflowTranscript, OrchestratorError> {
-        let transcript = Self::ensure_unresolved_final_review(pool, execution.id).await?;
-
-        Self::refresh_execution_projection_with_reason(
-            pool,
-            chat_runner,
-            execution.id,
-            None,
-            "execution_waiting_final_review",
-            Vec::new(),
-        )
-        .await?;
-
-        Ok(transcript)
-    }
-
-    /// Resolve the final_review transcript action.
-    /// "accepted" → Completed, "rejected" → Paused.
-    async fn resolve_final_review(
-        pool: &SqlitePool,
-        chat_runner: &ChatRunner,
-        transcript: &WorkflowTranscript,
-        execution: &WorkflowExecution,
-        resolved_action: &str,
-    ) -> Result<ResolvedTranscriptAction, OrchestratorError> {
-        let existing_meta: serde_json::Value = transcript
-            .meta_json
-            .as_deref()
-            .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
-            .unwrap_or_else(|| serde_json::json!({}));
-        if matches!(
-            existing_meta.get("resolved"),
-            Some(serde_json::Value::Bool(true))
-        ) {
-            return Err(OrchestratorError::IllegalTransition(format!(
-                "transcript {} already resolved",
-                transcript.id
-            )));
-        }
-
-        let updated_meta_json = Self::merge_transcript_meta(
-            transcript.meta_json.as_deref(),
-            serde_json::json!({
-                "resolved": true,
-                "resolved_action": resolved_action,
-                "resolved_at": Utc::now().to_rfc3339(),
-            }),
-        );
-        let updated_transcript =
-            WorkflowTranscript::update_meta_json(pool, transcript.id, &updated_meta_json).await?;
-
-        match resolved_action {
-            "accepted" => {
-                let completed_execution = Self::transition_execution_and_sync(
-                    pool,
-                    chat_runner,
-                    execution,
-                    WorkflowExecutionStatus::Completed,
-                    "execution_completed",
-                    None,
-                )
-                .await?;
-
-                let workflow_agent_sessions =
-                    WorkflowAgentSession::find_by_execution(pool, completed_execution.id).await?;
-                let session_agents =
-                    ChatSessionAgent::find_all_for_session(pool, completed_execution.session_id)
-                        .await?;
-                let agents = load_agents_for_session(pool, &session_agents).await?;
-                Self::persist_completion_work_items(
-                    pool,
-                    chat_runner,
-                    &completed_execution,
-                    &WorkflowStep::find_by_execution(pool, completed_execution.id).await?,
-                    &workflow_agent_sessions,
-                    &session_agents,
-                    &agents,
-                )
-                .await?;
-
-                Ok(ResolvedTranscriptAction {
-                    transcript: updated_transcript,
-                    execution: completed_execution,
-                    should_wake_scheduler: false,
-                })
-            }
-            "rejected" => {
-                let paused_execution = Self::transition_execution_and_sync(
-                    pool,
-                    chat_runner,
-                    execution,
-                    WorkflowExecutionStatus::Paused,
-                    "execution_paused",
-                    None,
-                )
-                .await?;
-
-                Ok(ResolvedTranscriptAction {
-                    transcript: updated_transcript,
-                    execution: paused_execution,
-                    should_wake_scheduler: false,
-                })
-            }
-            _ => Err(OrchestratorError::IllegalTransition(format!(
-                "unsupported action '{}' for final_review",
-                resolved_action
-            ))),
-        }
-    }
-
-    fn merge_transcript_meta(
-        existing_meta_json: Option<&str>,
-        updates: serde_json::Value,
-    ) -> String {
-        let mut meta = existing_meta_json
-            .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
-            .unwrap_or_else(|| serde_json::json!({}));
-        if !meta.is_object() {
-            meta = serde_json::json!({});
-        }
-        let meta_object = meta.as_object_mut().expect("meta object");
-
-        if let Some(update_object) = updates.as_object() {
-            for (key, value) in update_object {
-                meta_object.insert(key.clone(), value.clone());
-            }
-        }
-
-        meta.to_string()
-    }
-
-    pub async fn resolve_transcript_action(
-        pool: &SqlitePool,
-        chat_runner: &ChatRunner,
-        transcript_id: Uuid,
-        resolved_action: &str,
-        input_text: Option<&str>,
-    ) -> Result<ResolvedTranscriptAction, OrchestratorError> {
-        let transcript = WorkflowTranscript::find_by_id(pool, transcript_id)
-            .await?
-            .ok_or_else(|| {
-                OrchestratorError::NotFound(format!("transcript {} 未找到", transcript_id))
-            })?;
-        let execution = WorkflowExecution::find_by_id(pool, transcript.execution_id)
-            .await?
-            .ok_or_else(|| {
-                OrchestratorError::NotFound(format!("execution {} 未找到", transcript.execution_id))
-            })?;
-
-        if execution.status != WorkflowExecutionStatus::Waiting {
-            return Err(OrchestratorError::IllegalTransition(format!(
-                "execution {} is {:?}, expected waiting",
-                execution.id, execution.status
-            )));
-        }
-
-        // Handle final_review (execution-level, no step_id needed)
-        if transcript.entry_type == "final_review" {
-            return Self::resolve_final_review(
-                pool,
-                chat_runner,
-                &transcript,
-                &execution,
-                resolved_action,
-            )
-            .await;
-        }
-
-        let step_id = transcript.step_id.ok_or_else(|| {
-            OrchestratorError::NotFound(format!("transcript {} 缺少 step_id", transcript.id))
-        })?;
-        let workflow_agent_session_id = transcript.workflow_agent_session_id.ok_or_else(|| {
-            OrchestratorError::NotFound(format!(
-                "transcript {} 缺少 workflow_agent_session_id",
-                transcript.id
-            ))
-        })?;
-
-        let step = WorkflowStep::find_by_id(pool, step_id)
-            .await?
-            .ok_or_else(|| OrchestratorError::NotFound(format!("step {} 未找到", step_id)))?;
-        let workflow_session = WorkflowAgentSession::find_by_id(pool, workflow_agent_session_id)
-            .await?
-            .ok_or_else(|| {
-                OrchestratorError::NotFound(format!(
-                    "workflow agent session {} 未找到",
-                    workflow_agent_session_id
-                ))
-            })?;
-
-        let existing_meta: serde_json::Value = transcript
-            .meta_json
-            .as_deref()
-            .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
-            .unwrap_or_else(|| serde_json::json!({}));
-        if matches!(
-            existing_meta.get("resolved"),
-            Some(serde_json::Value::Bool(true))
-        ) {
-            return Err(OrchestratorError::IllegalTransition(format!(
-                "transcript {} already resolved",
-                transcript.id
-            )));
-        }
-
-        let resolution_kind = match (transcript.entry_type.as_str(), resolved_action) {
-            ("approval_request", "approved")
-            | ("permission_request", "granted")
-            | ("continue_confirmation", "continued")
-            | ("input_request", "submitted") => TranscriptResolution::Resume,
-            ("approval_request", "rejected") => {
-                TranscriptResolution::Fail("Approval rejected by user.".to_string())
-            }
-            ("permission_request", "denied") => {
-                TranscriptResolution::Fail("Permission denied by user.".to_string())
-            }
-            ("input_request", action) => {
-                return Err(OrchestratorError::IllegalTransition(format!(
-                    "unsupported action '{}' for input request",
-                    action
-                )));
-            }
-            ("continue_confirmation", action) => {
-                return Err(OrchestratorError::IllegalTransition(format!(
-                    "unsupported action '{}' for continue confirmation",
-                    action
-                )));
-            }
-            (entry_type, action) => {
-                return Err(OrchestratorError::IllegalTransition(format!(
-                    "unsupported action '{}' for transcript type '{}'",
-                    action, entry_type
-                )));
-            }
-        };
-
-        let input_text = input_text
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string);
-        if transcript.entry_type == "input_request" && input_text.is_none() {
-            return Err(OrchestratorError::IllegalTransition(
-                "input request requires non-empty input_text".to_string(),
-            ));
-        }
-
-        let updated_meta_json = Self::merge_transcript_meta(
-            transcript.meta_json.as_deref(),
-            serde_json::json!({
-                "resolved": true,
-                "resolved_action": resolved_action,
-                "resolved_at": Utc::now().to_rfc3339(),
-                "input_text": input_text,
-            }),
-        );
-        let updated_transcript =
-            WorkflowTranscript::update_meta_json(pool, transcript.id, &updated_meta_json).await?;
-
-        let decision_notice = if let Some(input_text) = input_text.as_deref() {
-            input_text.to_string()
-        } else {
-            format!("User {} {}", resolved_action, transcript.content.trim())
-        };
-
-        match resolution_kind {
-            TranscriptResolution::Resume => {
-                let resumed_step = Self::transition_step_and_sync(
-                    pool,
-                    chat_runner,
-                    &execution,
-                    &step,
-                    WorkflowStepStatus::Ready,
-                    "step_resumed",
-                )
-                .await?;
-                let resumed_execution =
-                    Self::synchronize_runtime_state(pool, execution.id, false).await?;
-                let resumed_session = WorkflowAgentSession::find_by_id(pool, workflow_session.id)
-                    .await?
-                    .ok_or_else(|| {
-                        OrchestratorError::NotFound(format!(
-                            "workflow agent session {} not found",
-                            workflow_session.id
-                        ))
-                    })?;
-
-                let resolution_meta = serde_json::json!({
-                    "source_transcript_id": updated_transcript.id,
-                    "action": resolved_action,
-                })
-                .to_string();
-                Self::write_transcript(
-                    pool,
-                    resumed_execution.id,
-                    Some(resumed_step.round_id),
-                    Some(resumed_session.id),
-                    Some(resumed_step.id),
-                    "user",
-                    "message",
-                    &decision_notice,
-                    Some(&resolution_meta),
-                )
-                .await?;
-
-                Self::refresh_execution_projection(pool, chat_runner, resumed_execution.id, None)
-                    .await?;
-
-                Ok(ResolvedTranscriptAction {
-                    transcript: updated_transcript,
-                    execution: resumed_execution,
-                    should_wake_scheduler: true,
-                })
-            }
-            TranscriptResolution::Fail(failure_reason) => {
-                let recorded_step = WorkflowStep::record_execution_result(
-                    pool,
-                    step.id,
-                    Uuid::new_v4(),
-                    Some(
-                        serde_json::to_string(&SummaryPayload {
-                            summary: failure_reason.clone(),
-                            content: Some(transcript.content.clone()),
-                            outputs: vec![],
-                        })
-                        .unwrap_or_else(|_| failure_reason.clone()),
-                    ),
-                    None,
-                )
-                .await?;
-                let failed_step = Self::transition_step_and_sync(
-                    pool,
-                    chat_runner,
-                    &execution,
-                    &recorded_step,
-                    WorkflowStepStatus::Failed,
-                    "step_failed",
-                )
-                .await?;
-                let failed_execution =
-                    Self::synchronize_runtime_state(pool, execution.id, false).await?;
-                let failed_session = WorkflowAgentSession::find_by_id(pool, workflow_session.id)
-                    .await?
-                    .ok_or_else(|| {
-                        OrchestratorError::NotFound(format!(
-                            "workflow agent session {} not found",
-                            workflow_session.id
-                        ))
-                    })?;
-
-                let resolution_meta = serde_json::json!({
-                    "source_transcript_id": updated_transcript.id,
-                    "action": resolved_action,
-                    "status": "failed",
-                })
-                .to_string();
-                Self::write_transcript(
-                    pool,
-                    failed_execution.id,
-                    Some(failed_step.round_id),
-                    Some(failed_session.id),
-                    Some(failed_step.id),
-                    "user",
-                    "message",
-                    &decision_notice,
-                    Some(&resolution_meta),
-                )
-                .await?;
-
-                Self::refresh_execution_projection(
-                    pool,
-                    chat_runner,
-                    failed_execution.id,
-                    Some(failure_reason),
-                )
-                .await?;
-
-                Ok(ResolvedTranscriptAction {
-                    transcript: updated_transcript,
-                    execution: failed_execution,
-                    should_wake_scheduler: false,
-                })
-            }
-        }
-    }
-
-    async fn persist_completion_work_items(
-        pool: &SqlitePool,
-        chat_runner: &ChatRunner,
+    fn scheduler_step_edges_from_compiled(
         execution: &WorkflowExecution,
         steps: &[WorkflowStep],
-        workflow_sessions: &[WorkflowAgentSession],
-        session_agents: &[ChatSessionAgent],
-        agents: &[ChatAgent],
-    ) -> Result<(), OrchestratorError> {
-        if !ChatWorkItem::find_by_run_id(pool, execution.id)
-            .await?
-            .is_empty()
-        {
-            return Ok(());
+        edges: &[WorkflowStepEdge],
+        compiled_graph: &CompiledGraph,
+    ) -> Result<Vec<WorkflowStepEdge>, OrchestratorError> {
+        if compiled_graph.edges.is_empty() {
+            return Ok(edges.to_vec());
         }
 
-        let result_step = steps
-            .iter()
-            .find(|step| step.step_type == WorkflowStepType::Result)
-            .ok_or_else(|| {
-                OrchestratorError::NotFound("workflow result step 未找到".to_string())
-            })?;
-        let payload =
-            parse_summary_payload(result_step.summary_text.as_deref()).ok_or_else(|| {
-                OrchestratorError::Runtime(WorkflowRuntimeError::Validation(
-                    "workflow result step 缺少可持久化的完成摘要".to_string(),
-                ))
-            })?;
-        let workflow_session =
-            resolve_step_workflow_session(execution, workflow_sessions, result_step)?;
-        let session_agent = session_agents
-            .iter()
-            .find(|item| item.id == workflow_session.session_agent_id)
-            .ok_or_else(|| {
-                OrchestratorError::NotFound(format!(
-                    "session agent {} 未找到",
-                    workflow_session.session_agent_id
-                ))
-            })?;
-        let agent = agents
-            .iter()
-            .find(|item| item.id == session_agent.agent_id)
-            .ok_or_else(|| {
-                OrchestratorError::NotFound(format!("agent {} 未找到", session_agent.agent_id))
-            })?;
-
-        let conclusion = match payload.content.as_deref().map(str::trim) {
-            Some(content) if !content.is_empty() && content != payload.summary.trim() => {
-                format!("{}\n\n{}", payload.summary, content)
-            }
-            _ => payload.summary.clone(),
+        let scoped_steps = if let Some(active_round_id) = execution.active_round_id {
+            steps
+                .iter()
+                .filter(|step| step.round_id == active_round_id)
+                .collect::<Vec<_>>()
+        } else {
+            steps.iter().collect::<Vec<_>>()
         };
 
-        chat_runner
-            .persist_work_item(
-                execution.session_id,
-                session_agent.id,
-                agent.id,
-                execution.id,
-                &agent.name,
-                ChatWorkItemType::Conclusion,
-                conclusion,
-            )
-            .await?;
+        let step_id_by_key = scoped_steps
+            .iter()
+            .map(|step| (step.step_key.as_str(), step.id))
+            .collect::<HashMap<_, _>>();
 
-        for output in payload.outputs {
-            let output = output.trim();
-            if output.is_empty() {
+        let mut existing = edges
+            .iter()
+            .map(|edge| {
+                (
+                    edge.from_step_id,
+                    edge.to_step_id,
+                    to_workflow_wire_value(&edge.edge_kind),
+                )
+            })
+            .collect::<HashSet<_>>();
+
+        let mut repaired = edges.to_vec();
+        for compiled_edge in &compiled_graph.edges {
+            let from_step_id = *step_id_by_key
+                .get(compiled_edge.from_step_key.as_str())
+                .ok_or_else(|| {
+                    OrchestratorError::NotFound(format!(
+                        "compiled edge source step {} not found for execution {}",
+                        compiled_edge.from_step_key, execution.id
+                    ))
+                })?;
+            let to_step_id = *step_id_by_key
+                .get(compiled_edge.to_step_key.as_str())
+                .ok_or_else(|| {
+                    OrchestratorError::NotFound(format!(
+                        "compiled edge target step {} not found for execution {}",
+                        compiled_edge.to_step_key, execution.id
+                    ))
+                })?;
+            let edge_kind = to_workflow_wire_value(&compiled_edge.edge_kind);
+            let key = (from_step_id, to_step_id, edge_kind);
+            if existing.contains(&key) {
                 continue;
             }
 
-            chat_runner
-                .persist_work_item(
-                    execution.session_id,
-                    session_agent.id,
-                    agent.id,
-                    execution.id,
-                    &agent.name,
-                    ChatWorkItemType::Artifact,
-                    format!("`{output}`"),
-                )
-                .await?;
-        }
-
-        Ok(())
-    }
-
-    pub async fn create_workflow_plan_and_card(
-        pool: &SqlitePool,
-        chat_runner: &ChatRunner,
-        session: &ChatSession,
-        source_message_id: Option<Uuid>,
-        lead_session_agent: &ChatSessionAgent,
-        plan_json: &str,
-    ) -> Result<(WorkflowPlan, WorkflowPlanRevision, ChatMessage), OrchestratorError> {
-        let parsed_plan: WorkflowPlanJson = serde_json::from_str(plan_json)?;
-        let plan_hash = WorkflowCompiler::compute_hash(&parsed_plan);
-        let plan_schema_version = parsed_plan
-            .plan_schema_version()
-            .map_err(|err| OrchestratorError::Runtime(WorkflowRuntimeError::Validation(err)))?;
-        let plan = WorkflowPlan::create(
-            pool,
-            &CreateWorkflowPlan {
-                session_id: session.id,
-                source_message_id,
-                created_by_session_agent_id: Some(lead_session_agent.id),
-                title: parsed_plan.title.clone(),
-                summary_text: Some(parsed_plan.goal.clone()),
-                plan_json: plan_json.to_string(),
-                plan_schema_version,
-                plan_hash: plan_hash.clone(),
-                validation_status: WorkflowValidationStatus::Valid,
-                validation_errors_json: None,
-            },
-            Uuid::new_v4(),
-        )
-        .await?;
-        let plan = WorkflowPlan::update_status(pool, plan.id, WorkflowPlanStatus::Ready).await?;
-        let revision = WorkflowPlanRevision::create(
-            pool,
-            &CreateWorkflowPlanRevision {
-                plan_id: plan.id,
-                revision_no: 1,
-                edited_by: WorkflowRevisionEditor::Lead,
-                editor_session_agent_id: Some(lead_session_agent.id),
-                reason: Some("generate-plan-and-run".to_string()),
-                plan_json: plan_json.to_string(),
-                plan_hash,
-                validation_status: WorkflowValidationStatus::Valid,
-                validation_errors_json: None,
-            },
-            Uuid::new_v4(),
-        )
-        .await?;
-        let message = chat::create_message(
-            pool,
-            session.id,
-            ChatSenderType::System,
-            None,
-            "Workflow execution".to_string(),
-            Some(serde_json::json!({
-                "card_type": "workflow_execution"
-            })),
-        )
-        .await?;
-        chat_runner.emit_message_new(message.session_id, message.clone());
-        Ok((plan, revision, message))
-    }
-
-    /// Create a plan in `ready` state and a preview card (no execution created).
-    /// Used by the `workflow_generate` -> plan_generation pipeline.
-    pub async fn create_workflow_plan_preview_card(
-        pool: &SqlitePool,
-        chat_runner: &ChatRunner,
-        session: &ChatSession,
-        source_message_id: Option<Uuid>,
-        lead_session_agent: &ChatSessionAgent,
-        plan_json: &str,
-        preferred_card_message_id: Option<Uuid>,
-    ) -> Result<(WorkflowPlan, WorkflowPlanRevision, ChatMessage), OrchestratorError> {
-        let parsed_plan: WorkflowPlanJson = serde_json::from_str(plan_json)?;
-        let plan_hash = WorkflowCompiler::compute_hash(&parsed_plan);
-        let plan_schema_version = parsed_plan
-            .plan_schema_version()
-            .map_err(|err| OrchestratorError::Runtime(WorkflowRuntimeError::Validation(err)))?;
-        let plan = WorkflowPlan::create(
-            pool,
-            &CreateWorkflowPlan {
-                session_id: session.id,
-                source_message_id,
-                created_by_session_agent_id: Some(lead_session_agent.id),
-                title: parsed_plan.title.clone(),
-                summary_text: Some(parsed_plan.goal.clone()),
-                plan_json: plan_json.to_string(),
-                plan_schema_version,
-                plan_hash: plan_hash.clone(),
-                validation_status: WorkflowValidationStatus::Valid,
-                validation_errors_json: None,
-            },
-            Uuid::new_v4(),
-        )
-        .await?;
-        let plan = WorkflowPlan::update_status(pool, plan.id, WorkflowPlanStatus::Ready).await?;
-        let revision = WorkflowPlanRevision::create(
-            pool,
-            &CreateWorkflowPlanRevision {
-                plan_id: plan.id,
-                revision_no: 1,
-                edited_by: WorkflowRevisionEditor::Lead,
-                editor_session_agent_id: Some(lead_session_agent.id),
-                reason: Some("workflow_generate".to_string()),
-                plan_json: plan_json.to_string(),
-                plan_hash,
-                validation_status: WorkflowValidationStatus::Valid,
-                validation_errors_json: None,
-            },
-            Uuid::new_v4(),
-        )
-        .await?;
-
-        // Build preview projection
-        let session_agents = ChatSessionAgent::find_all_for_session(pool, session.id).await?;
-        let agents = load_agents_for_session(pool, &session_agents).await?;
-        let agent_views: Vec<super::workflow_runtime::WorkflowCardAgent> = session_agents
-            .iter()
-            .filter_map(|sa| {
-                let agent = agents.iter().find(|a| a.id == sa.agent_id)?;
-                Some(super::workflow_runtime::WorkflowCardAgent {
-                    session_agent_id: sa.id.to_string(),
-                    workflow_agent_session_id: None,
-                    agent_id: agent.id.to_string(),
-                    name: agent.name.clone(),
-                })
-            })
-            .collect();
-        let agent_name_by_id: HashMap<String, String> = agent_views
-            .iter()
-            .map(|agent| (agent.agent_id.clone(), agent.name.clone()))
-            .collect();
-
-        let step_views: Vec<super::workflow_runtime::WorkflowCardStep> = parsed_plan
-            .nodes
-            .iter()
-            .map(|n| {
-                let step_type_str = if n.data.step_type.is_empty() {
-                    "task".to_string()
-                } else {
-                    n.data.step_type.to_lowercase()
-                };
-                super::workflow_runtime::WorkflowCardStep {
-                    id: n.id.clone(),
-                    step_key: n.id.clone(),
-                    title: n.data.title.clone(),
-                    step_type: step_type_str,
-                    status: "pending".to_string(),
-                    agent_name: n
-                        .data
-                        .agent_id
-                        .as_ref()
-                        .and_then(|agent_id| agent_name_by_id.get(agent_id).cloned())
-                        .or_else(|| n.data.agent_id.clone()),
-                    summary_text: None,
-                    content: None,
-                }
-            })
-            .collect();
-
-        let preview = super::workflow_runtime::WorkflowCardProjection {
-            execution_id: None,
-            plan_id: plan.id.to_string(),
-            revision_id: revision.id.to_string(),
-            title: plan.title.clone(),
-            goal: plan
-                .summary_text
-                .clone()
-                .filter(|v| !v.trim().is_empty())
-                .unwrap_or_else(|| plan.title.clone()),
-            state: super::workflow_runtime::WorkflowCardState::PreviewReady,
-            execution_status: "preview".to_string(),
-            error_message: None,
-            completed_step_count: 0,
-            total_step_count: parsed_plan.nodes.len(),
-            result_summary: None,
-            outputs: Vec::new(),
-            agents: agent_views,
-            steps: step_views,
-            plan: parsed_plan,
-            started_at: None,
-            completed_at: None,
-            validation_errors: None,
-        };
-
-        let card_meta = serde_json::json!({
-            "card_type": "workflow_plan",
-            "workflow_plan_id": plan.id,
-            "active_revision_id": revision.id,
-            "display_state": "preview_ready",
-            "workflow_card": serde_json::to_value(&preview)?,
-        });
-
-        // Single-card contract: reuse existing workflow card if present
-        let existing_card_id = if let Some(message_id) = preferred_card_message_id {
-            Some(message_id)
-        } else {
-            Self::find_session_workflow_card_message_id(pool, session.id).await
-        };
-        let message = if let Some(existing_id) = existing_card_id {
-            let updated = ChatMessage::update_content_and_meta(
-                pool,
-                existing_id,
-                "Workflow Plan",
-                card_meta.clone(),
-            )
-            .await?;
-            chat_runner.emit_message_updated(updated.session_id, updated.clone());
-            updated
-        } else {
-            let msg = chat::create_message(
-                pool,
-                session.id,
-                ChatSenderType::System,
-                None,
-                "Workflow Plan".to_string(),
-                Some(card_meta),
-            )
-            .await?;
-            chat_runner.emit_message_new(msg.session_id, msg.clone());
-            msg
-        };
-
-        // Update plan with the card message id for later reference (e.g. execute_plan)
-        let plan = WorkflowPlan::update_workflow_card_message_id(pool, plan.id, message.id).await?;
-
-        Ok((plan, revision, message))
-    }
-
-    /// Find the existing workflow card message in this session by looking at
-    /// plans that already have a `workflow_card_message_id`.
-    pub async fn find_session_workflow_card_message_id(
-        pool: &SqlitePool,
-        session_id: Uuid,
-    ) -> Option<Uuid> {
-        let plans = WorkflowPlan::find_by_session(pool, session_id)
-            .await
-            .unwrap_or_default();
-        for plan in &plans {
-            if let Some(card_msg_id) = plan.workflow_card_message_id {
-                return Some(card_msg_id);
-            }
-        }
-        None
-    }
-
-    // -----------------------------------------------------------------------
-    // Execute API: create execution from an existing ready plan (idempotent)
-    // -----------------------------------------------------------------------
-
-    /// Execute a plan that is in `ready` status.
-    /// Idempotent: if an active execution already exists for this plan, returns it.
-    pub async fn execute_plan(
-        pool: &SqlitePool,
-        chat_runner: &ChatRunner,
-        plan_id: Uuid,
-    ) -> Result<BootstrapResult, OrchestratorError> {
-        let plan = WorkflowPlan::find_by_id(pool, plan_id)
-            .await?
-            .ok_or_else(|| OrchestratorError::NotFound(format!("plan {} 未找到", plan_id)))?;
-
-        if plan.status != WorkflowPlanStatus::Ready {
-            return Err(OrchestratorError::IllegalTransition(format!(
-                "plan {} status is {:?}, expected Ready",
-                plan_id, plan.status
-            )));
-        }
-
-        // Idempotent check: if active execution exists for this plan, return early
-        let active_executions =
-            WorkflowExecution::find_non_terminal_by_session(pool, plan.session_id).await?;
-        for existing in &active_executions {
-            tracing::debug!(
-                "checking existing execution {} with plan_id {:?} new plan_id {}",
-                existing.id,
-                existing.plan_id,
-                plan_id
+            let edge = WorkflowStepEdge {
+                id: Uuid::new_v4(),
+                execution_id: execution.id,
+                compiled_revision_id: execution.active_revision_id,
+                from_step_id,
+                to_step_id,
+                edge_kind: compiled_edge.edge_kind.clone(),
+                created_at: Utc::now(),
+            };
+            tracing::warn!(
+                execution_id = %execution.id,
+                from_step = %compiled_edge.from_step_key,
+                to_step = %compiled_edge.to_step_key,
+                "reconstructed missing workflow step edge in memory before scheduling"
             );
-
-            if existing.plan_id == plan_id {
-                tracing::info!(
-                    "found existing active execution {} for plan {}, returning existing execution",
-                    existing.id,
-                    plan_id
-                );
-
-                // Already executing this plan
-                let steps = WorkflowStep::find_by_execution(pool, existing.id).await?;
-                let edges = WorkflowStepEdge::find_by_execution(pool, existing.id).await?;
-                let agent_sessions =
-                    WorkflowAgentSession::find_by_execution(pool, existing.id).await?;
-                let round = existing.active_round_id.and_then(|_| {
-                    // We can't do async in and_then easily, so skip
-                    None::<WorkflowRound>
-                });
-                let events = WorkflowEvent::find_by_execution(pool, existing.id).await?;
-                return Ok(BootstrapResult {
-                    execution: existing.clone(),
-                    round,
-                    steps,
-                    edges,
-                    agent_sessions,
-                    events,
-                    failed: false,
-                    failure_reason: None,
-                });
-            }
-        }
-        if !active_executions.is_empty() {
-            return Err(OrchestratorError::IllegalTransition(
-                "another workflow execution is already active in this session".to_string(),
-            ));
+            existing.insert(key);
+            repaired.push(edge);
         }
 
-        let revision = WorkflowPlanRevision::find_latest_by_plan(pool, plan_id)
-            .await?
-            .ok_or_else(|| {
-                OrchestratorError::NotFound(format!("plan {} 缺少 revision", plan_id))
-            })?;
-
-        let session = ChatSession::find_by_id(pool, plan.session_id)
-            .await?
-            .ok_or_else(|| {
-                OrchestratorError::NotFound(format!("session {} 未找到", plan.session_id))
-            })?;
-        let session_agents = ChatSessionAgent::find_all_for_session(pool, session.id).await?;
-        let agents = load_agents_for_session(pool, &session_agents).await?;
-
-        let lead_session_agent_id = plan
-            .created_by_session_agent_id
-            .or_else(|| session_agents.first().map(|sa| sa.id));
-
-        let valid_agent_ids: Vec<String> = agents.iter().map(|a| a.id.to_string()).collect();
-        let agent_id_map: HashMap<String, Uuid> = session_agents
-            .iter()
-            .map(|sa| (sa.agent_id.to_string(), sa.id))
-            .collect();
-
-        let bootstrap = Self::bootstrap_execution(
-            pool,
-            &plan,
-            &revision,
-            lead_session_agent_id,
-            &valid_agent_ids,
-            &agent_id_map,
-        )
-        .await?;
-
-        // Update the workflow card if it exists
-        if let Some(card_msg_id) = plan.workflow_card_message_id {
-            let _ = WorkflowExecution::update_workflow_card_message_id(
-                pool,
-                bootstrap.execution.id,
-                card_msg_id,
-            )
-            .await;
-
-            // Refresh the card to show running state
-            Self::refresh_workflow_card(
-                pool,
-                chat_runner,
-                &bootstrap.execution,
-                &plan,
-                &revision,
-                &session_agents,
-                &agents,
-                bootstrap.failure_reason.clone(),
-            )
-            .await?;
+        if repaired.len() != edges.len() {
+            tracing::warn!(
+                execution_id = %execution.id,
+                before = edges.len(),
+                after = repaired.len(),
+                "using reconstructed workflow step edges for scheduling"
+            );
         }
 
-        Ok(bootstrap)
+        Ok(repaired)
     }
 
-    // -----------------------------------------------------------------------
-    // Pause / Interrupt controls
-    // -----------------------------------------------------------------------
+    pub(crate) fn is_workflow_session_available(workflow_session: &WorkflowAgentSession) -> bool {
+        workflow_session.state == WorkflowAgentSessionState::Idle
+    }
 
-    /// Pause all running steps in the execution.
-    pub async fn pause_all(
-        chat_runner: &ChatRunner,
+    fn insert_scheduler_candidate(
+        candidates_by_session: &mut HashMap<Uuid, SchedulerCandidate>,
+        candidate: SchedulerCandidate,
+    ) {
+        let should_replace = candidates_by_session
+            .get(&candidate.session_id)
+            .map(|existing| {
+                (candidate.priority_order, candidate.tie_order)
+                    < (existing.priority_order, existing.tie_order)
+            })
+            .unwrap_or(true);
+
+        if should_replace {
+            candidates_by_session.insert(candidate.session_id, candidate);
+        }
+    }
+
+    fn loop_members_completed(
+        workflow_loop: &WorkflowLoop,
+        steps: &[WorkflowStep],
+    ) -> Result<bool, OrchestratorError> {
+        let member_ids = serde_json::from_str::<Vec<Uuid>>(&workflow_loop.member_step_ids_json)?;
+        let step_by_id = steps
+            .iter()
+            .map(|step| (step.id, step))
+            .collect::<HashMap<_, _>>();
+
+        Ok(member_ids.iter().all(|step_id| {
+            step_by_id
+                .get(step_id)
+                .map(|step| step.status == WorkflowStepStatus::Completed)
+                .unwrap_or(false)
+        }))
+    }
+
+    fn loop_review_display_order(
+        workflow_loop: &WorkflowLoop,
+        steps: &[WorkflowStep],
+    ) -> Option<i32> {
+        steps
+            .iter()
+            .find(|step| step.id == workflow_loop.review_step_id)
+            .map(|step| step.display_order)
+    }
+
+    fn is_loop_review_step_runnable(step: &WorkflowStep) -> bool {
+        matches!(
+            step.status,
+            WorkflowStepStatus::Pending
+                | WorkflowStepStatus::Ready
+                | WorkflowStepStatus::Completed
+                | WorkflowStepStatus::Failed
+                | WorkflowStepStatus::Interrupted
+                | WorkflowStepStatus::Blocked
+                | WorkflowStepStatus::Revising
+        )
+    }
+
+    async fn restore_recovered_failed_loops(
         pool: &SqlitePool,
-        execution_id: Uuid,
-    ) -> Result<WorkflowExecution, OrchestratorError> {
-        let execution = WorkflowExecution::find_by_id(pool, execution_id)
-            .await?
-            .ok_or_else(|| {
-                OrchestratorError::NotFound(format!("execution {} 未找到", execution_id))
-            })?;
-
-        // Accept pause from Running (interrupt active steps) or already-Paused states.
-        if !matches!(
-            execution.status,
-            WorkflowExecutionStatus::Running | WorkflowExecutionStatus::Paused
-        ) {
-            return Err(OrchestratorError::IllegalTransition(format!(
-                "cannot pause: execution is {:?}, expected running or paused",
-                execution.status
-            )));
-        }
-
-        // Interrupt all currently running steps so no agent work remains active.
-        let steps = WorkflowStep::find_by_execution(pool, execution.id).await?;
-        for step in &steps {
-            if step.status == WorkflowStepStatus::Running {
-                cancel_running_step(step.id);
-                let interrupt_requested = Self::transition_step_and_sync(
-                    pool,
-                    chat_runner,
-                    &execution,
-                    step,
-                    WorkflowStepStatus::InterruptRequested,
-                    "step_interrupt_requested",
-                )
-                .await?;
-                let _ = Self::transition_step_and_sync(
-                    pool,
-                    chat_runner,
-                    &execution,
-                    &interrupt_requested,
-                    WorkflowStepStatus::Interrupted,
-                    "step_interrupted",
-                )
-                .await?;
+        execution: &WorkflowExecution,
+        steps: &[WorkflowStep],
+        workflow_loops: &mut [WorkflowLoop],
+    ) -> Result<Vec<WorkflowLoop>, OrchestratorError> {
+        let mut recovered_loops = Vec::new();
+        for workflow_loop in workflow_loops.iter_mut().filter(|workflow_loop| {
+            workflow_loop.execution_id == execution.id
+                && workflow_loop.status == WorkflowLoopStatus::Failed
+        }) {
+            let loop_has_failed_step = steps.iter().any(|step| {
+                step.loop_id == Some(workflow_loop.id) && step.status == WorkflowStepStatus::Failed
+            });
+            if loop_has_failed_step {
+                continue;
             }
-        }
 
-        // Re-synchronize after interrupting all running steps.
-        let execution = Self::synchronize_runtime_state(pool, execution.id, false).await?;
-
-        // If execution didn't naturally land on Paused, explicitly transition to Paused.
-        let execution = if execution.status != WorkflowExecutionStatus::Paused {
-            Self::transition_execution_and_sync(
+            let running_loop = WorkflowLoop::update_status(
                 pool,
-                chat_runner,
-                &execution,
-                WorkflowExecutionStatus::Paused,
-                "execution_paused",
+                workflow_loop.id,
+                WorkflowLoopStatus::Running,
                 None,
             )
-            .await?
-        } else {
-            execution
-        };
-
-        Self::refresh_execution_projection_with_reason(
-            pool,
-            chat_runner,
-            execution.id,
-            None,
-            "execution_paused",
-            Vec::new(),
-        )
-        .await
-    }
-
-    /// Interrupt a specific step.
-    /// After interruption, checks if the execution has any remaining runnable steps.
-    /// If not, transitions execution to Failed to avoid being stuck in Running forever.
-    pub async fn interrupt_step(
-        chat_runner: &ChatRunner,
-        pool: &SqlitePool,
-        execution_id: Uuid,
-        step_id: Uuid,
-    ) -> Result<WorkflowStep, OrchestratorError> {
-        let execution = WorkflowExecution::find_by_id(pool, execution_id)
-            .await?
-            .ok_or_else(|| {
-                OrchestratorError::NotFound(format!("execution {} 未找到", execution_id))
-            })?;
-
-        let step = WorkflowStep::find_by_id(pool, step_id)
-            .await?
-            .ok_or_else(|| OrchestratorError::NotFound(format!("step {} 未找到", step_id)))?;
-
-        if step.status != WorkflowStepStatus::Running {
-            return Err(OrchestratorError::IllegalTransition(format!(
-                "cannot interrupt: step is {:?}",
-                step.status
-            )));
+            .await?;
+            *workflow_loop = running_loop.clone();
+            recovered_loops.push(running_loop);
         }
 
-        // Cancel the running agent process for this step.
-        cancel_running_step(step_id);
-
-        let interrupt_requested = Self::transition_step_and_sync(
-            pool,
-            chat_runner,
-            &execution,
-            &step,
-            WorkflowStepStatus::InterruptRequested,
-            "step_interrupt_requested",
-        )
-        .await?;
-
-        let interrupted_step = Self::transition_step_and_sync(
-            pool,
-            chat_runner,
-            &execution,
-            &interrupt_requested,
-            WorkflowStepStatus::Interrupted,
-            "step_interrupted",
-        )
-        .await?;
-
-        let _ = Self::synchronize_runtime_state(pool, execution_id, false).await?;
-
-        Ok(interrupted_step)
+        Ok(recovered_loops)
     }
 }
 
-/// Bootstrap 结果
-#[derive(Debug)]
-pub struct BootstrapResult {
-    pub execution: WorkflowExecution,
-    pub round: Option<WorkflowRound>,
-    pub steps: Vec<WorkflowStep>,
-    pub edges: Vec<WorkflowStepEdge>,
-    pub agent_sessions: Vec<WorkflowAgentSession>,
-    pub events: Vec<WorkflowEvent>,
-    pub failed: bool,
-    pub failure_reason: Option<String>,
-}
+// -----------------------------------------------------------------------
+// Free helper functions used across submodules
+// -----------------------------------------------------------------------
 
-#[derive(Debug)]
-pub struct ResolvedTranscriptAction {
-    pub transcript: WorkflowTranscript,
-    pub execution: WorkflowExecution,
-    pub should_wake_scheduler: bool,
-}
-
-enum TranscriptResolution {
-    Resume,
-    Fail(String),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StepFollowUpMode {
-    Paused,
-    Failed,
-}
-
-#[derive(Debug, Clone)]
-struct FailedStepFollowUpContext {
-    source_transcript_id: Option<Uuid>,
-    previous_message_content: String,
-}
-
-/// Outcome of a single step execution within the scheduler.
-/// Step-level state transitions are handled internally; execution-level
-/// transitions are deferred to the caller.
-enum StepOutcome {
-    /// Step completed with a final result
-    Completed,
-    /// Step parked waiting for user action (approval/permission/continue/input)
-    Parked,
-    /// Step failed with the given error message
-    Failed(String),
-}
-
-impl WorkflowOrchestrator {
-    fn build_step_follow_up_prompt(
-        step: &WorkflowStep,
-        previous_message_content: &str,
-        input_text: &str,
-        mode: StepFollowUpMode,
-    ) -> String {
-        let opening = match mode {
-            StepFollowUpMode::Paused => format!(
-                "The user has replied while workflow step \"{}\" is paused.",
-                step.title
-            ),
-            StepFollowUpMode::Failed => format!(
-                "The previous attempt for workflow step \"{}\" failed. The user has now provided follow-up input to restart the same agent session and continue execution.",
-                step.title
-            ),
-        };
-        let resume_rule = match mode {
-            StepFollowUpMode::Paused => {
-                "Do not repeat the whole task from scratch. Resume from the paused point."
-            }
-            StepFollowUpMode::Failed => {
-                "Do not restart the whole task from scratch unless required. Resume from the failed point and fix the issue that caused the failure."
-            }
-        };
-        format!(
-            r#"{opening}
-
-Previous agent message:
-{previous_message_content}
-
-Latest user input:
-{input_text}
-
-Continue from the same session context and reply with exactly one workflow protocol JSON object.
-{resume_rule}
-
-Workflow step context:
-- step_key: {step_key}
-- execution_id: {execution_id}
-- step_type: {step_type}
-- step_title: {step_title}
-- step_instructions: {step_instructions}
-
-Workflow step protocol JSON schema:
-{{
-  "type": "final_result | error | approval_request | permission_request | continue_confirmation | input_request",
-  "step_key": "{step_key}",
-  "execution_id": "{execution_id}",
-
-  "summary": "required when type=final_result",
-  "content": "required when type=final_result, optional when type=error",
-  "outputs": ["optional relative workspace paths when type=final_result"],
-
-  "message": "required when type=error or type=continue_confirmation",
-
-  "title": "required when type=approval_request or type=permission_request",
-  "description": "optional when type=approval_request | permission_request | continue_confirmation | input_request",
-
-  "prompt": "required when type=input_request",
-  "placeholder": "optional when type=input_request"
-}}
-
-Rules:
-- step_key must stay exactly "{step_key}".
-- execution_id must stay exactly "{execution_id}".
-- Return exactly one JSON object and no extra Markdown or explanation.
-- outputs must contain only relative workspace paths.
-- If the user input fully resolves the pause, continue and return final_result or the next appropriate protocol message.
-"#,
-            opening = opening,
-            step_title = step.title,
-            previous_message_content = previous_message_content.trim(),
-            input_text = input_text,
-            resume_rule = resume_rule,
-            step_key = step.step_key,
-            execution_id = step.execution_id,
-            step_type = format!("{:?}", step.step_type).to_lowercase(),
-            step_instructions = step.instructions
-        )
-    }
-
-    async fn handle_step_protocol_message(
-        pool: &SqlitePool,
-        chat_runner: &ChatRunner,
-        execution: &WorkflowExecution,
-        running_step: &WorkflowStep,
-        workflow_session: &WorkflowAgentSession,
-        protocol_message: WorkflowStepProtocolMessage,
-    ) -> Result<StepOutcome, OrchestratorError> {
-        match protocol_message {
-            WorkflowStepProtocolMessage::ApprovalRequest {
-                title, description, ..
-            } => {
-                Self::park_for_user_action(
-                    pool,
-                    chat_runner,
-                    execution,
-                    running_step,
-                    workflow_session,
-                    "approval_request",
-                    &title,
-                    description,
-                    WorkflowStepStatus::WaitingReview,
-                    WorkflowAgentSessionState::Paused,
-                    None,
-                )
-                .await?;
-                Ok(StepOutcome::Parked)
-            }
-            WorkflowStepProtocolMessage::PermissionRequest {
-                title, description, ..
-            } => {
-                Self::park_for_user_action(
-                    pool,
-                    chat_runner,
-                    execution,
-                    running_step,
-                    workflow_session,
-                    "permission_request",
-                    &title,
-                    description,
-                    WorkflowStepStatus::WaitingReview,
-                    WorkflowAgentSessionState::Paused,
-                    None,
-                )
-                .await?;
-                Ok(StepOutcome::Parked)
-            }
-            WorkflowStepProtocolMessage::ContinueConfirmation {
-                message,
-                description,
-                ..
-            } => {
-                Self::park_for_user_action(
-                    pool,
-                    chat_runner,
-                    execution,
-                    running_step,
-                    workflow_session,
-                    "continue_confirmation",
-                    &message,
-                    description,
-                    WorkflowStepStatus::WaitingInput,
-                    WorkflowAgentSessionState::Paused,
-                    None,
-                )
-                .await?;
-                Ok(StepOutcome::Parked)
-            }
-            WorkflowStepProtocolMessage::InputRequest {
-                prompt,
-                description,
-                placeholder,
-                ..
-            } => {
-                Self::park_for_user_action(
-                    pool,
-                    chat_runner,
-                    execution,
-                    running_step,
-                    workflow_session,
-                    "input_request",
-                    &prompt,
-                    description,
-                    WorkflowStepStatus::WaitingInput,
-                    WorkflowAgentSessionState::Paused,
-                    Some(serde_json::json!({
-                        "placeholder": placeholder,
-                    })),
-                )
-                .await?;
-                Ok(StepOutcome::Parked)
-            }
-            WorkflowStepProtocolMessage::Error {
-                message, content, ..
-            } => {
-                let error_message = message.trim().to_string();
-                let error_detail = content
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(str::to_string);
-                let err = Self::step_message_error(error_message.clone(), error_detail.clone());
-                let failed_step = WorkflowStep::record_execution_result(
-                    pool,
-                    running_step.id,
-                    Uuid::new_v4(),
-                    Some(
-                        serde_json::to_string(&SummaryPayload {
-                            summary: err.to_string(),
-                            content: None,
-                            outputs: vec![],
-                        })
-                        .unwrap_or_else(|_| err.to_string()),
-                    ),
-                    None,
-                )
-                .await?;
-                let error_meta = serde_json::json!({
-                    "description": error_detail,
-                    "source": "workflow_protocol_error",
-                })
-                .to_string();
-                let _ = Self::write_transcript(
-                    pool,
-                    execution.id,
-                    failed_step.round_id.into(),
-                    Some(workflow_session.id),
-                    Some(failed_step.id),
-                    "control",
-                    "error",
-                    &error_message,
-                    Some(&error_meta),
-                )
-                .await;
-                Self::transition_step_and_sync(
-                    pool,
-                    chat_runner,
-                    execution,
-                    &failed_step,
-                    WorkflowStepStatus::Failed,
-                    "step_failed",
-                )
-                .await?;
-                Ok(StepOutcome::Failed(err.to_string()))
-            }
-            WorkflowStepProtocolMessage::FinalResult {
-                summary,
-                content,
-                outputs,
-                ..
-            } => {
-                let execution_result = WorkflowStepRunResult {
-                    run_id: Uuid::new_v4(),
-                    summary,
-                    content,
-                    outputs,
-                };
-                let recorded_step = WorkflowStep::record_execution_result(
-                    pool,
-                    running_step.id,
-                    execution_result.run_id,
-                    Some(
-                        serde_json::to_string(&SummaryPayload {
-                            summary: execution_result.summary.clone(),
-                            content: Some(execution_result.content.clone()),
-                            outputs: execution_result.outputs.clone(),
-                        })
-                        .unwrap_or_else(|_| execution_result.summary.clone()),
-                    ),
-                    Some(execution_result.content.clone()),
-                )
-                .await?;
-                let _ = Self::write_transcript(
-                    pool,
-                    execution.id,
-                    recorded_step.round_id.into(),
-                    Some(workflow_session.id),
-                    Some(recorded_step.id),
-                    "agent",
-                    "message",
-                    &execution_result.content,
-                    Some(
-                        &serde_json::json!({
-                            "summary": execution_result.summary.clone(),
-                            "outputs": execution_result.outputs.clone(),
-                            "source": "workflow_protocol_final_result",
-                        })
-                        .to_string(),
-                    ),
-                )
-                .await;
-                Self::transition_step_and_sync(
-                    pool,
-                    chat_runner,
-                    execution,
-                    &recorded_step,
-                    WorkflowStepStatus::Completed,
-                    "step_completed",
-                )
-                .await?;
-                Ok(StepOutcome::Completed)
-            }
-        }
-    }
-
-    /// Execute a single step: resolve context, transition to Running, run agent
-    /// prompt, process the result. Returns a StepOutcome without modifying
-    /// execution-level state (the caller handles execution transitions).
-    async fn prepare_and_run_step(
-        db: &DBService,
-        pool: &SqlitePool,
-        chat_runner: &ChatRunner,
-        execution: &WorkflowExecution,
-        step: &WorkflowStep,
-        workflow_agent_sessions: &[WorkflowAgentSession],
-        session: &ChatSession,
-        session_agents: &[ChatSessionAgent],
-        agents: &[ChatAgent],
-        plan: &WorkflowPlan,
-        current_steps: &[WorkflowStep],
-        edges: &[WorkflowStepEdge],
-    ) -> Result<StepOutcome, OrchestratorError> {
-        let workflow_session =
-            resolve_step_workflow_session(execution, workflow_agent_sessions, step)?;
-        let session_agent = session_agents
+pub(crate) fn resolve_step_workflow_session<'a>(
+    execution: &WorkflowExecution,
+    workflow_sessions: &'a [WorkflowAgentSession],
+    step: &WorkflowStep,
+) -> Result<&'a WorkflowAgentSession, OrchestratorError> {
+    if let Some(workflow_session_id) = step.assigned_workflow_agent_session_id {
+        return workflow_sessions
             .iter()
-            .find(|item| item.id == workflow_session.session_agent_id)
+            .find(|session| session.id == workflow_session_id)
             .ok_or_else(|| {
                 OrchestratorError::NotFound(format!(
-                    "session agent {} 未找到",
-                    workflow_session.session_agent_id
+                    "workflow agent session {} 未找到",
+                    workflow_session_id
                 ))
-            })?;
-        let agent = agents
-            .iter()
-            .find(|item| item.id == session_agent.agent_id)
+            });
+    }
+
+    let lead_session_agent_id = execution.lead_session_agent_id.ok_or_else(|| {
+        OrchestratorError::NotFound(format!(
+            "execution {} 缺少 lead session agent",
+            execution.id
+        ))
+    })?;
+
+    workflow_sessions
+        .iter()
+        .find(|session| session.session_agent_id == lead_session_agent_id)
+        .ok_or_else(|| {
+            OrchestratorError::NotFound(format!(
+                "execution {} 的 lead workflow session 未找到",
+                execution.id
+            ))
+        })
+}
+
+pub(crate) async fn load_agents_for_session(
+    pool: &SqlitePool,
+    session_agents: &[ChatSessionAgent],
+) -> Result<Vec<ChatAgent>, OrchestratorError> {
+    let mut agents = Vec::new();
+    for session_agent in session_agents {
+        let agent = ChatAgent::find_by_id(pool, session_agent.agent_id)
+            .await?
             .ok_or_else(|| {
                 OrchestratorError::NotFound(format!("agent {} 未找到", session_agent.agent_id))
             })?;
-
-        // Use guarded (CAS) transition for Ready -> Running to prevent
-        // duplicate step execution from concurrent scheduler wake-ups.
-        let running_step = match Self::guarded_transition_step_and_sync(
-            pool,
-            chat_runner,
-            execution,
-            step,
-            WorkflowStepStatus::Running,
-            "step_started",
-        )
-        .await?
-        {
-            Some(s) => s,
-            None => {
-                // Another scheduler already claimed this step; skip silently.
-                return Ok(StepOutcome::Completed);
-            }
-        };
-
-        let _ = Self::write_transcript(
-            pool,
-            execution.id,
-            running_step.round_id.into(),
-            Some(workflow_session.id),
-            Some(running_step.id),
-            "system",
-            "message",
-            &format!(
-                "Step \"{}\" started (assigned to {})",
-                running_step.title, session_agent.agent_id
-            ),
-            None,
-        )
-        .await;
-
-        let dependency_summaries = predecessor_summaries(&running_step, current_steps, edges);
-        let step_transcript_context = WorkflowTranscript::find_by_step(pool, running_step.id)
-            .await?
-            .into_iter()
-            .map(|transcript| {
-                format!(
-                    "- [{}:{}] {}",
-                    transcript.sender_type, transcript.entry_type, transcript.content
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        let workflow_goal = plan
-            .summary_text
-            .clone()
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| plan.title.clone());
-        let prompt = build_step_execution_prompt(
-            execution,
-            &workflow_goal,
-            &running_step,
-            &dependency_summaries,
-            Some(&step_transcript_context),
-        );
-
-        tracing::debug!(
-            "Running step {} with prompt:\n{}",
-            running_step.title,
-            prompt
-        );
-
-        let protocol_message = match run_workflow_step_agent_prompt(
-            db,
-            chat_runner,
-            session,
-            agent,
-            session_agent,
-            Some(workflow_session),
-            &prompt,
-            &running_step,
-        )
-        .await
-        {
-            Ok(raw_output) => {
-                tracing::debug!(
-                    "Raw output from step {}: {}",
-                    running_step.title,
-                    raw_output
-                );
-                match Self::parse_step_output_message(execution.id, &running_step, &raw_output) {
-                    Ok(message) => message,
-                    Err(err) => {
-                        let failed_step = WorkflowStep::record_execution_result(
-                            pool,
-                            running_step.id,
-                            Uuid::new_v4(),
-                            Some(
-                                serde_json::to_string(&SummaryPayload {
-                                    summary: err.to_string(),
-                                    content: Some(raw_output),
-                                    outputs: vec![],
-                                })
-                                .unwrap_or_else(|_| err.to_string()),
-                            ),
-                            None,
-                        )
-                        .await?;
-                        Self::transition_step_and_sync(
-                            pool,
-                            chat_runner,
-                            execution,
-                            &failed_step,
-                            WorkflowStepStatus::Failed,
-                            "step_failed",
-                        )
-                        .await?;
-                        let _ = Self::write_transcript(
-                            pool,
-                            execution.id,
-                            failed_step.round_id.into(),
-                            Some(workflow_session.id),
-                            Some(failed_step.id),
-                            "system",
-                            "message",
-                            &format!("Step \"{}\" failed: {}", failed_step.title, err),
-                            None,
-                        )
-                        .await;
-                        return Ok(StepOutcome::Failed(err.to_string()));
-                    }
-                }
-            }
-            Err(WorkflowRuntimeError::Interrupted(reason)) => {
-                // The step was interrupted externally via interrupt_step.
-                // State transitions are handled by interrupt_step, just log and return.
-                let _ = Self::write_transcript(
-                    pool,
-                    execution.id,
-                    running_step.round_id.into(),
-                    Some(workflow_session.id),
-                    Some(running_step.id),
-                    "system",
-                    "message",
-                    &format!("Step \"{}\" interrupted: {}", running_step.title, reason),
-                    None,
-                )
-                .await;
-                return Ok(StepOutcome::Failed(reason));
-            }
-            Err(err) => {
-                let err_message = err.to_string();
-                let failed_step = WorkflowStep::record_execution_result(
-                    pool,
-                    running_step.id,
-                    Uuid::new_v4(),
-                    Some(
-                        serde_json::to_string(&SummaryPayload {
-                            summary: err_message.clone(),
-                            content: None,
-                            outputs: vec![],
-                        })
-                        .unwrap_or_else(|_| err_message.clone()),
-                    ),
-                    None,
-                )
-                .await?;
-                Self::transition_step_and_sync(
-                    pool,
-                    chat_runner,
-                    execution,
-                    &failed_step,
-                    WorkflowStepStatus::Failed,
-                    "step_failed",
-                )
-                .await?;
-                let _ = Self::write_transcript(
-                    pool,
-                    execution.id,
-                    failed_step.round_id.into(),
-                    Some(workflow_session.id),
-                    Some(failed_step.id),
-                    "system",
-                    "message",
-                    &format!("Step \"{}\" failed: {}", failed_step.title, err),
-                    None,
-                )
-                .await;
-                return Ok(StepOutcome::Failed(err_message));
-            }
-        };
-
-        Self::handle_step_protocol_message(
-            pool,
-            chat_runner,
-            execution,
-            &running_step,
-            workflow_session,
-            protocol_message,
-        )
-        .await
+        agents.push(agent);
     }
-
-    pub async fn write_transcript(
-        pool: &SqlitePool,
-        execution_id: Uuid,
-        round_id: Option<Uuid>,
-        workflow_agent_session_id: Option<Uuid>,
-        step_id: Option<Uuid>,
-        sender_type: &str,
-        entry_type: &str,
-        content: &str,
-        meta_json: Option<&str>,
-    ) -> Result<WorkflowTranscript, OrchestratorError> {
-        WorkflowTranscript::create(
-            pool,
-            &CreateWorkflowTranscript {
-                execution_id,
-                round_id,
-                workflow_agent_session_id,
-                step_id,
-                sender_type: sender_type.to_string(),
-                entry_type: entry_type.to_string(),
-                content: content.to_string(),
-                meta_json: meta_json.map(String::from),
-            },
-            Uuid::new_v4(),
-        )
-        .await
-        .map_err(OrchestratorError::Database)
-    }
-
-    pub async fn resolve_transcript(
-        pool: &SqlitePool,
-        transcript_id: Uuid,
-        resolved_action: &str,
-    ) -> Result<WorkflowTranscript, OrchestratorError> {
-        let _transcript = WorkflowTranscript::find_by_id(pool, transcript_id)
-            .await?
-            .ok_or_else(|| {
-                OrchestratorError::NotFound(format!("transcript {} 未找到", transcript_id))
-            })?;
-        let meta = serde_json::json!({
-            "resolved": true,
-            "resolved_action": resolved_action,
-        });
-        WorkflowTranscript::update_meta_json(pool, transcript_id, &meta.to_string())
-            .await
-            .map_err(OrchestratorError::Database)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use chrono::Utc;
-
-    use super::*;
-
-    fn sample_step(status: WorkflowStepStatus, summary_text: Option<String>) -> WorkflowStep {
-        let now = Utc::now();
-        WorkflowStep {
-            id: Uuid::new_v4(),
-            execution_id: Uuid::new_v4(),
-            round_id: Uuid::new_v4(),
-            compiled_revision_id: None,
-            step_key: "step-1".to_string(),
-            step_type: WorkflowStepType::Task,
-            title: "Implement fix".to_string(),
-            instructions: "Apply the requested change".to_string(),
-            assigned_workflow_agent_session_id: None,
-            status,
-            retry_count: 0,
-            max_retry: 1,
-            round_index: 1,
-            display_order: 0,
-            latest_run_id: None,
-            summary_text,
-            content: None,
-            created_at: now,
-            updated_at: now,
-            started_at: None,
-            completed_at: None,
-        }
-    }
-
-    #[test]
-    fn derive_failed_step_follow_up_context_prefers_latest_non_user_transcript() {
-        let step = sample_step(
-            WorkflowStepStatus::Failed,
-            Some(
-                serde_json::json!({
-                    "summary": "summary fallback",
-                    "content": "content fallback"
-                })
-                .to_string(),
-            ),
-        );
-        let source_id = Uuid::new_v4();
-        let transcripts = vec![
-            WorkflowTranscript {
-                id: Uuid::new_v4(),
-                execution_id: step.execution_id,
-                round_id: Some(step.round_id),
-                workflow_agent_session_id: Some(Uuid::new_v4()),
-                step_id: Some(step.id),
-                sender_type: "user".to_string(),
-                entry_type: "message".to_string(),
-                content: "first user reply".to_string(),
-                meta_json: None,
-                created_at: Utc::now().to_rfc3339(),
-            },
-            WorkflowTranscript {
-                id: source_id,
-                execution_id: step.execution_id,
-                round_id: Some(step.round_id),
-                workflow_agent_session_id: Some(Uuid::new_v4()),
-                step_id: Some(step.id),
-                sender_type: "system".to_string(),
-                entry_type: "message".to_string(),
-                content: "Step failed because dependency data was missing.".to_string(),
-                meta_json: None,
-                created_at: Utc::now().to_rfc3339(),
-            },
-        ];
-
-        let context =
-            WorkflowOrchestrator::derive_failed_step_follow_up_context(&step, &transcripts);
-
-        assert_eq!(context.source_transcript_id, Some(source_id));
-        assert_eq!(
-            context.previous_message_content,
-            "Step failed because dependency data was missing."
-        );
-    }
-
-    #[test]
-    fn build_step_follow_up_prompt_mentions_failed_restart() {
-        let step = sample_step(WorkflowStepStatus::Failed, None);
-
-        let prompt = WorkflowOrchestrator::build_step_follow_up_prompt(
-            &step,
-            "Previous attempt ended with an error.",
-            "I have provided the missing dependency data.",
-            StepFollowUpMode::Failed,
-        );
-
-        assert!(prompt.contains("previous attempt"));
-        assert!(prompt.contains("restart the same agent session"));
-        assert!(prompt.contains("Previous attempt ended with an error."));
-        assert!(prompt.contains("I have provided the missing dependency data."));
-        assert!(prompt.contains("Resume from the failed point"));
-    }
-
-    #[test]
-    fn retry_candidate_accepts_failed_and_interrupted_only_with_remaining_budget() {
-        let failed = sample_step(WorkflowStepStatus::Failed, None);
-        assert!(WorkflowOrchestrator::validate_step_retry_candidate(&failed).is_ok());
-
-        let interrupted = sample_step(WorkflowStepStatus::Interrupted, None);
-        assert!(WorkflowOrchestrator::validate_step_retry_candidate(&interrupted).is_ok());
-
-        let running = sample_step(WorkflowStepStatus::Running, None);
-        assert!(WorkflowOrchestrator::validate_step_retry_candidate(&running).is_err());
-    }
-
-    #[test]
-    fn retry_candidate_treats_max_retry_as_retries_after_first_attempt() {
-        let mut step = sample_step(WorkflowStepStatus::Failed, None);
-
-        step.max_retry = 0;
-        step.retry_count = 0;
-        assert!(WorkflowOrchestrator::validate_step_retry_candidate(&step).is_err());
-
-        step.max_retry = 1;
-        step.retry_count = 0;
-        assert!(WorkflowOrchestrator::validate_step_retry_candidate(&step).is_ok());
-        step.retry_count = 1;
-        assert!(WorkflowOrchestrator::validate_step_retry_candidate(&step).is_err());
-
-        step.max_retry = 2;
-        step.retry_count = 1;
-        assert!(WorkflowOrchestrator::validate_step_retry_candidate(&step).is_ok());
-        step.retry_count = 2;
-        assert!(WorkflowOrchestrator::validate_step_retry_candidate(&step).is_err());
-    }
-
-    #[test]
-    fn completed_like_final_review_invariant_requires_only_completed_terminal_steps() {
-        assert!(!WorkflowOrchestrator::all_steps_completed_like(&[]));
-
-        let steps = vec![
-            sample_step(WorkflowStepStatus::Completed, None),
-            sample_step(WorkflowStepStatus::Skipped, None),
-            sample_step(WorkflowStepStatus::Cancelled, None),
-        ];
-        assert!(WorkflowOrchestrator::all_steps_completed_like(&steps));
-
-        let steps = vec![
-            sample_step(WorkflowStepStatus::Completed, None),
-            sample_step(WorkflowStepStatus::Failed, None),
-        ];
-        assert!(!WorkflowOrchestrator::all_steps_completed_like(&steps));
-    }
+    Ok(agents)
 }

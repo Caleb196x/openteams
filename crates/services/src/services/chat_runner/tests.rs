@@ -24,11 +24,10 @@ use uuid::Uuid;
 
 use super::{
     AgentProtocolError, AgentProtocolMessageType, ChatProtocolNoticeCode, ChatRunner,
-    ChatStreamEvent, MARKDOWN_PROTOCOL_OUTPUT_EXAMPLE_JSON,  MAX_PROTOCOL_PARSE_RETRIES, MessageAttachmentContext,
+    ChatStreamEvent, MARKDOWN_PROTOCOL_OUTPUT_EXAMPLE_JSON, MAX_PROTOCOL_PARSE_RETRIES,
     PROTOCOL_OUTPUT_SCHEMA_JSON, RUNS_MAX_TOTAL_BYTES_PER_WORKSPACE,
-    RUNS_PRUNE_TARGET_BYTES_PER_WORKSPACE, ReferenceAttachment, ReferenceContext,
-    ResolvedPromptLanguage, RunCompletionStatus, SessionAgentSummary, TokenUsageInfo,
-    runtime::RunLogForwarders,
+    RUNS_PRUNE_TARGET_BYTES_PER_WORKSPACE, ResolvedPromptLanguage, RunCompletionStatus,
+    TokenUsageInfo, runtime::RunLogForwarders,
 };
 use crate::services::config::UiLanguage;
 
@@ -488,6 +487,23 @@ fn parse_agent_protocol_messages_rejects_empty_content() {
     let content = r#"[{"type":"conclusion","content":"   "}]"#;
     let err = ChatRunner::parse_agent_protocol_messages(content).expect_err("error");
     assert_eq!(err.code, ChatProtocolNoticeCode::EmptyMessage);
+}
+
+#[test]
+fn protocol_send_routing_blocks_agent_targets_in_workflow_mode() {
+    assert!(!ChatRunner::should_route_protocol_send(
+        true,
+        "backend-runtime"
+    ));
+    assert!(!ChatRunner::should_route_protocol_send(
+        true,
+        "@frontend-dev"
+    ));
+    assert!(ChatRunner::should_route_protocol_send(true, "you"));
+    assert!(ChatRunner::should_route_protocol_send(
+        false,
+        "backend-runtime"
+    ));
 }
 
 #[tokio::test]
@@ -961,7 +977,7 @@ async fn process_agent_protocol_output_requests_retry_for_first_json_shape_failu
         .expect("process protocol output");
 
     match result {
-        ProtocolProcessResult::RetryableParseFailure { code, .. } => {
+        super::ProtocolProcessResult::RetryableParseFailure { code, .. } => {
             assert_eq!(code, ChatProtocolNoticeCode::NotJsonArray);
         }
         other => panic!("expected retryable parse failure, got {other:?}"),
@@ -1004,7 +1020,10 @@ async fn process_agent_protocol_output_reports_error_after_retry_exhaustion() {
         .await
         .expect("process protocol output");
 
-    assert!(matches!(result, ProtocolProcessResult::ProtocolFailure));
+    assert!(matches!(
+        result,
+        super::ProtocolProcessResult::ProtocolFailure
+    ));
 
     let messages = ChatMessage::find_by_session_id(&db.pool, session_id, None)
         .await
@@ -1400,6 +1419,36 @@ fn build_exact_markdown_prompt_matches_expected_input_template() {
     assert!(prompt.contains("- to: agent:fullstack"));
     assert!(prompt.contains("- message_id: 88bd7b05-1ba3-407c-8ca3-a52f14c8aced"));
     assert!(prompt.contains("- timestamp: 2026-03-10 06:22:12.973 UTC"));
+}
+
+#[test]
+fn build_exact_markdown_prompt_restricts_send_targets_in_workflow_mode() {
+    let agent = test_agent("planner", "Workflow lead");
+    let message = test_message(
+        "Generate a workflow plan",
+        json!({ "chat_input_mode": "workflow" }),
+    );
+
+    let prompt = ChatRunner::build_exact_markdown_prompt(
+        &agent,
+        &message,
+        Path::new(r"E:\workspace\projectSS\MainPage2\.openteams\context\demo"),
+        Path::new(r"E:\workspace\projectSS\MainPage2"),
+        &[],
+        None,
+        None,
+        &[],
+        ResolvedPromptLanguage {
+            setting: "simplified_chinese",
+            code: "zh-Hans",
+            instruction: "You MUST respond in Simplified Chinese.",
+        },
+        None,
+    );
+
+    assert!(prompt.contains("Workflow mode: `send.to` may only be `\"you\"`"));
+    assert!(prompt.contains("do not send workflow-mode messages to other agents"));
+    assert!(!prompt.contains("`send.to` must match a group member name"));
 }
 
 #[test]

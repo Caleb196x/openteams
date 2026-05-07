@@ -170,7 +170,13 @@ export enum WorkflowRoundStatus { running = "running", waiting_user_acceptance =
 
 export enum WorkflowStepType { task = "task", review = "review", result = "result" }
 
-export enum WorkflowStepStatus { pending = "pending", ready = "ready", running = "running", interrupt_requested = "interrupt_requested", interrupted = "interrupted", waiting_input = "waiting_input", waiting_review = "waiting_review", blocked = "blocked", completed = "completed", failed = "failed", skipped = "skipped", cancelled = "cancelled" }
+export enum WorkflowStepStatus { pending = "pending", ready = "ready", running = "running", pre_completed = "pre_completed", interrupt_requested = "interrupt_requested", interrupted = "interrupted", waiting_input = "waiting_input", waiting_review = "waiting_review", blocked = "blocked", revising = "revising", completed = "completed", failed = "failed", skipped = "skipped", cancelled = "cancelled" }
+
+export enum WorkflowLoopStatus { pending = "pending", running = "running", waiting_review = "waiting_review", passed = "passed", rejected = "rejected", waiting_user = "waiting_user", completed = "completed", failed = "failed" }
+
+export enum ReviewVerdict { approved = "approved", rejected = "rejected" }
+
+export enum ReviewerType { lead = "lead", user = "user" }
 
 export enum WorkflowEdgeKind { hard = "hard", soft = "soft" }
 
@@ -178,9 +184,9 @@ export enum WorkflowAgentSessionRole { lead = "lead", worker = "worker", reviewe
 
 export enum WorkflowAgentSessionState { idle = "idle", running = "running", interrupt_requested = "interrupt_requested", interrupted = "interrupted", paused = "paused", completed = "completed", failed = "failed", expired = "expired" }
 
-export enum WorkflowEventType { execution_created = "execution_created", execution_running = "execution_running", execution_failed = "execution_failed", execution_completed = "execution_completed", execution_paused = "execution_paused", execution_waiting = "execution_waiting", round_started = "round_started", round_result_ready = "round_result_ready", user_accepted = "user_accepted", user_rejected = "user_rejected", round_archived = "round_archived", plan_revision_created = "plan_revision_created", plan_recompiled = "plan_recompiled", step_status_changed = "step_status_changed", agent_session_state_changed = "agent_session_state_changed" }
+export enum WorkflowEventType { execution_created = "execution_created", execution_running = "execution_running", execution_failed = "execution_failed", execution_completed = "execution_completed", execution_paused = "execution_paused", execution_waiting = "execution_waiting", round_started = "round_started", round_result_ready = "round_result_ready", user_accepted = "user_accepted", user_rejected = "user_rejected", round_archived = "round_archived", plan_revision_created = "plan_revision_created", plan_recompiled = "plan_recompiled", step_status_changed = "step_status_changed", agent_session_state_changed = "agent_session_state_changed", step_lead_review_started = "step_lead_review_started", step_lead_review_passed = "step_lead_review_passed", step_lead_review_rejected = "step_lead_review_rejected", step_user_review_started = "step_user_review_started", step_user_review_passed = "step_user_review_passed", step_user_review_rejected = "step_user_review_rejected", loop_started = "loop_started", loop_retrying = "loop_retrying", loop_passed = "loop_passed", loop_failed = "loop_failed", iteration_feedback_received = "iteration_feedback_received", iteration_new_plan_generated = "iteration_new_plan_generated" }
 
-export type WorkflowPlanJson = { version: string, title: string, goal: string, agents: WorkflowPlanAgents, globals: WorkflowPlanGlobals | null, viewport: WorkflowPlanViewport | null, nodes: Array<WorkflowPlanNode>, edges: Array<WorkflowPlanEdge>, policies: WorkflowPlanPolicies | null, };
+export type WorkflowPlanJson = { version: string, title: string, goal: string, agents: WorkflowPlanAgents, globals: WorkflowPlanGlobals | null, viewport: WorkflowPlanViewport | null, nodes: Array<WorkflowPlanNode>, edges: Array<WorkflowPlanEdge>, loops: Array<WorkflowLoopDef> | null, policies: WorkflowPlanPolicies | null, };
 
 export type WorkflowPlanAgents = { lead: string, available: Array<string>, };
 
@@ -192,13 +198,35 @@ export type WorkflowPlanNode = { id: string, type: string, position: WorkflowNod
 
 export type WorkflowNodePosition = { x: number, y: number, };
 
-export type WorkflowNodeData = { stepType: string, agentId: string | null, title: string, instructions: string, acceptance: Array<string> | null, outputs: Array<string> | null, interruptible: boolean, maxRetry: number | null, status: string | null, };
+export type WorkflowNodeData = { stepType: string, agentId: string | null, title: string, instructions: string, acceptance: Array<string> | null, outputs: Array<string> | null, interruptible: boolean, maxRetry: number | null, status: string | null, loopKey: string | null, reviewScope: Array<string> | null, leadReview: boolean | null, userReview: boolean | null, };
+
+export type WorkflowLoopDef = { loopKey: string, memberSteps: Array<string>, reviewStep: string, maxRetry: number | null, userReviewRequired: boolean | null, };
 
 export type WorkflowPlanEdge = { id: string, source: string, target: string, type: string | null, data: WorkflowEdgeData | null, };
 
 export type WorkflowEdgeData = { kind: string, };
 
 export type WorkflowPlanPolicies = { approval_required_on: Array<string> | null, permission_required_on: Array<string> | null, on_failure: string | null, allow_plan_revision: boolean, };
+
+export type CompiledGraph = { plan_hash: string, compiled_graph_hash: string, steps: Array<CompiledStep>, edges: Array<CompiledEdge>, ready_step_keys: Array<string>, loops: Array<CompiledLoopDef> | null, };
+
+export type CompiledStep = { step_key: string, step_type: WorkflowStepType, title: string, instructions: string, assigned_agent_id: string | null, acceptance: Array<string> | null, outputs: Array<string> | null, interruptible: boolean, max_retry: number, display_order: number, loop_key: string | null, review_scope: Array<string> | null, lead_review: boolean | null, user_review: boolean | null, };
+
+export type CompiledEdge = { edge_id: string, from_step_key: string, to_step_key: string, edge_kind: WorkflowEdgeKind, };
+
+export type CompiledLoopDef = { loop_key: string, member_step_keys: Array<string>, review_step_key: string, review_scope_step_keys: Array<string>, max_retry: number, user_review_required: boolean, };
+
+export type WorkflowLoop = { id: string, execution_id: string, round_id: string, loop_key: string, review_step_id: string, member_step_ids_json: string, status: WorkflowLoopStatus, retry_count: number, max_retry: number, user_review_required: boolean, rejection_reason: string | null, created_at: string, updated_at: string, };
+
+export type CreateWorkflowLoop = { execution_id: string, round_id: string, loop_key: string, review_step_id: string, member_step_ids_json: string, max_retry: number | null, user_review_required: boolean | null, rejection_reason: string | null, };
+
+export type WorkflowStepReview = { id: string, step_id: string, execution_id: string, reviewer_type: ReviewerType, reviewer_id: string | null, verdict: ReviewVerdict, feedback: string, review_round: number, created_at: string, };
+
+export type CreateWorkflowStepReview = { step_id: string, execution_id: string, reviewer_type: ReviewerType, reviewer_id: string | null, verdict: ReviewVerdict, feedback: string, review_round: number | null, };
+
+export type WorkflowIterationFeedback = { id: string, execution_id: string, from_round_id: string, to_round_id: string | null, user_feedback_json: string, current_status_summary: string, new_plan_diff: string | null, created_at: string, };
+
+export type CreateWorkflowIterationFeedback = { execution_id: string, from_round_id: string, to_round_id: string | null, user_feedback_json: string, current_status_summary: string, new_plan_diff: string | null, };
 
 export type RemoteSkillMeta = { id: string, name: string, description: string, category: string | null, version: string, author: string | null, tags: string[], compatible_agents: string[], source_url: string | null, 
 /**
@@ -344,11 +372,27 @@ export type ChatRunRetentionListResponse = { runs: Array<ChatRunRetentionInfo>, 
 
 export type UpdateNativeSkillRequest = { enabled: boolean, };
 
+export type ExecutePlanReviewOverride = { stepId: string, leadReview: boolean | null, userReview: boolean | null, };
+
+export type ExecutePlanRequest = { plan: WorkflowPlanJson | null, stepReviewOverrides: Array<ExecutePlanReviewOverride>, };
+
+export type ExecutePlanResponse = { execution_id: string, };
+
 export type ChatMessageListQuery = { limit: bigint | null, };
 
 export type ChatWorkItemListQuery = { limit: bigint | null, };
 
 export type CreateChatMessageRequest = { sender_type: ChatSenderType, sender_id: string | null, content: string, meta: JsonValue | null, };
+
+export type UserReviewResponseRequest = { review_id: string, action: string, feedback: string | null, };
+
+export type UserReviewResponseResponse = { execution_id: string, transcript_id: string, status: string, };
+
+export type UserIterationFeedbackDetailRequest = { what_wrong: string, expected: string, priority: string, additional_notes: string | null, };
+
+export type UserIterationFeedbackRequest = { execution_id: string, action: string, feedback: UserIterationFeedbackDetailRequest | null, };
+
+export type UserIterationFeedbackResponse = { execution_id: string, status: string, current_round: number, };
 
 export type ImageResponse = { id: string, file_path: string, original_name: string, mime_type: string | null, size_bytes: bigint, hash: string, created_at: string, updated_at: string, };
 
@@ -372,9 +416,27 @@ export type WorkflowCardAgent = { session_agent_id: string, workflow_agent_sessi
 
 export type WorkflowCardState = "preview_ready" | "preview_invalid" | "pending" | "running" | "waiting" | "paused" | "completed" | "failed";
 
-export type WorkflowCardStep = { id: string, step_key: string, title: string, step_type: string, status: string, agent_name: string | null, summary_text: string | null, content: string | null, };
+export type WorkflowCardReview = { reviewer_type: string, verdict: string, feedback: string, review_round: number, created_at: string, };
 
-export type WorkflowCardProjection = { execution_id: string | null, plan_id: string, revision_id: string, title: string, goal: string, state: WorkflowCardState, execution_status: string, error_message: string | null, completed_step_count: number, total_step_count: number, result_summary: string | null, outputs: Array<string>, agents: Array<WorkflowCardAgent>, steps: Array<WorkflowCardStep>, plan: WorkflowPlanJson, started_at: string | null, completed_at: string | null, validation_errors: string | null, };
+export type WorkflowCardLoop = { id: string, loop_key: string, status: string, retry_count: number, max_retry: number, user_review_required: boolean, rejection_reason: string | null, member_step_ids: Array<string>, review_step_id: string, };
+
+export type WorkflowReviewField = { key: string, label: string, field_type: string, required: boolean, placeholder: string | null, options: Array<string> | null, };
+
+export type WorkflowReviewAction = { action: string, label: string, style: string, requires_feedback: boolean, };
+
+export type WorkflowReviewPromptTemplate = { message: string, fields: Array<WorkflowReviewField>, actions: Array<WorkflowReviewAction>, };
+
+export type WorkflowPendingReview = { review_id: string, review_type: string, target_id: string, target_title: string, context_summary: string, prompt_template: WorkflowReviewPromptTemplate, };
+
+export type WorkflowIterationSummary = { round_index: number, status: string, user_feedback: string | null, result_summary: string | null, started_at: string, completed_at: string | null, };
+
+export type WorkflowCardStep = { id: string, step_key: string, title: string, step_type: string, status: string, review_phase: string | null, retry_count: number, max_retry: number, loop_key: string | null, latest_review: WorkflowCardReview | null, agent_name: string | null, summary_text: string | null, content: string | null, };
+
+export type WorkflowCardProjection = { execution_id: string | null, plan_id: string, revision_id: string, title: string, goal: string, state: WorkflowCardState, execution_status: string, error_message: string | null, completed_step_count: number, total_step_count: number, result_summary: string | null, outputs: Array<string>, agents: Array<WorkflowCardAgent>, steps: Array<WorkflowCardStep>, current_round: number, loops: Array<WorkflowCardLoop>, pending_review: WorkflowPendingReview | null, iteration_history: Array<WorkflowIterationSummary>, plan: WorkflowPlanJson, started_at: string | null, completed_at: string | null, validation_errors: string | null, };
+
+export type UserIterationFeedbackDetail = { what_wrong: string, expected: string, priority: string | null, additional_notes: string | null, };
+
+export type UserIterationFeedback = { execution_id: string, round_id: string, action: string, feedback: UserIterationFeedbackDetail | null, };
 
 export type Config = { config_version: string, theme: ThemeMode, executor_profile: ExecutorProfileId, disclaimer_acknowledged: boolean, onboarding_acknowledged: boolean, notifications: NotificationConfig, editor: EditorConfig, github: GitHubConfig, analytics_enabled: boolean, workspace_dir: string | null, last_app_version: string | null, show_release_notes: boolean, language: UiLanguage, git_branch_prefix: string, showcases: ShowcaseState, pr_auto_description_enabled: boolean, pr_auto_description_prompt: string | null, beta_workspaces: boolean, beta_workspaces_invitation_sent: boolean, commit_reminder_enabled: boolean, commit_reminder_prompt: string | null, send_message_shortcut: SendMessageShortcut, 
 /**

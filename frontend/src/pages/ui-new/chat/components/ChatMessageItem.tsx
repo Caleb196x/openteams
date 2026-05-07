@@ -59,10 +59,7 @@ import {
   extractWorkflowCardProjection,
   type WorkflowCardProjection,
 } from './ChatWorkflowCard';
-import {
-  WorkflowFinalReviewCard,
-  type WorkflowFinalReviewActionData,
-} from './WorkflowFinalReviewCard';
+import { type WorkflowFinalReviewActionData } from './WorkflowFinalReviewCard';
 
 const SUPPRESSED_PROTOCOL_ERROR_CODES = new Set([
   'invalid_json',
@@ -156,6 +153,21 @@ export interface ChatMessageItemProps {
     transcriptId: string,
     action: 'accepted' | 'rejected'
   ) => void;
+  onRespondPendingReview?: (
+    reviewId: string,
+    action: 'approve' | 'reject',
+    feedback?: string
+  ) => void;
+  onSubmitWorkflowIterationFeedback?: (payload: {
+    executionId: string;
+    action: 'accept' | 'reject';
+    feedback?: {
+      what_wrong: string;
+      expected: string;
+      priority: 'high' | 'medium' | 'low';
+      additional_notes?: string;
+    };
+  }) => void;
   pendingWorkflowActionId?: string | null;
 }
 
@@ -192,6 +204,8 @@ export function ChatMessageItem({
   workflowCardProjection: workflowCardProjectionOverride,
   workflowFinalReviewAction,
   onResolveWorkflowFinalReview,
+  onRespondPendingReview,
+  onSubmitWorkflowIterationFeedback,
   pendingWorkflowActionId,
 }: ChatMessageItemProps) {
   const { t } = useTranslation('chat');
@@ -359,6 +373,8 @@ export function ChatMessageItem({
                 onRetryStep={onRetryWorkflowStep}
                 finalReviewAction={workflowFinalReviewAction}
                 onResolveFinalReview={onResolveWorkflowFinalReview}
+                onRespondPendingReview={onRespondPendingReview}
+                onSubmitIterationFeedback={onSubmitWorkflowIterationFeedback}
                 pendingActionId={pendingWorkflowActionId}
                 onRetryPlanGeneration={onRetryWorkflowPlanGeneration}
                 retryPlanGenerationPending={workflowPlanGenerationRetryPending}
@@ -372,32 +388,6 @@ export function ChatMessageItem({
                     : undefined
                 }
               />
-              {workflowFinalReviewAction && onResolveWorkflowFinalReview && (
-                <div className="w-full max-w-[760px]">
-                  <WorkflowFinalReviewCard
-                    message={workflowFinalReviewAction.message}
-                    description={workflowFinalReviewAction.description}
-                    onAccept={() =>
-                      onResolveWorkflowFinalReview(
-                        workflowFinalReviewAction.executionId,
-                        workflowFinalReviewAction.transcriptId,
-                        'accepted'
-                      )
-                    }
-                    onReject={() =>
-                      onResolveWorkflowFinalReview(
-                        workflowFinalReviewAction.executionId,
-                        workflowFinalReviewAction.transcriptId,
-                        'rejected'
-                      )
-                    }
-                    disabled={
-                      pendingWorkflowActionId ===
-                      workflowFinalReviewAction.transcriptId
-                    }
-                  />
-                </div>
-              )}
             </div>
           </div>
         </div>

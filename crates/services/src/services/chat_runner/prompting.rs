@@ -875,7 +875,14 @@ impl ChatRunner {
         markdown.push_str(
             "2. Keep messages concise. Put complex content into files instead of long text.\n",
         );
-        markdown.push_str("3. `send.to` must match a group member name or `\"you\"` (the user).\n");
+        if chat::is_workflow_chat_input_mode(&message.meta.0) {
+            markdown.push_str(
+                "3. Workflow mode: `send.to` may only be `\"you\"` (the user). Do not send direct group-chat messages to other agents; workflow orchestration will dispatch agent work through the workflow plan.\n",
+            );
+        } else {
+            markdown
+                .push_str("3. `send.to` must match a group member name or `\"you\"` (the user).\n");
+        }
         markdown.push_str("4. `record`: long-lived shared facts only. Written to `");
         markdown.push_str(&shared_blackboard_rel.to_string_lossy());
         markdown.push_str("`.\n");
@@ -898,7 +905,7 @@ impl ChatRunner {
             "- Review the chat history first and confirm that a final implementation plan has already been discussed and agreed on.\n",
         );
         markdown.push_str(
-            "- If no final plan is confirmed, emit `workflow_generate` with `plan_check: false` and also send a `send` message to the user explaining the current planning status.\n",
+            "- If no final plan is confirmed, emit `workflow_generate` with `plan_check: false` and also send a `send` message to `\"you\"` explaining the current planning status; do not send workflow-mode messages to other agents.\n",
         );
         markdown.push_str(
             "- If a final plan is confirmed, emit `workflow_generate` with `plan_check: true`; its `content` must be a concise plan-generation brief that includes the essential plan summary, relevant plan files, participating members, and other execution-defining context.\n\n",
@@ -2263,6 +2270,7 @@ impl ChatRunner {
         toml
     }
 
+    #[cfg(test)]
     pub(super) fn resolve_team_protocol_guidelines(team_protocol: Option<&str>) -> String {
         let normalized_protocol = team_protocol.map(str::trim).unwrap_or_default();
         if normalized_protocol.is_empty() {

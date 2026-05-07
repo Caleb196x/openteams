@@ -2,12 +2,14 @@ type FinalReviewTranscriptLike = {
   id: string;
   entry_type: string;
   content: string;
+  round_id?: string | null;
   meta_json?: string | null;
 };
 
 export type WorkflowFinalReviewActionData = {
   executionId: string;
   transcriptId: string;
+  roundId?: string | null;
   message: string;
   description?: string;
 };
@@ -61,6 +63,7 @@ export function toWorkflowFinalReviewAction<
   return {
     executionId,
     transcriptId: transcript.id,
+    roundId: transcript.round_id ?? null,
     message: transcript.content || '任务已完成，是否接受结果？',
     description:
       typeof meta?.description === 'string' ? meta.description : undefined,

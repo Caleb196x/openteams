@@ -11,14 +11,18 @@ use db::{
         chat_session_agent::ChatSessionAgent,
         workflow_agent_session::WorkflowAgentSession,
         workflow_execution::WorkflowExecution,
+        workflow_iteration_feedback::WorkflowIterationFeedback,
+        workflow_loop::WorkflowLoop,
         workflow_plan::WorkflowPlan,
         workflow_plan_revision::WorkflowPlanRevision,
+        workflow_round::WorkflowRound,
         workflow_step::WorkflowStep,
         workflow_step_edge::WorkflowStepEdge,
+        workflow_step_review::WorkflowStepReview,
         workflow_transcript::{CreateWorkflowTranscript, WorkflowTranscript},
         workflow_types::{
-            WorkflowExecutionStatus, WorkflowPlanJson, WorkflowPlanNode, WorkflowStepStatus,
-            WorkflowStepType, to_workflow_wire_value,
+            ReviewVerdict, WorkflowExecutionStatus, WorkflowPlanJson, WorkflowPlanNode,
+            WorkflowStepStatus, WorkflowStepType, to_workflow_wire_value,
         },
     },
 };
@@ -113,9 +117,81 @@ pub struct WorkflowCardStep {
     pub title: String,
     pub step_type: String,
     pub status: String,
+    pub review_phase: Option<String>,
+    pub retry_count: i32,
+    pub max_retry: i32,
+    pub loop_key: Option<String>,
+    pub latest_review: Option<WorkflowCardReview>,
     pub agent_name: Option<String>,
     pub summary_text: Option<String>,
     pub content: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct WorkflowCardReview {
+    pub reviewer_type: String,
+    pub verdict: String,
+    pub feedback: String,
+    pub review_round: i32,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct WorkflowCardLoop {
+    pub id: String,
+    pub loop_key: String,
+    pub status: String,
+    pub retry_count: i32,
+    pub max_retry: i32,
+    pub user_review_required: bool,
+    pub rejection_reason: Option<String>,
+    pub member_step_ids: Vec<String>,
+    pub review_step_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct WorkflowPendingReview {
+    pub review_id: String,
+    pub review_type: String,
+    pub target_id: String,
+    pub target_title: String,
+    pub context_summary: String,
+    pub prompt_template: WorkflowReviewPromptTemplate,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct WorkflowIterationSummary {
+    pub round_index: i32,
+    pub status: String,
+    pub user_feedback: Option<String>,
+    pub result_summary: Option<String>,
+    pub started_at: String,
+    pub completed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct WorkflowReviewPromptTemplate {
+    pub message: String,
+    pub fields: Vec<WorkflowReviewField>,
+    pub actions: Vec<WorkflowReviewAction>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct WorkflowReviewField {
+    pub key: String,
+    pub label: String,
+    pub field_type: String,
+    pub required: bool,
+    pub placeholder: Option<String>,
+    pub options: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct WorkflowReviewAction {
+    pub action: String,
+    pub label: String,
+    pub style: String,
+    pub requires_feedback: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -134,6 +210,10 @@ pub struct WorkflowCardProjection {
     pub outputs: Vec<String>,
     pub agents: Vec<WorkflowCardAgent>,
     pub steps: Vec<WorkflowCardStep>,
+    pub current_round: i32,
+    pub loops: Vec<WorkflowCardLoop>,
+    pub pending_review: Option<WorkflowPendingReview>,
+    pub iteration_history: Vec<WorkflowIterationSummary>,
     pub plan: WorkflowPlanJson,
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
@@ -205,6 +285,23 @@ pub struct SummaryPayload {
     pub content: Option<String>,
     #[serde(default)]
     pub outputs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkflowRevisionFeedbackSource {
+    Lead,
+    User,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum WorkflowReviewProtocolMessage {
+    ReviewResult {
+        step_key: String,
+        execution_id: String,
+        verdict: ReviewVerdict,
+        feedback: String,
+    },
 }
 
 #[derive(Default)]
@@ -684,8 +781,8 @@ pub fn build_plan_generation_prompt(
         "acceptance": ["optional string"],
         "outputs": ["optional string"],
         "interruptible": true,
-        "maxRetry": 3,
-        "status": "optional string"
+        "status": "optional string",
+        "reviewScope": ["optional node_id list, review nodes only"]
       }
     }
   ],
@@ -726,6 +823,9 @@ pub fn build_plan_generation_prompt(
 9. `agents.available` 和 `nodes[].data.agentId` 只能复用下方提供的 `agent_id`。
 10. 节点 `title` 和 `instructions` 必须具体、可执行，避免空泛描述。
 11. 计划应优先追求最小可执行闭环，避免不必要的步骤膨胀。
+12. 当需要"执行-审核-修订"迭代时，使用 `stepType: "review"` 节点，并通过 `data.reviewScope` 显式声明该 review 拒绝时需要重跑的前置 task 节点 id 列表。
+13. `reviewScope` 非空才会创建 retry loop；未指定或空数组表示普通 review，不会自动反向推导 loop。`reviewScope` 只能包含 task 节点，且每个 task 必须能沿有向边到达该 review。
+14. `leadReview` 和 `userReview` 由用户在前端卡片中勾选后由系统写入，你不要输出或推断这两个字段；返工次数不再由 plan JSON 限制。
 
 你的输出会被系统直接校验、编译并启动执行；任何 schema 错误、循环依赖、非法 agent 引用、非法 agents.available 或缺失 result 节点都会导致本次“立即执行”失败。
 
@@ -764,7 +864,25 @@ lead agent 标识：
         "- agents.available and nodes[].data.agentId may only use the provided agent_id values\n",
     );
     prompt.push_str(
-        "- globals, viewport, policies, and node/edge optional fields may be omitted when unnecessary",
+        "- globals, viewport, policies, and node/edge optional fields may be omitted when unnecessary\n",
+    );
+    prompt.push_str(
+        "- Review loop rules: a review node creates a retry loop only when nodes[].data.reviewScope is a non-empty array.\n",
+    );
+    prompt.push_str(
+        "- reviewScope is the exact list of task node ids that should be re-run if that review rejects the work; reviewScope may contain task nodes only.\n",
+    );
+    prompt.push_str(
+        "- Every reviewScope task must be an upstream predecessor of that review node: there must be a directed path from the task to the review node.\n",
+    );
+    prompt.push_str(
+        "- If a scoped task reaches the review through intermediate task nodes, include those intermediate task nodes in the same reviewScope so retry state stays consistent.\n",
+    );
+    prompt.push_str(
+        "- Do not put the same task node in multiple reviewScope arrays; if two loops need similar work, split it into separate task nodes or keep shared setup outside reviewScope.\n",
+    );
+    prompt.push_str(
+        "- Do not include result nodes, review nodes, nonexistent ids, duplicate ids, or downstream nodes in reviewScope.\n",
     );
     prompt
 }
@@ -914,6 +1032,161 @@ step 指令：
     )
 }
 
+pub fn build_lead_review_prompt(
+    workflow_goal: &str,
+    step: &WorkflowStep,
+    result: &WorkflowStepRunResult,
+    dependency_summaries: &[String],
+    acceptance_criteria: &[String],
+) -> String {
+    let dependency_text = if dependency_summaries.is_empty() {
+        "无".to_string()
+    } else {
+        dependency_summaries.join("\n\n")
+    };
+    let acceptance_text = if acceptance_criteria.is_empty() {
+        "无".to_string()
+    } else {
+        acceptance_criteria
+            .iter()
+            .map(|item| format!("- {}", item.trim()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let outputs_text = if result.outputs.is_empty() {
+        "无".to_string()
+    } else {
+        result
+            .outputs
+            .iter()
+            .map(|item| format!("- {}", item.trim()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    format!(
+        r#"## 审核任务
+
+你是本次 workflow 的 Lead Agent，请审核以下执行节点的结果。
+
+### workflow 目标
+{workflow_goal}
+
+### 被审核节点信息
+- step 标题：{step_title}
+- step 指令：{step_instructions}
+- 验收标准：
+{acceptance_text}
+
+### 执行结果
+摘要：{step_summary}
+详细内容：{step_content}
+产出文件：
+{step_outputs}
+
+### 前置依赖结果摘要
+{dependency_text}
+
+### 审核要求
+请从以下维度评估执行结果：
+1. 是否完成了 step 指令要求的所有内容
+2. 结果质量是否满足验收标准
+3. 是否与 workflow 整体目标一致
+4. 是否有明显的错误或遗漏
+
+### 返回格式
+通过时返回：
+{{
+  "type": "review_result",
+  "step_key": "{step_key}",
+  "execution_id": "{execution_id}",
+  "verdict": "approved",
+  "feedback": "审核通过的简要说明"
+}}
+
+不通过时返回：
+{{
+  "type": "review_result",
+  "step_key": "{step_key}",
+  "execution_id": "{execution_id}",
+  "verdict": "rejected",
+  "feedback": "详细说明不通过的原因和需要修改的具体内容"
+}}"#,
+        workflow_goal = workflow_goal,
+        step_title = step.title,
+        step_instructions = step.instructions,
+        acceptance_text = acceptance_text,
+        step_summary = result.summary,
+        step_content = result.content,
+        step_outputs = outputs_text,
+        dependency_text = dependency_text,
+        step_key = step.step_key,
+        execution_id = step.execution_id,
+    )
+}
+
+pub fn build_step_revision_prompt(
+    step: &WorkflowStep,
+    feedback_source: WorkflowRevisionFeedbackSource,
+    feedback_content: &str,
+    previous_summary: &str,
+    retry_count: i32,
+) -> String {
+    let source_section = match feedback_source {
+        WorkflowRevisionFeedbackSource::Lead => format!(
+            r#"## 修改要求 (第 {retry_count} 次修改)
+
+你之前的执行结果未通过 Lead Agent 审核。请根据以下审核意见修改你的工作。
+
+### 审核意见
+{feedback_content}
+
+### 你上次的执行结果摘要
+{previous_summary}
+
+### 要求
+1. 仔细阅读审核意见，理解问题所在
+2. 针对审核意见中指出的问题进行修改
+3. 保留上次执行中正确的部分，只修改有问题的部分
+4. 修改完成后按照标准格式返回结果"#,
+            retry_count = retry_count,
+            feedback_content = feedback_content.trim(),
+            previous_summary = previous_summary.trim(),
+        ),
+        WorkflowRevisionFeedbackSource::User => format!(
+            r#"## 用户修改要求 (第 {retry_count} 次修改)
+
+你之前的执行结果未通过用户审核。请根据用户的修改意见重新执行。
+
+### 用户反馈
+{feedback_content}
+
+### 你上次的执行结果摘要
+{previous_summary}
+
+### 要求
+1. 用户的反馈具有最高优先级，必须严格按照用户意见修改
+2. 如果用户反馈与原始指令有冲突，以用户反馈为准
+3. 保留上次执行中用户未提出异议的部分
+4. 修改完成后按照标准格式返回结果"#,
+            retry_count = retry_count,
+            feedback_content = feedback_content.trim(),
+            previous_summary = previous_summary.trim(),
+        ),
+    };
+
+    format!(
+        r#"{source_section}
+
+### 原始任务指令
+step 标题：{step_title}
+step 指令：{step_instructions}"#,
+        source_section = source_section,
+        step_title = step.title,
+        step_instructions = step.instructions,
+    )
+}
+
 pub fn parse_step_protocol_output(
     execution_id: Uuid,
     step_key: &str,
@@ -973,12 +1246,64 @@ pub fn parse_step_protocol_output(
     Ok(message)
 }
 
+pub fn parse_review_protocol_output(
+    execution_id: Uuid,
+    step_key: &str,
+    raw_output: &str,
+) -> Result<WorkflowReviewProtocolMessage, WorkflowRuntimeError> {
+    tracing::debug!(
+        "解析 review protocol 输出，execution_id: {}, step_key: {}, raw_output: {}",
+        execution_id,
+        step_key,
+        raw_output
+    );
+
+    let payload = extract_json_payload(raw_output).ok_or_else(|| {
+        WorkflowRuntimeError::Validation("review 输出中未找到 JSON 对象".to_string())
+    })?;
+
+    let message: WorkflowReviewProtocolMessage = serde_json::from_str(&payload)?;
+    match &message {
+        WorkflowReviewProtocolMessage::ReviewResult {
+            step_key: actual_step_key,
+            execution_id: actual_execution_id,
+            feedback,
+            ..
+        } => {
+            if actual_step_key != step_key {
+                return Err(WorkflowRuntimeError::Validation(format!(
+                    "review protocol 的 step_key 非法，期望 '{}'，实际 '{}'",
+                    step_key, actual_step_key
+                )));
+            }
+            if actual_execution_id != &execution_id.to_string() {
+                return Err(WorkflowRuntimeError::Validation(format!(
+                    "review protocol 的 execution_id 非法，期望 '{}'，实际 '{}'",
+                    execution_id, actual_execution_id
+                )));
+            }
+            if feedback.trim().is_empty() {
+                return Err(WorkflowRuntimeError::Validation(
+                    "review protocol 的 feedback 不能为空".to_string(),
+                ));
+            }
+        }
+    }
+
+    Ok(message)
+}
+
 pub fn build_workflow_card_projection(
     execution: &WorkflowExecution,
     plan: &WorkflowPlan,
     revision: &WorkflowPlanRevision,
     steps: &[WorkflowStep],
     _edges: &[WorkflowStepEdge],
+    rounds: &[WorkflowRound],
+    loops: &[WorkflowLoop],
+    iteration_feedbacks: &[WorkflowIterationFeedback],
+    step_reviews: &[WorkflowStepReview],
+    transcripts: &[WorkflowTranscript],
     workflow_agent_sessions: &[WorkflowAgentSession],
     session_agents: &[ChatSessionAgent],
     agents: &[ChatAgent],
@@ -1014,6 +1339,52 @@ pub fn build_workflow_card_projection(
         .count();
     let total_step_count = steps.len();
 
+    let latest_review_by_step_id: HashMap<Uuid, WorkflowCardReview> = step_reviews
+        .iter()
+        .map(|review| {
+            (
+                review.step_id,
+                WorkflowCardReview {
+                    reviewer_type: to_workflow_wire_value(&review.reviewer_type),
+                    verdict: to_workflow_wire_value(&review.verdict),
+                    feedback: review.feedback.clone(),
+                    review_round: review.review_round,
+                    created_at: review.created_at.to_rfc3339(),
+                },
+            )
+        })
+        .collect();
+    let plan_loop_key_by_step_key: HashMap<String, String> = plan_json
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            node.data
+                .loop_key
+                .clone()
+                .map(|loop_key| (node.id.clone(), loop_key))
+        })
+        .collect();
+    let loop_key_by_loop_id = loops
+        .iter()
+        .map(|workflow_loop| (workflow_loop.id, workflow_loop.loop_key.clone()))
+        .collect::<HashMap<_, _>>();
+    let loop_key_by_step_key = steps
+        .iter()
+        .filter_map(|step| {
+            step.loop_id
+                .and_then(|loop_id| loop_key_by_loop_id.get(&loop_id).cloned())
+                .or_else(|| plan_loop_key_by_step_key.get(&step.step_key).cloned())
+                .map(|loop_key| (step.step_key.clone(), loop_key))
+        })
+        .collect::<HashMap<_, _>>();
+    for node in &mut plan_json.nodes {
+        if let Some(loop_key) = loop_key_by_step_key.get(&node.id) {
+            node.data.loop_key = Some(loop_key.clone());
+        }
+    }
+
+    let pending_review = build_pending_review(steps, loops, transcripts);
+
     let step_views = steps
         .iter()
         .map(|step| WorkflowCardStep {
@@ -1022,6 +1393,11 @@ pub fn build_workflow_card_projection(
             title: step.title.clone(),
             step_type: to_workflow_wire_value(&step.step_type),
             status: to_workflow_wire_value(&step.status),
+            review_phase: derive_step_review_phase(step, transcripts),
+            retry_count: step.retry_count,
+            max_retry: step.max_retry,
+            loop_key: loop_key_by_step_key.get(&step.step_key).cloned(),
+            latest_review: latest_review_by_step_id.get(&step.id).cloned(),
             agent_name: step
                 .assigned_workflow_agent_session_id
                 .and_then(|id| workflow_agent_name_by_id.get(&id))
@@ -1055,6 +1431,27 @@ pub fn build_workflow_card_projection(
             })
         })
         .collect::<Vec<_>>();
+
+    let loop_views = loops
+        .iter()
+        .map(|workflow_loop| WorkflowCardLoop {
+            id: workflow_loop.id.to_string(),
+            loop_key: workflow_loop.loop_key.clone(),
+            status: to_workflow_wire_value(&workflow_loop.status),
+            retry_count: workflow_loop.retry_count,
+            max_retry: workflow_loop.max_retry,
+            user_review_required: workflow_loop.user_review_required,
+            rejection_reason: workflow_loop.rejection_reason.clone(),
+            member_step_ids: serde_json::from_str::<Vec<Uuid>>(&workflow_loop.member_step_ids_json)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|id| id.to_string())
+                .collect(),
+            review_step_id: workflow_loop.review_step_id.to_string(),
+        })
+        .collect::<Vec<_>>();
+
+    let iteration_history = build_iteration_history(rounds, steps, iteration_feedbacks);
 
     let result_step = steps
         .iter()
@@ -1093,11 +1490,84 @@ pub fn build_workflow_card_projection(
         outputs,
         agents: agent_views,
         steps: step_views,
+        current_round: execution.current_round,
+        loops: loop_views,
+        pending_review,
+        iteration_history,
         plan: plan_json,
         started_at: execution.started_at.map(|value| value.to_rfc3339()),
         completed_at: execution.completed_at.map(|value| value.to_rfc3339()),
         validation_errors: None,
     })
+}
+
+fn build_iteration_history(
+    rounds: &[WorkflowRound],
+    steps: &[WorkflowStep],
+    feedbacks: &[WorkflowIterationFeedback],
+) -> Vec<WorkflowIterationSummary> {
+    rounds
+        .iter()
+        .map(|round| {
+            let user_feedback = feedbacks
+                .iter()
+                .find(|feedback| feedback.from_round_id == round.id)
+                .and_then(|feedback| {
+                    extract_iteration_feedback_summary(&feedback.user_feedback_json)
+                });
+            let result_summary = steps
+                .iter()
+                .filter(|step| step.round_id == round.id)
+                .find(|step| step.step_type == WorkflowStepType::Result)
+                .and_then(|step| parse_summary_payload(step.summary_text.as_deref()))
+                .map(|payload| payload.summary)
+                .or_else(|| {
+                    steps
+                        .iter()
+                        .filter(|step| step.round_id == round.id)
+                        .filter_map(|step| parse_summary_payload(step.summary_text.as_deref()))
+                        .last()
+                        .map(|payload| payload.summary)
+                });
+
+            WorkflowIterationSummary {
+                round_index: round.round_index,
+                status: to_workflow_wire_value(&round.status),
+                user_feedback,
+                result_summary,
+                started_at: round
+                    .started_at
+                    .map(|value| value.to_rfc3339())
+                    .unwrap_or_else(|| round.created_at.to_rfc3339()),
+                completed_at: round.completed_at.map(|value| value.to_rfc3339()),
+            }
+        })
+        .collect()
+}
+
+fn extract_iteration_feedback_summary(user_feedback_json: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(user_feedback_json).ok()?;
+    let feedback = value.get("feedback")?;
+    if let Some(text) = feedback.as_str() {
+        return Some(text.trim().to_string()).filter(|value| !value.is_empty());
+    }
+    let what_wrong = feedback
+        .get("what_wrong")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .trim();
+    let expected = feedback
+        .get("expected")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .trim();
+    let summary = match (what_wrong.is_empty(), expected.is_empty()) {
+        (false, false) => format!("{what_wrong}; expected: {expected}"),
+        (false, true) => what_wrong.to_string(),
+        (true, false) => expected.to_string(),
+        (true, true) => String::new(),
+    };
+    (!summary.is_empty()).then_some(summary)
 }
 
 async fn finish_workflow_runtime_stream(
@@ -1647,6 +2117,122 @@ pub fn parse_summary_payload(summary_text: Option<&str>) -> Option<SummaryPayloa
         })
 }
 
+fn transcript_meta_value(transcript: &WorkflowTranscript) -> serde_json::Value {
+    transcript
+        .meta_json
+        .as_deref()
+        .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
+        .unwrap_or_else(|| serde_json::json!({}))
+}
+
+fn derive_step_review_phase(
+    step: &WorkflowStep,
+    transcripts: &[WorkflowTranscript],
+) -> Option<String> {
+    match step.status {
+        WorkflowStepStatus::Running => Some("worker_running".to_string()),
+        WorkflowStepStatus::WaitingReview => Some("lead_review".to_string()),
+        WorkflowStepStatus::WaitingInput => transcripts
+            .iter()
+            .rev()
+            .find(|transcript| {
+                transcript.step_id == Some(step.id)
+                    && transcript.entry_type == "step_review"
+                    && !matches!(
+                        transcript_meta_value(transcript).get("resolved"),
+                        Some(serde_json::Value::Bool(true))
+                    )
+            })
+            .map(|_| "user_review".to_string()),
+        WorkflowStepStatus::PreCompleted => Some("pre_completed".to_string()),
+        WorkflowStepStatus::Revising => Some("revising".to_string()),
+        _ => None,
+    }
+}
+
+fn build_pending_review(
+    steps: &[WorkflowStep],
+    loops: &[WorkflowLoop],
+    transcripts: &[WorkflowTranscript],
+) -> Option<WorkflowPendingReview> {
+    let transcript = transcripts.iter().find(|transcript| {
+        matches!(
+            transcript.entry_type.as_str(),
+            "step_review" | "loop_review"
+        ) && !matches!(
+            transcript_meta_value(transcript).get("resolved"),
+            Some(serde_json::Value::Bool(true))
+        )
+    })?;
+
+    let step = steps
+        .iter()
+        .find(|step| Some(step.id) == transcript.step_id)?;
+    let meta = transcript_meta_value(transcript);
+    let context_summary = meta
+        .get("summary")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| parse_summary_text_preview(step.summary_text.clone().unwrap_or_default()))
+        .unwrap_or_else(|| transcript.content.clone());
+
+    let meta = transcript_meta_value(transcript);
+    let loop_target = if transcript.entry_type == "loop_review" {
+        meta.get("loop_id")
+            .and_then(|value| value.as_str())
+            .and_then(|id| Uuid::parse_str(id).ok())
+            .and_then(|id| loops.iter().find(|workflow_loop| workflow_loop.id == id))
+    } else {
+        None
+    };
+    let review_type = if transcript.entry_type == "loop_review" {
+        "loop_user_review"
+    } else {
+        "step_user_review"
+    };
+    let target_id = loop_target
+        .map(|workflow_loop| workflow_loop.id.to_string())
+        .unwrap_or_else(|| step.id.to_string());
+    let target_title = loop_target
+        .map(|workflow_loop| workflow_loop.loop_key.clone())
+        .unwrap_or_else(|| step.title.clone());
+
+    Some(WorkflowPendingReview {
+        review_id: transcript.id.to_string(),
+        review_type: review_type.to_string(),
+        target_id,
+        target_title,
+        context_summary,
+        prompt_template: WorkflowReviewPromptTemplate {
+            message: transcript.content.clone(),
+            fields: vec![WorkflowReviewField {
+                key: "feedback".to_string(),
+                label: "修改意见".to_string(),
+                field_type: "textarea".to_string(),
+                required: false,
+                placeholder: Some("如果需要修改，请填写具体意见".to_string()),
+                options: None,
+            }],
+            actions: vec![
+                WorkflowReviewAction {
+                    action: "approve".to_string(),
+                    label: "通过".to_string(),
+                    style: "primary".to_string(),
+                    requires_feedback: false,
+                },
+                WorkflowReviewAction {
+                    action: "reject".to_string(),
+                    label: "打回修改".to_string(),
+                    style: "danger".to_string(),
+                    requires_feedback: true,
+                },
+            ],
+        },
+    })
+}
+
 fn parse_summary_text_preview(summary_text: String) -> Option<String> {
     if let Ok(payload) = serde_json::from_str::<SummaryPayload>(&summary_text) {
         return Some(payload.summary);
@@ -1928,6 +2514,10 @@ mod tests {
             latest_run_id: None,
             summary_text: None,
             content: None,
+            loop_id: None,
+            lead_review_required: true,
+            user_review_required: false,
+            revision_context: None,
             created_at: now,
             updated_at: now,
             started_at: None,
@@ -1965,6 +2555,50 @@ mod tests {
         (vec![session_agent], vec![agent])
     }
 
+    fn sample_step_review(step: &WorkflowStep) -> WorkflowStepReview {
+        WorkflowStepReview {
+            id: Uuid::new_v4(),
+            step_id: step.id,
+            execution_id: step.execution_id,
+            reviewer_type: db::models::workflow_types::ReviewerType::Lead,
+            reviewer_id: Some(Uuid::new_v4().to_string()),
+            verdict: ReviewVerdict::Approved,
+            feedback: "Looks good".to_string(),
+            review_round: 1,
+            created_at: Utc::now(),
+        }
+    }
+
+    fn sample_step_review_transcript(step: &WorkflowStep) -> WorkflowTranscript {
+        WorkflowTranscript {
+            id: Uuid::new_v4(),
+            execution_id: step.execution_id,
+            round_id: Some(step.round_id),
+            workflow_agent_session_id: Some(Uuid::new_v4()),
+            step_id: Some(step.id),
+            sender_type: "control".to_string(),
+            entry_type: "step_review".to_string(),
+            content: format!("请审核步骤「{}」的执行结果", step.title),
+            meta_json: Some(
+                serde_json::json!({
+                    "summary": "Need user confirmation",
+                    "resolved": false,
+                })
+                .to_string(),
+            ),
+            created_at: Utc::now().to_rfc3339(),
+        }
+    }
+
+    fn sample_step_run_result() -> WorkflowStepRunResult {
+        WorkflowStepRunResult {
+            run_id: Uuid::new_v4(),
+            summary: "Implemented the requested fix".to_string(),
+            content: "Updated the handler and added validation.".to_string(),
+            outputs: vec!["src/handler.rs".to_string(), "tests/handler.rs".to_string()],
+        }
+    }
+
     #[test]
     fn build_plan_generation_prompt_includes_previous_failure_reason() {
         let prompt = build_plan_generation_prompt(
@@ -1980,6 +2614,157 @@ mod tests {
         assert!(prompt.contains("Missing result node in the previous workflow JSON."));
         assert!(prompt.contains("Do not repeat the same failure."));
         assert!(prompt.contains("Ship the confirmed implementation plan."));
+        assert!(!prompt.contains("\"userReview\": \"optional boolean"));
+        assert!(!prompt.contains("\"leadReview\": \"optional boolean"));
+        assert!(prompt.contains("不要输出或推断这两个字段"));
+    }
+
+    #[test]
+    fn build_lead_review_prompt_includes_required_sections() {
+        let step = sample_step(WorkflowStepStatus::Running);
+        let result = sample_step_run_result();
+
+        let prompt = build_lead_review_prompt(
+            "Ship a stable workflow review loop.",
+            &step,
+            &result,
+            &[
+                "Dependency A done".to_string(),
+                "Dependency B done".to_string(),
+            ],
+            &[
+                "Must pass tests".to_string(),
+                "Must preserve API contract".to_string(),
+            ],
+        );
+
+        assert!(prompt.contains("## 审核任务"));
+        assert!(prompt.contains("Ship a stable workflow review loop."));
+        assert!(prompt.contains(&step.title));
+        assert!(prompt.contains(&step.instructions));
+        assert!(prompt.contains("Must pass tests"));
+        assert!(prompt.contains("Must preserve API contract"));
+        assert!(prompt.contains(&result.summary));
+        assert!(prompt.contains(&result.content));
+        assert!(prompt.contains("src/handler.rs"));
+        assert!(prompt.contains("Dependency A done"));
+        assert!(prompt.contains("\"type\": \"review_result\""));
+        assert!(prompt.contains(&step.step_key));
+        assert!(prompt.contains(&step.execution_id.to_string()));
+    }
+
+    #[test]
+    fn build_step_revision_prompt_supports_lead_feedback_template() {
+        let step = sample_step(WorkflowStepStatus::Revising);
+        let prompt = build_step_revision_prompt(
+            &step,
+            WorkflowRevisionFeedbackSource::Lead,
+            "补充错误处理和日志记录。",
+            "已经完成主流程，但漏掉异常分支。",
+            2,
+        );
+
+        assert!(prompt.contains("## 修改要求 (第 2 次修改)"));
+        assert!(prompt.contains("未通过 Lead Agent 审核"));
+        assert!(prompt.contains("补充错误处理和日志记录。"));
+        assert!(prompt.contains("已经完成主流程，但漏掉异常分支。"));
+        assert!(prompt.contains(&step.title));
+        assert!(prompt.contains(&step.instructions));
+    }
+
+    #[test]
+    fn build_step_revision_prompt_supports_user_feedback_template() {
+        let step = sample_step(WorkflowStepStatus::Revising);
+        let prompt = build_step_revision_prompt(
+            &step,
+            WorkflowRevisionFeedbackSource::User,
+            "请把输出改成中文，并补一份测试说明。",
+            "上次结果结构正确，但文案不符合预期。",
+            1,
+        );
+
+        assert!(prompt.contains("## 用户修改要求 (第 1 次修改)"));
+        assert!(prompt.contains("未通过用户审核"));
+        assert!(prompt.contains("请把输出改成中文，并补一份测试说明。"));
+        assert!(prompt.contains("上次结果结构正确，但文案不符合预期。"));
+        assert!(prompt.contains("用户的反馈具有最高优先级"));
+        assert!(prompt.contains(&step.title));
+    }
+
+    #[test]
+    fn parse_review_protocol_output_accepts_approved_review() {
+        let step = sample_step(WorkflowStepStatus::WaitingReview);
+        let raw_output = format!(
+            r#"{{
+  "type": "review_result",
+  "step_key": "{}",
+  "execution_id": "{}",
+  "verdict": "approved",
+  "feedback": "结果满足验收标准。"
+}}"#,
+            step.step_key, step.execution_id
+        );
+
+        let message = parse_review_protocol_output(step.execution_id, &step.step_key, &raw_output)
+            .expect("parse");
+
+        assert_eq!(
+            message,
+            WorkflowReviewProtocolMessage::ReviewResult {
+                step_key: step.step_key,
+                execution_id: step.execution_id.to_string(),
+                verdict: ReviewVerdict::Approved,
+                feedback: "结果满足验收标准。".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_review_protocol_output_accepts_rejected_review() {
+        let step = sample_step(WorkflowStepStatus::WaitingReview);
+        let raw_output = format!(
+            r#"{{
+  "type": "review_result",
+  "step_key": "{}",
+  "execution_id": "{}",
+  "verdict": "rejected",
+  "feedback": "还缺少回归测试。"
+}}"#,
+            step.step_key, step.execution_id
+        );
+
+        let message = parse_review_protocol_output(step.execution_id, &step.step_key, &raw_output)
+            .expect("parse");
+
+        assert_eq!(
+            message,
+            WorkflowReviewProtocolMessage::ReviewResult {
+                step_key: step.step_key,
+                execution_id: step.execution_id.to_string(),
+                verdict: ReviewVerdict::Rejected,
+                feedback: "还缺少回归测试。".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_review_protocol_output_rejects_invalid_review_payload() {
+        let step = sample_step(WorkflowStepStatus::WaitingReview);
+        let raw_output = format!(
+            r#"{{
+  "type": "review_result",
+  "step_key": "{}",
+  "execution_id": "{}",
+  "verdict": "approved",
+  "feedback": "   "
+}}"#,
+            step.step_key, step.execution_id
+        );
+
+        let err = parse_review_protocol_output(step.execution_id, &step.step_key, &raw_output)
+            .expect_err("invalid");
+
+        assert!(matches!(err, WorkflowRuntimeError::Validation(_)));
     }
 
     #[test]
@@ -2199,6 +2984,11 @@ mod tests {
                 &[sample_step(status.clone())],
                 &[],
                 &[],
+                &[],
+                &[],
+                &[],
+                &[],
+                &[],
                 &session_agents,
                 &agents,
                 None,
@@ -2241,6 +3031,11 @@ mod tests {
                 &[sample_step(WorkflowStepStatus::Completed)],
                 &[],
                 &[],
+                &[],
+                &[],
+                &[],
+                &[],
+                &[],
                 &session_agents,
                 &agents,
                 None,
@@ -2252,5 +3047,75 @@ mod tests {
                 assert!(matches!(projection.state, WorkflowCardState::Running));
             }
         }
+    }
+
+    #[test]
+    fn workflow_projection_includes_pending_review_and_latest_review_fields() {
+        let execution = sample_execution(WorkflowExecutionStatus::Waiting);
+        let plan_json = sample_plan_json();
+        let plan = sample_plan(execution.plan_id);
+        let revision = sample_revision(plan.id, plan_json);
+        let (session_agents, agents) = sample_agent_views();
+        let mut step = sample_step(WorkflowStepStatus::WaitingInput);
+        step.execution_id = execution.id;
+        step.user_review_required = true;
+        step.retry_count = 1;
+        step.max_retry = 3;
+        step.summary_text = Some(
+            serde_json::json!({
+                "summary": "Need user confirmation",
+                "content": "Draft ready",
+                "outputs": ["src/handler.rs"]
+            })
+            .to_string(),
+        );
+        let review = sample_step_review(&step);
+        let transcript = sample_step_review_transcript(&step);
+
+        let projection = build_workflow_card_projection(
+            &execution,
+            &plan,
+            &revision,
+            &[step.clone()],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[review],
+            &[transcript],
+            &[],
+            &session_agents,
+            &agents,
+            None,
+        )
+        .expect("build projection");
+
+        assert_eq!(
+            projection.steps[0].review_phase.as_deref(),
+            Some("user_review")
+        );
+        assert_eq!(projection.steps[0].retry_count, 1);
+        assert_eq!(projection.steps[0].max_retry, 3);
+        assert_eq!(
+            projection.steps[0]
+                .latest_review
+                .as_ref()
+                .map(|item| item.verdict.as_str()),
+            Some("approved")
+        );
+        assert_eq!(
+            projection
+                .pending_review
+                .as_ref()
+                .map(|item| item.review_type.as_str()),
+            Some("step_user_review")
+        );
+        assert_eq!(
+            projection
+                .pending_review
+                .as_ref()
+                .map(|item| item.target_id.as_str()),
+            Some(projection.steps[0].id.as_str())
+        );
     }
 }

@@ -254,6 +254,10 @@ impl ChatRunner {
         }
     }
 
+    pub(super) fn should_route_protocol_send(workflow_route_mode: bool, target: &str) -> bool {
+        !workflow_route_mode || target.trim().eq_ignore_ascii_case("you")
+    }
+
     pub(super) fn work_item_type_label(item_type: &ChatWorkItemType) -> &'static str {
         match item_type {
             ChatWorkItemType::Artifact => "artifact",
@@ -613,6 +617,11 @@ impl ChatRunner {
         }
 
         let session = ChatSession::find_by_id(&self.db.pool, session_id).await?;
+        let source_message = ChatMessage::find_by_id(&self.db.pool, source_message_id).await?;
+        let workflow_route_mode = workflow_generate_detected
+            || source_message
+                .as_ref()
+                .is_some_and(|message| chat::is_workflow_chat_input_mode(&message.meta.0));
         let mut send_count = 0usize;
 
         // handle send type message for agents in the current session
@@ -624,6 +633,18 @@ impl ChatRunner {
             let Some(target) = message.to.as_deref() else {
                 continue;
             };
+            if !Self::should_route_protocol_send(workflow_route_mode, target) {
+                tracing::info!(
+                    session_id = %session_id,
+                    run_id = %run_id,
+                    agent_id = %agent_id,
+                    agent_name = %agent_name,
+                    target,
+                    workflow_generate_detected,
+                    "blocked workflow-mode direct agent send"
+                );
+                continue;
+            }
             let content = Self::build_send_message_content(target, &message.content);
             let intent = message.intent.as_deref();
             let intent_meaning = intent.and_then(Self::protocol_send_intent_meaning);
@@ -750,6 +771,7 @@ impl ChatRunner {
             viewport: None,
             nodes: Vec::new(),
             edges: Vec::new(),
+            loops: None,
             policies: None,
         };
         let projection = WorkflowCardProjection {
@@ -767,6 +789,10 @@ impl ChatRunner {
             outputs: Vec::new(),
             agents: available_agents.to_vec(),
             steps: Vec::new(),
+            current_round: 0,
+            loops: Vec::new(),
+            pending_review: None,
+            iteration_history: Vec::new(),
             plan,
             started_at: None,
             completed_at: None,

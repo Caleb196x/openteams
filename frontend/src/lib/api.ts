@@ -56,6 +56,11 @@ import {
   SkillCategory,
   ChatRunRetentionInfo,
   CreatePresetSnapshotResponse,
+  ExecutePlanRequest,
+  UserIterationFeedbackRequest,
+  UserIterationFeedbackResponse,
+  UserReviewResponseRequest,
+  UserReviewResponseResponse,
 } from 'shared/types';
 import type {
   CliConfig,
@@ -134,6 +139,60 @@ export interface WorkflowTranscriptEntry {
   agent_name?: string | null;
 }
 
+export interface WorkflowCardReviewData {
+  reviewer_type: string;
+  verdict: string;
+  feedback: string;
+  review_round: number;
+  created_at: string;
+}
+
+export interface WorkflowCardLoopData {
+  id: string;
+  loop_key: string;
+  status: string;
+  retry_count: number;
+  max_retry: number;
+  user_review_required: boolean;
+  rejection_reason: string | null;
+  member_step_ids: string[];
+  review_step_id: string;
+}
+
+export interface WorkflowPendingReviewData {
+  review_id: string;
+  review_type: string;
+  target_id: string;
+  target_title: string;
+  context_summary: string;
+  prompt_template: {
+    message: string;
+    fields: Array<{
+      key: string;
+      label: string;
+      field_type: string;
+      required: boolean;
+      placeholder?: string | null;
+      help_text?: string | null;
+    }>;
+    actions: Array<{
+      action: string;
+      label: string;
+      style: string;
+      requires_feedback: boolean;
+    }>;
+  };
+}
+
+export interface WorkflowIterationSummaryData {
+  round_index: number;
+  status: string;
+  user_feedback: string | null;
+  result_summary: string | null;
+  started_at: string;
+  completed_at: string | null;
+}
+
 export interface WorkflowCardData {
   execution_id?: string | null;
   plan_id?: string;
@@ -147,12 +206,20 @@ export interface WorkflowCardData {
   total_step_count: number;
   result_summary?: string | null;
   outputs: string[];
+  current_round: number;
+  loops: WorkflowCardLoopData[];
+  iteration_history: WorkflowIterationSummaryData[];
   steps: Array<{
     id: string;
     step_key: string;
     title: string;
     step_type: string;
     status: string;
+    review_phase: string | null;
+    retry_count: number;
+    max_retry: number;
+    loop_key: string | null;
+    latest_review: WorkflowCardReviewData | null;
     agent_name?: string | null;
     summary_text?: string | null;
     content?: string | null;
@@ -180,8 +247,17 @@ export interface WorkflowCardData {
       source: string;
       target: string;
     }>;
+    loops?: Array<{
+      loop_key: string;
+      member_step_keys: string[];
+      review_step_key: string;
+      review_scope_step_keys: string[];
+      max_retry: number;
+      user_review_required: boolean;
+    }> | null;
     viewport?: { x?: number; y?: number; zoom?: number };
   };
+  pending_review?: WorkflowPendingReviewData | null;
   validation_errors?: string | null;
 }
 
@@ -888,11 +964,15 @@ export const chatApi = {
 
   executePlan: async (
     sessionId: string,
-    planId: string
+    planId: string,
+    payload?: Partial<ExecutePlanRequest>
   ): Promise<ExecutePlanResponse> => {
     const response = await makeRequest(
       `/api/chat/sessions/${sessionId}/workflow/plans/${planId}/execute`,
-      { method: 'POST' }
+      {
+        method: 'POST',
+        body: payload ? JSON.stringify(payload) : undefined,
+      }
     );
     return handleApiResponse<ExecutePlanResponse>(response);
   },
@@ -1139,6 +1219,26 @@ export const chatApi = {
       `/api/chat/messages/${messageId}/workflow-card`
     );
     return handleApiResponse<WorkflowCardData>(response);
+  },
+
+  respondToWorkflowReview: async (
+    payload: UserReviewResponseRequest
+  ): Promise<UserReviewResponseResponse> => {
+    const response = await makeRequest('/api/workflow/review/respond', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    return handleApiResponse<UserReviewResponseResponse>(response);
+  },
+
+  submitWorkflowIterationFeedback: async (
+    payload: UserIterationFeedbackRequest
+  ): Promise<UserIterationFeedbackResponse> => {
+    const response = await makeRequest('/api/workflow/iteration/feedback', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    return handleApiResponse<UserIterationFeedbackResponse>(response);
   },
 
   resendMessage: async (

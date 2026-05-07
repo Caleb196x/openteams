@@ -458,6 +458,22 @@ async fn build_execution_workflow_card_projection(
     let workflow_sessions = WorkflowAgentSession::find_by_execution(pool, execution.id).await?;
     let steps = WorkflowStep::find_by_execution(pool, execution.id).await?;
     let edges = WorkflowStepEdge::find_by_execution(pool, execution.id).await?;
+    let rounds =
+        db::models::workflow_round::WorkflowRound::find_by_execution(pool, execution.id).await?;
+    let loops =
+        db::models::workflow_loop::WorkflowLoop::find_by_execution(pool, execution.id).await?;
+    let iteration_feedbacks =
+        db::models::workflow_iteration_feedback::WorkflowIterationFeedback::find_by_execution(
+            pool,
+            execution.id,
+        )
+        .await?;
+    let step_reviews =
+        db::models::workflow_step_review::WorkflowStepReview::find_by_execution(pool, execution.id)
+            .await?;
+    let transcripts =
+        db::models::workflow_transcript::WorkflowTranscript::find_by_execution(pool, execution.id)
+            .await?;
 
     build_workflow_card_projection(
         &execution,
@@ -465,6 +481,11 @@ async fn build_execution_workflow_card_projection(
         &revision,
         &steps,
         &edges,
+        &rounds,
+        &loops,
+        &iteration_feedbacks,
+        &step_reviews,
+        &transcripts,
         &workflow_sessions,
         &session_agents,
         &agents,
@@ -521,6 +542,11 @@ async fn build_plan_workflow_card_projection(
                 node.data.step_type.to_lowercase()
             },
             status: "pending".to_string(),
+            review_phase: None,
+            retry_count: 0,
+            max_retry: node.data.max_retry.unwrap_or(1) as i32,
+            loop_key: node.data.loop_key.clone(),
+            latest_review: None,
             agent_name: node.data.agent_id.clone(),
             summary_text: None,
             content: None,
@@ -546,6 +572,10 @@ async fn build_plan_workflow_card_projection(
         outputs: Vec::new(),
         agents: agent_views,
         steps: step_views,
+        current_round: 0,
+        loops: Vec::new(),
+        pending_review: None,
+        iteration_history: Vec::new(),
         plan: parsed_plan,
         started_at: None,
         completed_at: None,

@@ -42,7 +42,9 @@ pub struct TransitionResult<T> {
 fn is_step_waiting(status: &WorkflowStepStatus) -> bool {
     matches!(
         status,
-        WorkflowStepStatus::WaitingInput | WorkflowStepStatus::WaitingReview
+        WorkflowStepStatus::PreCompleted
+            | WorkflowStepStatus::WaitingInput
+            | WorkflowStepStatus::WaitingReview
     )
 }
 
@@ -56,7 +58,10 @@ fn is_step_completed_like(status: &WorkflowStepStatus) -> bool {
 fn is_step_ready_like(status: &WorkflowStepStatus) -> bool {
     matches!(
         status,
-        WorkflowStepStatus::Pending | WorkflowStepStatus::Ready | WorkflowStepStatus::Blocked
+        WorkflowStepStatus::Pending
+            | WorkflowStepStatus::Ready
+            | WorkflowStepStatus::Blocked
+            | WorkflowStepStatus::Revising
     )
 }
 
@@ -144,7 +149,9 @@ pub fn derive_agent_session_state(
     if step_statuses.iter().any(|status| {
         matches!(
             status,
-            WorkflowStepStatus::WaitingInput | WorkflowStepStatus::WaitingReview
+            WorkflowStepStatus::PreCompleted
+                | WorkflowStepStatus::WaitingInput
+                | WorkflowStepStatus::WaitingReview
         )
     }) {
         return A::Paused;
@@ -221,13 +228,15 @@ pub fn validate_step_transition(
         Ready => matches!(to, Running),
         Running => matches!(
             to,
-            WaitingInput | WaitingReview | InterruptRequested | Completed | Failed
+            PreCompleted | WaitingInput | WaitingReview | InterruptRequested | Completed | Failed
         ),
-        WaitingInput => matches!(to, Ready | Failed),
-        WaitingReview => matches!(to, Ready | Failed),
+        PreCompleted => matches!(to, WaitingReview | Revising | Completed | Failed),
+        WaitingInput => matches!(to, Ready | Revising | PreCompleted | Failed),
+        WaitingReview => matches!(to, Ready | Revising | Completed | Failed),
         InterruptRequested => matches!(to, Interrupted | Failed),
         Interrupted => matches!(to, Ready | Failed | Cancelled),
         Blocked => matches!(to, Ready | Cancelled),
+        Revising => matches!(to, Ready | Running | Failed | Cancelled),
         Failed => matches!(to, Ready),
         Completed => matches!(to, Ready),
         Skipped | Cancelled => false,
@@ -293,6 +302,8 @@ pub fn validate_step_in_execution(
             step_status,
             S::WaitingInput
                 | S::WaitingReview
+                | S::PreCompleted
+                | S::Revising
                 | S::Ready
                 | S::Completed
                 | S::Skipped

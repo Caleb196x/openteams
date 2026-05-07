@@ -60,11 +60,13 @@ use utils::{
 };
 use uuid::Uuid;
 
+#[cfg(test)]
+use crate::services::config::preset_loader::PresetLoader;
 use crate::services::{
     analytics::AnalyticsService,
     analytics_events::{AnalyticsProjector, DomainEvent},
     chat::{self, ChatServiceError},
-    config::{self, UiLanguage, preset_loader::PresetLoader},
+    config::{self, UiLanguage},
     native_skills::{NativeSkillError, list_native_skills_for_runner},
 };
 
