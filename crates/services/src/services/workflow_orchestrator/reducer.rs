@@ -231,8 +231,14 @@ pub fn validate_step_transition(
             PreCompleted | WaitingInput | WaitingReview | InterruptRequested | Completed | Failed
         ),
         PreCompleted => matches!(to, WaitingReview | Revising | Completed | Failed),
-        WaitingInput => matches!(to, Ready | Revising | PreCompleted | Failed | InterruptRequested),
-        WaitingReview => matches!(to, Ready | Revising | Completed | Failed | WaitingInput | InterruptRequested),
+        WaitingInput => matches!(
+            to,
+            Ready | Revising | PreCompleted | Failed | InterruptRequested
+        ),
+        WaitingReview => matches!(
+            to,
+            Ready | Revising | Completed | Failed | WaitingInput | InterruptRequested
+        ),
         InterruptRequested => matches!(to, Interrupted | Failed),
         Interrupted => matches!(to, Ready | Failed | Cancelled),
         Blocked => matches!(to, Ready | Cancelled),

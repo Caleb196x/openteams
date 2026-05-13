@@ -1,6 +1,3 @@
-import { AlertCircle } from 'lucide-react';
-import { useTranslation } from 'react-i18next';
-
 type FinalReviewTranscriptLike = {
   id: string;
   entry_type: string;
@@ -71,56 +68,4 @@ export function toWorkflowFinalReviewAction<
     description:
       typeof meta?.description === 'string' ? meta.description : undefined,
   };
-}
-
-type WorkflowFinalReviewCardProps = {
-  message?: string;
-  description?: string;
-  onAccept: () => void;
-  onReject: () => void;
-  disabled?: boolean;
-};
-
-export function WorkflowFinalReviewCard({
-  message,
-  description,
-  onAccept,
-  onReject,
-  disabled,
-}: WorkflowFinalReviewCardProps) {
-  const { t } = useTranslation('chat');
-  const displayMessage = message ?? t('workflow.finalReview.defaultMessage', { defaultValue: 'Task completed. Accept the result?' });
-  return (
-    <div className="bg-white border-2 border-amber-400 p-4 rounded-xl shadow-lg animate-in fade-in slide-in-from-bottom-4">
-      <div className="text-xs font-bold text-amber-800 flex items-center gap-2 mb-2">
-        <AlertCircle className="w-4 h-4" /> {t('workflow.finalReview.title', { defaultValue: 'Final Review' })}
-      </div>
-      <p className="text-[11px] text-slate-600 mb-3 leading-relaxed font-medium">
-        {displayMessage}
-      </p>
-      {description && (
-        <p className="text-[11px] text-slate-500 mb-3 leading-relaxed">
-          {description}
-        </p>
-      )}
-      <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={onAccept}
-          disabled={disabled}
-          className="flex-1 py-1.5 bg-emerald-600 text-white rounded text-[10px] font-bold hover:bg-emerald-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {t('workflow.finalReview.accept', { defaultValue: 'ACCEPT' })}
-        </button>
-        <button
-          type="button"
-          onClick={onReject}
-          disabled={disabled}
-          className="flex-1 py-1.5 bg-white border border-slate-300 text-slate-700 rounded text-[10px] font-bold hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {t('workflow.finalReview.reject', { defaultValue: 'REJECT' })}
-        </button>
-      </div>
-    </div>
-  );
 }

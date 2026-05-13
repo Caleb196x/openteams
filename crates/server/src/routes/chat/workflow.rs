@@ -27,16 +27,18 @@ use db::models::{
 use deployment::Deployment;
 use serde::{Deserialize, Serialize};
 use services::services::{
+    config,
     workflow_compiler::WorkflowCompiler,
     workflow_orchestrator::WorkflowOrchestrator,
     workflow_runtime::{
         WorkflowCardAgent, WorkflowCardProjection, build_plan_generation_prompt,
-        extract_json_payload, resolve_lead_agent, resolve_workflow_goal, run_workflow_agent_prompt,
+        extract_json_payload, resolve_lead_agent, resolve_workflow_goal,
+        resolve_workflow_response_language_instruction, run_workflow_agent_prompt,
     },
     workflow_validator,
 };
 use ts_rs::TS;
-use utils::response::ApiResponse;
+use utils::{assets::config_path, response::ApiResponse};
 use uuid::Uuid;
 
 use crate::{DeploymentImpl, error::ApiError};
@@ -109,9 +111,8 @@ pub async fn generate_plan_and_run(
         agents.push(agent);
     }
 
-    let (lead_agent, lead_session_agent) =
-        resolve_lead_agent(&session, &session_agents, &agents)
-            .map_err(|err| ApiError::BadRequest(err.to_string()))?;
+    let (lead_agent, lead_session_agent) = resolve_lead_agent(&session, &session_agents, &agents)
+        .map_err(|err| ApiError::BadRequest(err.to_string()))?;
 
     let available_agents = session_agents
         .iter()
@@ -128,10 +129,15 @@ pub async fn generate_plan_and_run(
         })
         .collect::<Vec<_>>();
 
+    let ui_config = config::load_config_from_file(&config_path()).await;
+    let response_language_instruction =
+        resolve_workflow_response_language_instruction(&ui_config.language);
     let prompt = build_plan_generation_prompt(
         &user_goal,
         &lead_agent.id.to_string(),
         &available_agents,
+        None,
+        response_language_instruction,
         None,
     );
 
@@ -348,6 +354,7 @@ pub async fn retry_plan_generation(
                 &plan_goal,
                 Some(message_id),
                 previous_failure_reason.as_deref(),
+                None,
             )
             .await
         {
@@ -965,24 +972,16 @@ pub async fn retry_step(
 
     let retry_target = query.retry_target.as_deref().unwrap_or("task");
     let (execution, step) = match retry_target {
-        "review" => {
-            WorkflowOrchestrator::retry_step_review(
-                deployment.db(),
-                deployment.chat_runner(),
-                step_id,
-            )
+        "review" => WorkflowOrchestrator::retry_step_review(
+            deployment.db(),
+            deployment.chat_runner(),
+            step_id,
+        )
+        .await
+        .map_err(|err| ApiError::BadRequest(err.to_string()))?,
+        _ => WorkflowOrchestrator::retry_step(deployment.db(), deployment.chat_runner(), step_id)
             .await
-            .map_err(|err| ApiError::BadRequest(err.to_string()))?
-        }
-        _ => {
-            WorkflowOrchestrator::retry_step(
-                deployment.db(),
-                deployment.chat_runner(),
-                step_id,
-            )
-            .await
-            .map_err(|err| ApiError::BadRequest(err.to_string()))?
-        }
+            .map_err(|err| ApiError::BadRequest(err.to_string()))?,
     };
 
     Ok((

@@ -1,14 +1,11 @@
-//! Step input handling: park-for-user-action, follow-up prompts, final-review resolution.
+//! Step input handling: park-for-user-action, follow-up prompts, and final-review parking.
 
-use chrono::Utc;
 use db::{
     DBService,
     models::{
         chat_session::ChatSession, chat_session_agent::ChatSessionAgent,
         workflow_agent_session::WorkflowAgentSession, workflow_execution::WorkflowExecution,
-        workflow_plan::WorkflowPlan, workflow_plan_revision::WorkflowPlanRevision,
-        workflow_round::WorkflowRound, workflow_step::WorkflowStep,
-        workflow_transcript::WorkflowTranscript, workflow_types::*,
+        workflow_step::WorkflowStep, workflow_transcript::WorkflowTranscript, workflow_types::*,
     },
 };
 use sqlx::SqlitePool;
@@ -17,7 +14,6 @@ use uuid::Uuid;
 use super::{
     super::{
         chat_runner::ChatRunner,
-        workflow_iteration::IterationManager,
         workflow_runtime::{
             SummaryPayload, WorkflowRuntimeError, parse_summary_payload,
             workflow_step_protocol_json_schema,
@@ -562,175 +558,6 @@ impl WorkflowOrchestrator {
         .await?;
 
         Ok(transcript)
-    }
-
-    /// Resolve the final_review transcript action.
-    /// "accepted" → Completed, "rejected" → Paused.
-    pub(super) async fn resolve_final_review(
-        pool: &SqlitePool,
-        chat_runner: &ChatRunner,
-        transcript: &WorkflowTranscript,
-        execution: &WorkflowExecution,
-        resolved_action: &str,
-        input_text: Option<&str>,
-    ) -> Result<ResolvedTranscriptAction, OrchestratorError> {
-        let existing_meta: serde_json::Value = transcript
-            .meta_json
-            .as_deref()
-            .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
-            .unwrap_or_else(|| serde_json::json!({}));
-        if matches!(
-            existing_meta.get("resolved"),
-            Some(serde_json::Value::Bool(true))
-        ) {
-            return Err(OrchestratorError::IllegalTransition(format!(
-                "transcript {} already resolved",
-                transcript.id
-            )));
-        }
-
-        let updated_meta_json = Self::merge_transcript_meta(
-            transcript.meta_json.as_deref(),
-            serde_json::json!({
-                "resolved": true,
-                "resolved_action": resolved_action,
-                "resolved_at": Utc::now().to_rfc3339(),
-                "input_text": input_text.map(str::trim).filter(|value| !value.is_empty()),
-            }),
-        );
-        let updated_transcript =
-            WorkflowTranscript::update_meta_json(pool, transcript.id, &updated_meta_json).await?;
-
-        match resolved_action {
-            "accepted" => {
-                if let Some(round_id) = execution.active_round_id {
-                    let _ =
-                        WorkflowRound::update_status(pool, round_id, WorkflowRoundStatus::Accepted)
-                            .await?;
-                }
-                let completed_execution = Self::transition_execution_and_sync(
-                    pool,
-                    chat_runner,
-                    execution,
-                    WorkflowExecutionStatus::Completed,
-                    "execution_completed",
-                    None,
-                )
-                .await?;
-
-                let workflow_agent_sessions =
-                    WorkflowAgentSession::find_by_execution(pool, completed_execution.id).await?;
-                let session_agents =
-                    ChatSessionAgent::find_all_for_session(pool, completed_execution.session_id)
-                        .await?;
-                let agents = load_agents_for_session(pool, &session_agents).await?;
-                Self::persist_completion_work_items(
-                    pool,
-                    chat_runner,
-                    &completed_execution,
-                    &WorkflowStep::find_by_execution(pool, completed_execution.id).await?,
-                    &workflow_agent_sessions,
-                    &session_agents,
-                    &agents,
-                )
-                .await?;
-
-                Ok(ResolvedTranscriptAction {
-                    transcript: updated_transcript,
-                    execution: completed_execution,
-                    should_wake_scheduler: false,
-                })
-            }
-            "rejected" => {
-                let feedback = input_text
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .ok_or_else(|| {
-                        OrchestratorError::IllegalTransition(
-                            "final review rejection requires feedback".to_string(),
-                        )
-                    })?;
-                let recompiling_execution = Self::transition_execution_and_sync(
-                    pool,
-                    chat_runner,
-                    execution,
-                    WorkflowExecutionStatus::Recompiling,
-                    "iteration_recompiling",
-                    None,
-                )
-                .await?;
-                let plan = WorkflowPlan::find_by_id(pool, recompiling_execution.plan_id)
-                    .await?
-                    .ok_or_else(|| {
-                        OrchestratorError::NotFound(format!(
-                            "plan {} not found",
-                            recompiling_execution.plan_id
-                        ))
-                    })?;
-                let revision_id = recompiling_execution.active_revision_id.ok_or_else(|| {
-                    OrchestratorError::NotFound(format!(
-                        "execution {} missing active revision",
-                        recompiling_execution.id
-                    ))
-                })?;
-                let active_revision = WorkflowPlanRevision::find_by_id(pool, revision_id)
-                    .await?
-                    .ok_or_else(|| {
-                        OrchestratorError::NotFound(format!("revision {} not found", revision_id))
-                    })?;
-                let round_id = recompiling_execution.active_round_id.ok_or_else(|| {
-                    OrchestratorError::NotFound(format!(
-                        "execution {} missing active round",
-                        recompiling_execution.id
-                    ))
-                })?;
-                let from_round = WorkflowRound::find_by_id(pool, round_id)
-                    .await?
-                    .ok_or_else(|| {
-                        OrchestratorError::NotFound(format!("round {} not found", round_id))
-                    })?;
-                let session = ChatSession::find_by_id(pool, recompiling_execution.session_id)
-                    .await?
-                    .ok_or_else(|| {
-                        OrchestratorError::NotFound(format!(
-                            "session {} not found",
-                            recompiling_execution.session_id
-                        ))
-                    })?;
-                let session_agents =
-                    ChatSessionAgent::find_all_for_session(pool, recompiling_execution.session_id)
-                        .await?;
-                let agents = load_agents_for_session(pool, &session_agents).await?;
-                let db = DBService { pool: pool.clone() };
-                let iteration_manager = IterationManager {
-                    db: &db,
-                    pool,
-                    chat_runner,
-                    session: &session,
-                    session_agents: &session_agents,
-                    agents: &agents,
-                };
-                let iterated_execution = iteration_manager
-                    .start_iteration_from_feedback(
-                        &recompiling_execution,
-                        &plan,
-                        &active_revision,
-                        &from_round,
-                        feedback,
-                    )
-                    .await?;
-
-                Ok(ResolvedTranscriptAction {
-                    transcript: updated_transcript,
-                    execution: iterated_execution,
-                    should_wake_scheduler: true,
-                })
-            }
-            _ => Err(OrchestratorError::IllegalTransition(format!(
-                "unsupported action '{}' for final_review",
-                resolved_action
-            ))),
-        }
     }
 
     pub(super) fn build_step_follow_up_prompt(

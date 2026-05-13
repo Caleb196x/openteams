@@ -146,7 +146,8 @@ const PROTOCOL_OUTPUT_SCHEMA_JSON_WORKFLOW_PLAN: &str = r#"{
         "properties": {
           "type": { "const": "workflow_generate" },
           "plan_check": { "type": "boolean" },
-          "content": { "type": "string" }
+          "content": { "type": "string" },
+          "design_doc_path": { "type": "array", "items": { "type": "string" } }
         },
         "required": ["type", "plan_check", "content"],
         "additionalProperties": false
@@ -212,7 +213,7 @@ const MARKDOWN_PROTOCOL_OUTPUT_EXAMPLE_JSON: &str = r#"[
 const MARKDOWN_PROTOCOL_OUTPUT_EXAMPLE_JSON_WORKFLOW_PLAN: &str = r#"[
   {"type": "send", "to": "you", "intent": "request", "content": "I have finished the implementation"},
   {"type": "record", "content": "The metrics are `latency_p95_ms` and `success_rate`."},
-  {"type": "workflow_generate", "plan_check": true, "content": "Generate a workflow plan to implement the following task: ..."}
+  {"type": "workflow_generate", "plan_check": true, "content": "Generate a workflow plan to implement the following task: ...", "design_doc_path": ["path/to/design_doc1.md", "path/to/design_doc2.md"]}
 ]"#;
 struct DiffInfo {
     _truncated: bool,
@@ -304,6 +305,8 @@ struct AgentProtocolMessage {
     plan_check: Option<bool>,
     #[serde(default)]
     content: String,
+    #[serde(default)]
+    design_doc_path: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -340,6 +343,8 @@ pub(super) enum ProtocolProcessResult {
         plan_check: bool,
         /// The content field from the workflow_generate message (may be empty).
         workflow_content: String,
+        /// Optional paths to design documents referenced in the workflow_generate message.
+        design_doc_paths: Option<Vec<String>>,
     },
 }
 
@@ -1692,6 +1697,8 @@ impl ChatRunner {
                 .await?;
             let session_agents = self.build_session_agent_summaries(session_id).await?;
             let session = ChatSession::find_by_id(&self.db.pool, session_id).await?;
+
+            // todo: 如果当前是workflow模式，那么检查是否
 
             // Resolve the enabled native skills allowed for this session member.
             let agent_skills = self

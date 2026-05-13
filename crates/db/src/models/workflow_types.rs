@@ -372,6 +372,7 @@ pub struct WorkflowPlanNode {
     pub id: String,
     #[serde(rename = "type")]
     pub node_type: String,
+    #[serde(default)]
     pub position: WorkflowNodePosition,
     pub data: WorkflowNodeData,
 }
@@ -380,6 +381,12 @@ pub struct WorkflowPlanNode {
 pub struct WorkflowNodePosition {
     pub x: f64,
     pub y: f64,
+}
+
+impl Default for WorkflowNodePosition {
+    fn default() -> Self {
+        Self { x: 0.0, y: 0.0 }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]

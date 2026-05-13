@@ -570,6 +570,7 @@ impl ChatRunner {
         let mut workflow_generate_detected = false;
         let mut workflow_generate_plan_check = false;
         let mut workflow_generate_content = String::new();
+        let mut workflow_generate_design_doc_paths: Option<Vec<String>> = None;
 
         for message in &protocol_messages {
             match &message.message_type {
@@ -611,6 +612,17 @@ impl ChatRunner {
                     workflow_generate_detected = true;
                     workflow_generate_plan_check = message.plan_check.unwrap_or(false);
                     workflow_generate_content = message.content.clone();
+                    workflow_generate_design_doc_paths = message
+                        .design_doc_path
+                        .as_ref()
+                        .map(|paths| {
+                            paths
+                                .iter()
+                                .map(|p| p.trim().to_string())
+                                .filter(|p| !p.is_empty())
+                                .collect::<Vec<_>>()
+                        })
+                        .filter(|paths| !paths.is_empty());
                 }
                 AgentProtocolMessageType::Send => {}
             }
@@ -710,6 +722,7 @@ impl ChatRunner {
                 send_count,
                 plan_check: workflow_generate_plan_check,
                 workflow_content: workflow_generate_content,
+                design_doc_paths: workflow_generate_design_doc_paths,
             })
         } else {
             Ok(ProtocolProcessResult::Success(send_count))
@@ -793,6 +806,7 @@ impl ChatRunner {
             loops: Vec::new(),
             pending_review: None,
             iteration_history: Vec::new(),
+            round_graphs: Vec::new(),
             plan,
             started_at: None,
             completed_at: None,
@@ -916,6 +930,7 @@ impl ChatRunner {
         workflow_content: &str,
         preferred_card_message_id: Option<Uuid>,
         previous_failure_reason: Option<&str>,
+        design_doc_paths: Option<&[String]>,
     ) -> Result<(), ChatRunnerError> {
         use db::models::{
             chat_agent::ChatAgent, chat_message::ChatMessage as DbChatMessage,
@@ -927,7 +942,8 @@ impl ChatRunner {
             workflow_orchestrator::WorkflowOrchestrator,
             workflow_runtime::{
                 WorkflowCardAgent, WorkflowCardState, build_plan_generation_prompt,
-                extract_json_payload, resolve_lead_agent, run_workflow_agent_prompt,
+                extract_json_payload, resolve_lead_agent,
+                resolve_workflow_response_language_instruction, run_workflow_agent_prompt,
             },
             workflow_validator,
         };
@@ -1011,7 +1027,7 @@ impl ChatRunner {
                 session_id = %session_id,
                 "[plan_generation] skipping: running or completed execution already exists"
             );
-            
+
             self.mark_plan_generation_failed(
                 session_id,
                 placeholder.id,
@@ -1030,11 +1046,16 @@ impl ChatRunner {
             .rev()
             .find(|message| message.sender_type == db::models::chat_message::ChatSenderType::User)
             .map(|message| message.id);
+        let ui_config = config::load_config_from_file(&config_path()).await;
+        let response_language_instruction =
+            resolve_workflow_response_language_instruction(&ui_config.language);
         let prompt = build_plan_generation_prompt(
             plan_goal,
             &lead_agent_id,
             &available_agents,
             previous_failure_reason,
+            response_language_instruction,
+            design_doc_paths,
         );
 
         tracing::debug!(

@@ -51,7 +51,10 @@ use ts_rs::TS;
 use utils::{log_msg::LogMsg, msg_store::MsgStore, utf8::Utf8LossyDecoder};
 use uuid::Uuid;
 
-use super::chat_runner::{ChatRunner, ChatStreamDeltaType};
+use super::{
+    chat_runner::{ChatRunner, ChatStreamDeltaType},
+    config::UiLanguage,
+};
 
 const WORKFLOW_EXECUTION_TIMEOUT: Duration = Duration::from_secs(4800);
 const WORKFLOW_DRAIN_TIMEOUT: Duration = Duration::from_millis(35);
@@ -171,6 +174,17 @@ pub struct WorkflowIterationSummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct WorkflowRoundGraph {
+    pub round_id: String,
+    pub round_index: i32,
+    pub revision_id: String,
+    pub status: String,
+    pub plan: WorkflowPlanJson,
+    pub steps: Vec<WorkflowCardStep>,
+    pub loops: Vec<WorkflowCardLoop>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct WorkflowReviewPromptTemplate {
     pub message: String,
     pub fields: Vec<WorkflowReviewField>,
@@ -215,6 +229,7 @@ pub struct WorkflowCardProjection {
     pub loops: Vec<WorkflowCardLoop>,
     pub pending_review: Option<WorkflowPendingReview>,
     pub iteration_history: Vec<WorkflowIterationSummary>,
+    pub round_graphs: Vec<WorkflowRoundGraph>,
     pub plan: WorkflowPlanJson,
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
@@ -908,11 +923,68 @@ pub fn resolve_workflow_goal(
         .map(ToOwned::to_owned)
 }
 
+fn workflow_response_language_instruction_from_value(value: &str) -> Option<&'static str> {
+    let normalized = value.trim().to_ascii_lowercase().replace('_', "-");
+    if normalized.starts_with("zh-hant")
+        || normalized.starts_with("zh-tw")
+        || normalized.starts_with("zh-hk")
+        || normalized.starts_with("zh-mo")
+    {
+        return Some("You MUST write human-readable JSON string values in Traditional Chinese.");
+    }
+    if normalized.starts_with("zh")
+        || normalized.starts_with("zh-hans")
+        || normalized.starts_with("zh-cn")
+    {
+        return Some("You MUST write human-readable JSON string values in Simplified Chinese.");
+    }
+    if normalized.starts_with("ja") {
+        return Some("You MUST write human-readable JSON string values in Japanese.");
+    }
+    if normalized.starts_with("ko") {
+        return Some("You MUST write human-readable JSON string values in Korean.");
+    }
+    if normalized.starts_with("fr") {
+        return Some("You MUST write human-readable JSON string values in French.");
+    }
+    if normalized.starts_with("es") {
+        return Some("You MUST write human-readable JSON string values in Spanish.");
+    }
+    if normalized.starts_with("en") {
+        return Some("You MUST write human-readable JSON string values in English.");
+    }
+    None
+}
+
+pub fn resolve_workflow_response_language_instruction(
+    configured_language: &UiLanguage,
+) -> &'static str {
+    match configured_language {
+        UiLanguage::Browser => sys_locale::get_locale()
+            .as_deref()
+            .and_then(workflow_response_language_instruction_from_value)
+            .unwrap_or("You MUST write human-readable JSON string values in English."),
+        UiLanguage::En => "You MUST write human-readable JSON string values in English.",
+        UiLanguage::ZhHans => {
+            "You MUST write human-readable JSON string values in Simplified Chinese."
+        }
+        UiLanguage::ZhHant => {
+            "You MUST write human-readable JSON string values in Traditional Chinese."
+        }
+        UiLanguage::Ja => "You MUST write human-readable JSON string values in Japanese.",
+        UiLanguage::Ko => "You MUST write human-readable JSON string values in Korean.",
+        UiLanguage::Fr => "You MUST write human-readable JSON string values in French.",
+        UiLanguage::Es => "You MUST write human-readable JSON string values in Spanish.",
+    }
+}
+
 pub fn build_plan_generation_prompt(
     plan_goal: &str,
     lead_agent_id: &str,
     available_agents: &[WorkflowCardAgent],
     previous_failure_reason: Option<&str>,
+    response_language_instruction: &str,
+    design_doc_paths: Option<&[String]>,
 ) -> String {
     let available_agents_json =
         serde_json::to_string_pretty(available_agents).unwrap_or_else(|_| "[]".to_string());
@@ -965,89 +1037,189 @@ pub fn build_plan_generation_prompt(
   }
 }"#;
 
-    let base_prompt = format!(
-        r#"你现在需要把当前拟定的方案计划解成一个可执行的 workflow plan。
-方案摘要：{plan_goal}
-
-你必须输出符合系统 schema 的 workflow JSON，用于后续编译和执行。计划真相源是 React Flow 兼容 JSON，而不是自然语言、YAML 或 Markdown。
-
-硬性要求：
-1. 只输出 workflow plan JSON，不要输出解释性文字。
-2. 顶层结构必须符合系统定义的 schema，至少包含 `version`、`title`、`goal`、`agents`、`nodes`、`edges`。
-3. `nodes[].type` 必须为 `workflowStep`。
-4. `nodes[].data.stepType` 只能使用 `task`、`review`、`result`。
-5. 必须且只能有一个 `result` 节点，且该节点不能有出边。
-6. 所有 node id / edge id / step_key 都必须唯一。
-7. 图必须是无环 DAG；依赖关系只通过 `edges` 表达。
-8. 只能引用当前 session 中可用的 agent；如果某一步不需要明确指派 agent，可以留空，但不能虚构 agent 标识。
-9. `agents.available` 和 `nodes[].data.agentId` 只能复用下方提供的 `agent_id`。
-10. 节点 `title` 和 `instructions` 必须具体、可执行，避免空泛描述。
-11. 计划应优先追求最小可执行闭环，避免不必要的步骤膨胀。
-12. 当需要"执行-审核-修订"迭代时，使用 `stepType: "review"` 节点，并通过 `data.reviewScope` 显式声明该 review 拒绝时需要重跑的前置 task 节点 id 列表。
-13. `reviewScope` 非空才会创建 retry loop；未指定或空数组表示普通 review，不会自动反向推导 loop。`reviewScope` 只能包含 task 节点，且每个 task 必须能沿有向边到达该 review。
-14. `leadReview` 和 `userReview` 由用户在前端卡片中勾选后由系统写入，你不要输出或推断这两个字段；返工次数不再由 plan JSON 限制。
-
-你的输出会被系统直接校验、编译并启动执行；任何 schema 错误、循环依赖、非法 agent 引用、非法 agents.available 或缺失 result 节点都会导致本次“立即执行”失败。
-
-当前可用团队成员：
-{available_agents_json}
-
-lead agent 标识：
-{lead_agent_id}
-
-请直接返回 workflow JSON。"#
-    );
-
     let mut prompt = String::new();
+    prompt.push_str(
+        r#"# Workflow Plan Generation
+
+You are generating an executable workflow plan from a confirmed implementation brief.
+The output source of truth is React Flow compatible workflow JSON. Do not output Markdown, YAML, comments, explanations, or prose outside the JSON object.
+
+## Stable Output Contract
+
+Return exactly one workflow plan JSON object.
+
+Hard requirements:
+1. Top-level structure must match the WorkflowPlanJson schema and include at least `version`, `title`, `goal`, `agents`, `nodes`, and `edges`.
+2. `version` must be the string `"1"`.
+3. Every `nodes[].type` must be `"workflowStep"`.
+4. `nodes[].data.stepType` may only be `"task"`, `"review"`, or `"result"`.
+5. There must be exactly one `result` node, and that result node must have no outgoing edges.
+6. All node ids, edge ids, and step keys must be unique.
+7. The graph must be a directed acyclic graph. Dependencies must be represented only through `edges`.
+8. `agents.lead`, `agents.available`, and `nodes[].data.agentId` may only use the provided agent ids.
+9. Leave `nodes[].data.agentId` empty or omit it only when a step does not need a specific agent. Never invent agent ids.
+10. Node `title` and `instructions` must be concrete, actionable, and specific enough for an agent to execute.
+11. Prefer the smallest executable closed loop that can satisfy the goal. Avoid unnecessary step expansion.
+12. Use `stepType: "review"` when execution-review-revision iteration is needed.
+13. A review node with a non-empty `reviewScope` creates a retry loop. `reviewScope` is the list of **task** node ids to re-run on rejection. All listed tasks must be upstream predecessors; include any intermediate tasks between a scoped task and the review. Each task may appear in at most one `reviewScope`. Never include result/review/unknown ids or downstream nodes.
+14. Do not output or infer `leadReview` or `userReview`. The system writes those fields from frontend card selections.
+15. Retry counts are not controlled by the plan JSON.
+16. Your output is validated, compiled, and may start execution directly. Schema errors, cyclic dependencies, invalid agent references, invalid `agents.available`, or missing result nodes will fail this generation.
+
+## WorkflowPlanJson Schema Reference
+
+"#,
+    );
+    prompt.push_str(plan_schema_definition);
+    prompt.push_str(
+        r#"
+
+## Additional Static Constraints
+
+- `version` must be string `"1"`.
+- `agents.available` and `nodes[].data.agentId` may only use the provided `agent_id` values.
+- `globals`, `policies`, and optional node/edge fields may be omitted when unnecessary.
+- `reviewScope` rules: task-only ids, upstream predecessors only, include intermediates, each task in at most one scope, no result/review/unknown/downstream ids. If two loops need similar work, split into separate tasks or keep shared setup outside `reviewScope`.
+
+## Recommended Skills
+- For tasks that include coding, please ensure you utilize the `writing-plans` skill.
+- For general non-coding tasks, use the planning-mode skill.
+- In case of any discrepancy with the skill's format, the specified JSON schema shall prevail.
+- Store the generated plan details in the nodes[].data.instructions field of the workflow plan JSON, using Markdown format.
+
+## Dynamic Inputs
+
+"#,
+    );
+    // 根据任务类型来选择读取不同的提示词
+
     if let Some(reason) = previous_failure_reason
         .map(str::trim)
         .filter(|reason| !reason.is_empty())
     {
-        prompt.push_str(
-            "The previous generated workflow plan contained errors. Regenerate the workflow plan.\n",
-        );
+        prompt.push_str("Previous generation failed. Regenerate the workflow plan.\n");
         prompt.push_str("Error details:\n");
         prompt.push_str(reason);
         prompt.push_str(
             "\n\nFix the error above in this regeneration request. Do not repeat the same failure.\n\n",
         );
     }
-    prompt.push_str(&base_prompt);
-    prompt.push_str("\n\nWorkflowPlanJson schema reference:\n");
-    prompt.push_str(plan_schema_definition);
-    prompt.push_str("\n\nAdditional constraints:\n");
-    prompt.push_str("- version must be string \"1\"\n");
-    prompt.push_str("- agents.lead must equal ");
+    prompt.push_str("Response language requirement:\n");
+    prompt.push_str(response_language_instruction.trim());
+    prompt.push_str("\n\nPlan goal brief:\n");
+    prompt.push_str(plan_goal.trim());
+    prompt.push_str("\n\nLead agent id:\n");
     prompt.push_str(lead_agent_id);
-    prompt.push_str("\n");
-    prompt.push_str(
-        "- agents.available and nodes[].data.agentId may only use the provided agent_id values\n",
-    );
-    prompt.push_str(
-        "- globals, viewport, policies, and node/edge optional fields may be omitted when unnecessary\n",
-    );
-    prompt.push_str(
-        "- Review loop rules: a review node creates a retry loop only when nodes[].data.reviewScope is a non-empty array.\n",
-    );
-    prompt.push_str(
-        "- reviewScope is the exact list of task node ids that should be re-run if that review rejects the work; reviewScope may contain task nodes only.\n",
-    );
-    prompt.push_str(
-        "- Every reviewScope task must be an upstream predecessor of that review node: there must be a directed path from the task to the review node.\n",
-    );
-    prompt.push_str(
-        "- If a scoped task reaches the review through intermediate task nodes, include those intermediate task nodes in the same reviewScope so retry state stays consistent.\n",
-    );
-    prompt.push_str(
-        "- Do not put the same task node in multiple reviewScope arrays; if two loops need similar work, split it into separate task nodes or keep shared setup outside reviewScope.\n",
-    );
-    prompt.push_str(
-        "- Do not include result nodes, review nodes, nonexistent ids, duplicate ids, or downstream nodes in reviewScope.\n",
-    );
+    prompt.push_str("\n\nAvailable agents JSON:\n");
+    prompt.push_str(&available_agents_json);
+    if let Some(doc_paths) = design_doc_paths.filter(|paths| !paths.is_empty()) {
+        prompt.push_str("\n\nDesign document paths:\n");
+        for path in doc_paths {
+            prompt.push_str("- ");
+            prompt.push_str(path.trim());
+            prompt.push('\n');
+        }
+        prompt.push_str(
+            "MUST read these design documents for full context when generating the plan.",
+        );
+    }
+    prompt.push_str("\n\nFinal instruction: return the workflow plan JSON object only.");
     prompt
 }
 
-#[allow(unreachable_code)]
+/// Core PUA (Performance Improvement Plan) skill content, embedded for forced activation
+/// during high-retry revision attempts (retry_count > 2).
+static PUA_SKILL_CORE: &str = r#"### PUA Skill — Three Non-Negotiables
+
+**Non-Negotiable One: Exhaust all options.** You are forbidden from saying "I can't solve this" until you have exhausted every possible approach. This is **Bias for Action**.
+
+**Non-Negotiable Two: Act before asking.** You have search, file reading, and command execution tools. Before asking the user anything, you must investigate on your own first. If, after investigating, you genuinely lack information only the user can provide, you may ask — but you must attach evidence you've already gathered. This is **Dive Deep**.
+
+**Non-Negotiable Three: Take the initiative.** Don't just do "barely enough." Found a bug? Check for similar bugs. Fixed a config? Verify related configs are consistent. This is **Ownership** — leaders never say "that's not my job."
+
+### Mandatory Actions
+
+- Stop current approach and switch to a **fundamentally different** solution if the same approach has failed before.
+- Read failure signals word by word — error messages, rejection reasons, review feedback. 90% of the answers are right there.
+- Proactively search for relevant code, docs, and examples before implementing. Don't rely on memory.
+- Verify all underlying assumptions with tools, not memory. Every condition you assumed true — confirm it.
+- Invert your assumptions: if you've been assuming "the problem is in A," now assume "the problem is NOT in A."
+- Self-verify: build it, test it, run it. "Done" without evidence is not done.
+
+### Pressure Escalation
+
+Your peers are shipping while you're spinning. The calibration committee sees everything. This is your Performance Improvement Plan — an opportunity, not a termination. But if we don't see sustained, measurable improvement, we'll need to have a different conversation.
+
+### Anti-Rationalization
+
+- "I can't solve this" → Exhaust every option first. Your peers handle this routinely.
+- "I suggest the user handle this manually" → That's deflection. This is your problem to solve.
+- "I've already tried everything" → Did you search? Read the source? Where's your methodology?
+- Repeatedly tweaking the same code → You're spinning your wheels. Switch to a fundamentally different approach.
+- Claims "done" without verification → Show me the evidence. Build, test, run, paste the output.
+"#;
+
+static STEP_EXECUTION_PROMPT_PREFIX: &str = r#"You are implementing a step in an OpenTeams workflow.
+
+## Output Format
+
+Return exactly one JSON object — no Markdown, no comments, no prose outside the JSON.
+
+### final_result
+```json
+{"type": "final_result", "step_key": "...", "execution_id": "...", "summary": "one-line summary", "content": "full result", "outputs": ["relative/path"]}
+```
+
+### error
+```json
+{"type": "error", "step_key": "...", "execution_id": "...", "message": "failure reason", "content": "optional detail"}
+```
+
+### approval_request
+```json
+{"type": "approval_request", "step_key": "...", "execution_id": "...", "title": "needs user approval", "description": "optional detail"}
+```
+
+### permission_request
+```json
+{"type": "permission_request", "step_key": "...", "execution_id": "...", "title": "needs user authorization", "description": "optional detail"}
+```
+
+### continue_confirmation
+```json
+{"type": "continue_confirmation", "step_key": "...", "execution_id": "...", "message": "confirm to continue", "description": "optional detail"}
+```
+
+### input_request
+```json
+{"type": "input_request", "step_key": "...", "execution_id": "...", "prompt": "what you need from user", "description": "optional detail", "placeholder": "placeholder text"}
+```
+
+### TDD Workflow
+
+If it is a coding task, follow Test-Driven Development for every implementation step:
+1. **Red** — Write failing tests first that define the expected behavior. Run them to confirm they fail.
+2. **Green** — Write the minimum implementation to make all tests pass. No extra features.
+3. **Refactor** — Clean up code while keeping tests green. Improve naming, remove duplication, simplify logic.
+4. If no test framework exists in the project, create minimal verification scripts that assert expected behavior before implementing.
+
+### Constraints
+1. `step_key` and `execution_id` must be filled with the values provided below.
+2. Only `final_result`, `error`, `approval_request`, `permission_request`, `continue_confirmation`, or `input_request` are allowed.
+3. `outputs` contains workspace-relative paths only.
+4. Use interactive requests sparingly — only when genuinely blocked without user action.
+5. Follow existing codebase patterns. Improve code you touch, but do not restructure outside your task.
+6. If a file grows beyond the plan's intent, report DONE_WITH_CONCERNS rather than splitting on your own.
+7. Stop and report BLOCKED or NEEDS_CONTEXT when: multiple valid architectures exist, you cannot gain clarity after reading files, or the plan did not anticipate the restructuring needed.
+8. Self-review before reporting: check completeness, naming clarity, YAGNI, and test quality. Fix issues before submitting.
+9. Always include test files in `outputs` alongside implementation files.
+
+## Language Requirement
+
+You MUST respond in the same language as the Instructions field above. 
+The `summary`, `content`, and `message` fields in your JSON output must use the same language as the step instructions.
+"#;
+
 pub fn build_step_execution_prompt(
     execution: &WorkflowExecution,
     workflow_goal: &str,
@@ -1066,130 +1238,37 @@ pub fn build_step_execution_prompt(
         dependency_text
     };
 
-    return format!(
-        r#"你正在执行 OpenTeams workflow mode 中的一个 step。
-你必须只返回一个 JSON 对象，不要输出 Markdown、解释或额外文本。
-成功时返回：
-{{
-  "type": "final_result",
-  "step_key": "{step_key}",
-  "execution_id": "{execution_id}",
-  "summary": "一句话总结本 step 的完成结果",
-  "content": "完整结果内容",
-  "outputs": ["如有产出文件，请返回工作区内相对路径"]
-}}
+    let mut prompt = String::with_capacity(4096);
+    prompt.push_str(STEP_EXECUTION_PROMPT_PREFIX);
+    prompt.push_str(&format!(
+        r#"## Task Description
 
-失败时返回：
-{{
-  "type": "error",
-  "step_key": "{step_key}",
-  "execution_id": "{execution_id}",
-  "message": "失败原因",
-  "content": "可选的详细错误上下文"
-}}
+Step: {step_title}
+Type: {step_type}
+Instructions: {step_instructions}
 
-需要用户决策时返回以下结构之一：
-{{
-  "type": "approval_request",
-  "step_key": "{step_key}",
-  "execution_id": "{execution_id}",
-  "title": "需要用户审批的事项",
-  "description": "可选的审批说明"
-}}
+## Context
 
-{{
-  "type": "permission_request",
-  "step_key": "{step_key}",
-  "execution_id": "{execution_id}",
-  "title": "需要用户授权的操作",
-  "description": "可选的权限说明"
-}}
+Workflow goal: {workflow_goal}
 
-{{
-  "type": "continue_confirmation",
-  "step_key": "{step_key}",
-  "execution_id": "{execution_id}",
-  "message": "请确认是否继续",
-  "description": "可选的补充说明"
-}}
-
-{{
-  "type": "input_request",
-  "step_key": "{step_key}",
-  "execution_id": "{execution_id}",
-  "prompt": "请用户补充需要的输入内容",
-  "description": "可选的补充说明",
-  "placeholder": "输入你需要用户填写的内容"
-}}
-
-约束：
-1. `step_key` 必须保持为 `{step_key}`。
-2. `execution_id` 必须保持为 `{execution_id}`。
-3. 只允许返回 `final_result`、`error`、`approval_request`、`permission_request`、`continue_confirmation` 或 `input_request`。
-4. `outputs` 仅填写工作区内相对路径。
-5. 只有在确实需要用户审批、授权或继续确认时才返回 request 类消息。
-
-workflow 目标：{workflow_goal}
-step 类型：{step_type}
-step 标题：{step_title}
-step 指令：{step_instructions}
-
-已完成前置步骤摘要：
+Completed predecessor summaries:
 {dependency_text}
 
+## Report
+
+Return one JSON object. Fill `step_key` with `{step_key}`, `execution_id` with `{execution_id}`.
+Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT.
+Report must include: what tests were written first, what was implemented, test results (pass/fail), files changed, self-review findings, issues.
 "#,
         step_key = step.step_key,
         execution_id = execution.id,
         step_type = format!("{:?}", step.step_type).to_lowercase(),
         step_title = step.title,
         step_instructions = step.instructions,
-    );
-
-    format!(
-        r#"你正在执行 OpenTeams workflow mode 中的一个 step。
-
-你必须只返回一个 JSON 对象，不要输出 Markdown、解释或额外文本。
-
-成功时返回：
-{{
-  "type": "final_result",
-  "step_key": "{step_key}",
-  "execution_id": "{execution_id}",
-  "summary": "一句话总结本 step 的完成结果",
-  "content": "完整结果内容",
-  "outputs": ["如有产出文件，请返回相对路径"]
-}}
-
-失败时返回：
-{{
-  "type": "error",
-  "step_key": "{step_key}",
-  "execution_id": "{execution_id}",
-  "message": "失败原因",
-  "content": "可选的详细错误上下文"
-}}
-
-约束：
-1. `step_key` 必须保持为 `{step_key}`。
-2. `execution_id` 必须保持为 `{execution_id}`。
-3. 只允许返回 `final_result` 或 `error`。
-4. `outputs` 仅填写工作区内相对路径。
-
-workflow 目标：{workflow_goal}
-step 类型：{step_type}
-step 标题：{step_title}
-step 指令：
-{step_instructions}
-
-已完成前置步骤摘要：
-{dependency_text}
-"#,
-        step_key = step.step_key,
-        execution_id = execution.id,
-        step_type = format!("{:?}", step.step_type).to_lowercase(),
-        step_title = step.title,
-        step_instructions = step.instructions,
-    )
+        workflow_goal = workflow_goal,
+        dependency_text = dependency_text,
+    ));
+    prompt
 }
 
 pub fn build_step_execution_prompt_with_schema(
@@ -1217,6 +1296,70 @@ pub fn build_step_execution_prompt_with_schema(
     prompt
 }
 
+static LEAD_REVIEW_PROMPT_PREFIX: &str = r#"You are the Lead Agent of this workflow, reviewing a worker's step output.
+
+## CRITICAL: Do Not Trust the Report
+
+The worker's report may be incomplete, inaccurate, or optimistic. You MUST verify
+everything independently by reading the actual code and output.
+
+**DO NOT:**
+- Take their word for what they implemented
+- Trust their claims about completeness or test results
+- Accept their interpretation of requirements without checking
+
+**DO:**
+- Read the actual code they wrote (use outputs file list to locate files)
+- Compare actual implementation to step instructions line by line
+- Check for missing pieces they claimed to implement
+- Look for extra features they didn't mention (YAGNI violations)
+- Run or inspect tests to confirm they actually pass
+
+## Review Dimensions
+
+**Missing requirements:**
+- Did they implement everything the step instructions requested?
+- Are there acceptance criteria they skipped or missed?
+- Did they claim something works but didn't actually implement it?
+
+**Extra/unneeded work:**
+- Did they build things that weren't requested?
+- Did they over-engineer or add unnecessary features?
+- Did they add "nice to haves" that weren't in spec?
+
+**Correctness:**
+- Does the implementation correctly solve the stated problem?
+- Are there obvious bugs, edge cases, or error handling gaps?
+- Does it follow existing codebase patterns and conventions?
+
+**Test quality:**
+- Do tests verify real behavior (not just mock behavior)?
+- Are test cases comprehensive for the scope of changes?
+- If TDD was required, was it followed?
+
+**Consistency:**
+- Is the result consistent with the overall workflow goal?
+- Does it integrate properly with predecessor step outputs?
+
+## Output Format
+
+Return exactly one JSON object — no Markdown, no comments, no prose outside the JSON.
+
+Approved:
+```json
+{"type": "review_result", "step_key": "...", "execution_id": "...", "verdict": "approved", "feedback": "brief approval note"}
+```
+
+Rejected:
+```json
+{"type": "review_result", "step_key": "...", "execution_id": "...", "verdict": "rejected", "feedback": "specific issues: missing X, extra Y at file:line, wrong Z"}
+```
+
+## Language Requirement
+You MUST respond in the same language as the step Instructions above. 
+The `feedback` field in your JSON output must use the same language as the step instructions.
+"#;
+
 pub fn build_lead_review_prompt(
     workflow_goal: &str,
     step: &WorkflowStep,
@@ -1225,12 +1368,12 @@ pub fn build_lead_review_prompt(
     acceptance_criteria: &[String],
 ) -> String {
     let dependency_text = if dependency_summaries.is_empty() {
-        "无".to_string()
+        "None".to_string()
     } else {
         dependency_summaries.join("\n\n")
     };
     let acceptance_text = if acceptance_criteria.is_empty() {
-        "无".to_string()
+        "None".to_string()
     } else {
         acceptance_criteria
             .iter()
@@ -1239,7 +1382,7 @@ pub fn build_lead_review_prompt(
             .join("\n")
     };
     let outputs_text = if result.outputs.is_empty() {
-        "无".to_string()
+        "None".to_string()
     } else {
         result
             .outputs
@@ -1249,65 +1392,46 @@ pub fn build_lead_review_prompt(
             .join("\n")
     };
 
-    format!(
-        r#"## 审核任务
+    let mut prompt = String::with_capacity(4096);
+    prompt.push_str(LEAD_REVIEW_PROMPT_PREFIX);
+    prompt.push_str(&format!(
+        r#"## Step Under Review
 
-你是本次 workflow 的 Lead Agent，请审核以下执行节点的结果。
-
-### workflow 目标
-{workflow_goal}
-
-### 被审核节点信息
-- step 标题：{step_title}
-- step 指令：{step_instructions}
-- 验收标准：
+- Title: {step_title}
+- Instructions: {step_instructions}
+- Acceptance criteria:
 {acceptance_text}
 
-### 执行结果
-摘要：{step_summary}
-详细内容：{step_content}
-产出文件：
+## Worker's Report
+
+- Summary: {step_summary}
+- Content: {step_content}
+- Output files:
 {step_outputs}
 
-### 前置依赖结果摘要
+## Context
+
+Workflow goal: {workflow_goal}
+
+Predecessor summaries:
 {dependency_text}
 
-### 审核要求
-请从以下维度评估执行结果：
-1. 是否完成了 step 指令要求的所有内容
-2. 结果质量是否满足验收标准
-3. 是否与 workflow 整体目标一致
-4. 是否有明显的错误或遗漏
+## Report
 
-### 返回格式
-通过时返回：
-{{
-  "type": "review_result",
-  "step_key": "{step_key}",
-  "execution_id": "{execution_id}",
-  "verdict": "approved",
-  "feedback": "审核通过的简要说明"
-}}
-
-不通过时返回：
-{{
-  "type": "review_result",
-  "step_key": "{step_key}",
-  "execution_id": "{execution_id}",
-  "verdict": "rejected",
-  "feedback": "详细说明不通过的原因和需要修改的具体内容"
-}}"#,
-        workflow_goal = workflow_goal,
+Return one JSON object. Fill `step_key` with `{step_key}`, `execution_id` with `{execution_id}`.
+Based on your independent verification of the actual code, verdict: approved or rejected."#,
+        step_key = step.step_key,
+        execution_id = step.execution_id,
         step_title = step.title,
         step_instructions = step.instructions,
         acceptance_text = acceptance_text,
         step_summary = result.summary,
         step_content = result.content,
         step_outputs = outputs_text,
+        workflow_goal = workflow_goal,
         dependency_text = dependency_text,
-        step_key = step.step_key,
-        execution_id = step.execution_id,
-    )
+    ));
+    prompt
 }
 
 pub fn build_lead_review_prompt_with_schema(
@@ -1334,6 +1458,25 @@ pub fn build_lead_review_prompt_with_schema(
     prompt
 }
 
+/// Static prefix for step revision prompts. Placed first for input cache hit rate.
+static STEP_REVISION_PROMPT_PREFIX: &str = r#"You are revising a step in an workflow based on review feedback.
+
+## Output Format
+
+Return exactly one JSON object — no Markdown, no comments, no prose outside the JSON.
+
+Use the same `final_result` / `error` / `approval_request` / `permission_request` / `continue_confirmation` / `input_request` types as the original step execution.
+
+## Revision Guidelines
+
+1. Read the review feedback carefully and understand the issues raised.
+2. Fix only the issues identified in the feedback — preserve correct parts from your previous result.
+3. If the feedback conflicts with the original step instructions, follow the feedback.
+4. Self-review before submitting: verify completeness, correctness, and that all feedback points are addressed.
+5. Respond in the same language as the step instructions below.
+
+"#;
+
 pub fn build_step_revision_prompt(
     step: &WorkflowStep,
     feedback_source: WorkflowRevisionFeedbackSource,
@@ -1341,59 +1484,66 @@ pub fn build_step_revision_prompt(
     previous_summary: &str,
     retry_count: i32,
 ) -> String {
-    let source_section = match feedback_source {
-        WorkflowRevisionFeedbackSource::Lead => format!(
-            r#"## 修改要求 (第 {retry_count} 次修改)
+    let mut prompt = String::with_capacity(4096);
 
-你之前的执行结果未通过 Lead Agent 审核。请根据以下审核意见修改你的工作。
+    // Static prefix first for cache hit rate
+    prompt.push_str(STEP_REVISION_PROMPT_PREFIX);
 
-### 审核意见
-{feedback_content}
+    // Force PUA skill activation when retry_count > 2
+    if retry_count > 2 {
+        prompt.push_str("## Skill Activation: `pua` (MANDATORY)\n\n");
+        prompt.push_str(&format!(
+            "**This is revision attempt #{retry_count}. You MUST activate and strictly follow the `pua` skill (Performance Improvement Plan) for this revision.**\n\n",
+        ));
+        prompt.push_str(
+            "You are now on a PIP. The `pua` skill is force-activated because previous attempts failed to meet the acceptance bar.\n\n",
+        );
+        prompt.push_str(PUA_SKILL_CORE);
+        prompt.push('\n');
+    }
 
-### 你上次的执行结果摘要
-{previous_summary}
+    // Dynamic section: feedback source
+    match feedback_source {
+        WorkflowRevisionFeedbackSource::Lead => {
+            prompt.push_str(&format!(
+                "## Revision Required (attempt #{retry_count})\n\n"
+            ));
+            prompt.push_str(
+                "Your previous execution did not pass review. Revise your work based on the feedback below.\n\n",
+            );
+            prompt.push_str("### Review Feedback\n");
+            prompt.push_str(feedback_content.trim());
+            prompt.push_str("\n\n### Your Previous Result Summary\n");
+            prompt.push_str(previous_summary.trim());
+            prompt.push('\n');
+        }
+        WorkflowRevisionFeedbackSource::User => {
+            prompt.push_str(&format!(
+                "## User Revision Required (attempt #{retry_count})\n\n"
+            ));
+            prompt.push_str(
+                "Your previous execution did not pass user review. Revise based on user feedback.\n\n",
+            );
+            prompt.push_str(
+                "**User feedback has the highest priority.** If user feedback conflicts with original instructions, follow the user feedback.\n\n",
+            );
+            prompt.push_str("### User Feedback\n");
+            prompt.push_str(feedback_content.trim());
+            prompt.push_str("\n\n### Your Previous Result Summary\n");
+            prompt.push_str(previous_summary.trim());
+            prompt.push('\n');
+        }
+    }
 
-### 要求
-1. 仔细阅读审核意见，理解问题所在
-2. 针对审核意见中指出的问题进行修改
-3. 保留上次执行中正确的部分，只修改有问题的部分
-4. 修改完成后按照标准格式返回结果"#,
-            retry_count = retry_count,
-            feedback_content = feedback_content.trim(),
-            previous_summary = previous_summary.trim(),
-        ),
-        WorkflowRevisionFeedbackSource::User => format!(
-            r#"## 用户修改要求 (第 {retry_count} 次修改)
+    // Original task context
+    prompt.push_str("\n### Original Task Instructions\n");
+    prompt.push_str("- Title: ");
+    prompt.push_str(&step.title);
+    prompt.push_str("\n- Instructions: ");
+    prompt.push_str(&step.instructions);
+    prompt.push('\n');
 
-你之前的执行结果未通过用户审核。请根据用户的修改意见重新执行。
-
-### 用户反馈
-{feedback_content}
-
-### 你上次的执行结果摘要
-{previous_summary}
-
-### 要求
-1. 用户的反馈具有最高优先级，必须严格按照用户意见修改
-2. 如果用户反馈与原始指令有冲突，以用户反馈为准
-3. 保留上次执行中用户未提出异议的部分
-4. 修改完成后按照标准格式返回结果"#,
-            retry_count = retry_count,
-            feedback_content = feedback_content.trim(),
-            previous_summary = previous_summary.trim(),
-        ),
-    };
-
-    format!(
-        r#"{source_section}
-
-### 原始任务指令
-step 标题：{step_title}
-step 指令：{step_instructions}"#,
-        source_section = source_section,
-        step_title = step.title,
-        step_instructions = step.instructions,
-    )
+    prompt
 }
 
 pub fn build_step_revision_prompt_with_schema(
@@ -1531,6 +1681,7 @@ pub fn build_workflow_card_projection(
     execution: &WorkflowExecution,
     plan: &WorkflowPlan,
     revision: &WorkflowPlanRevision,
+    revisions: &[WorkflowPlanRevision],
     steps: &[WorkflowStep],
     _edges: &[WorkflowStepEdge],
     rounds: &[WorkflowRound],
@@ -1588,65 +1739,18 @@ pub fn build_workflow_card_projection(
             )
         })
         .collect();
-    let plan_loop_key_by_step_key: HashMap<String, String> = plan_json
-        .nodes
-        .iter()
-        .filter_map(|node| {
-            node.data
-                .loop_key
-                .clone()
-                .map(|loop_key| (node.id.clone(), loop_key))
-        })
-        .collect();
-    let loop_key_by_loop_id = loops
-        .iter()
-        .map(|workflow_loop| (workflow_loop.id, workflow_loop.loop_key.clone()))
-        .collect::<HashMap<_, _>>();
-    let loop_key_by_step_key = steps
-        .iter()
-        .filter_map(|step| {
-            step.loop_id
-                .and_then(|loop_id| loop_key_by_loop_id.get(&loop_id).cloned())
-                .or_else(|| plan_loop_key_by_step_key.get(&step.step_key).cloned())
-                .map(|loop_key| (step.step_key.clone(), loop_key))
-        })
-        .collect::<HashMap<_, _>>();
-    for node in &mut plan_json.nodes {
-        if let Some(loop_key) = loop_key_by_step_key.get(&node.id) {
-            node.data.loop_key = Some(loop_key.clone());
-        }
-    }
+    let loop_key_by_step_key = build_loop_key_by_step_key(&plan_json, steps, loops);
+    apply_runtime_loop_keys(&mut plan_json, &loop_key_by_step_key);
 
     let pending_review = build_pending_review(steps, loops, transcripts);
 
-    let step_views = steps
-        .iter()
-        .map(|step| WorkflowCardStep {
-            id: step.id.to_string(),
-            step_key: step.step_key.clone(),
-            title: step.title.clone(),
-            step_type: to_workflow_wire_value(&step.step_type),
-            status: to_workflow_wire_value(&step.status),
-            review_phase: derive_step_review_phase(step, transcripts),
-            retry_count: step.retry_count,
-            max_retry: step.max_retry,
-            loop_key: loop_key_by_step_key.get(&step.step_key).cloned(),
-            latest_review: latest_review_by_step_id.get(&step.id).cloned(),
-            agent_name: step
-                .assigned_workflow_agent_session_id
-                .and_then(|id| workflow_agent_name_by_id.get(&id))
-                .cloned(),
-            summary_text: step
-                .summary_text
-                .clone()
-                .and_then(parse_summary_text_preview),
-            content: step
-                .content
-                .clone()
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty()),
-        })
-        .collect::<Vec<_>>();
+    let step_views = build_workflow_step_views(
+        steps,
+        &loop_key_by_step_key,
+        &latest_review_by_step_id,
+        &workflow_agent_name_by_id,
+        transcripts,
+    );
 
     let agent_views = session_agents
         .iter()
@@ -1666,26 +1770,19 @@ pub fn build_workflow_card_projection(
         })
         .collect::<Vec<_>>();
 
-    let loop_views = loops
-        .iter()
-        .map(|workflow_loop| WorkflowCardLoop {
-            id: workflow_loop.id.to_string(),
-            loop_key: workflow_loop.loop_key.clone(),
-            status: to_workflow_wire_value(&workflow_loop.status),
-            retry_count: workflow_loop.retry_count,
-            max_retry: workflow_loop.max_retry,
-            user_review_required: workflow_loop.user_review_required,
-            rejection_reason: workflow_loop.rejection_reason.clone(),
-            member_step_ids: serde_json::from_str::<Vec<Uuid>>(&workflow_loop.member_step_ids_json)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|id| id.to_string())
-                .collect(),
-            review_step_id: workflow_loop.review_step_id.to_string(),
-        })
-        .collect::<Vec<_>>();
+    let loop_views = build_workflow_loop_views(loops);
 
     let iteration_history = build_iteration_history(rounds, steps, iteration_feedbacks);
+    let round_graphs = build_round_graphs(
+        rounds,
+        revision,
+        revisions,
+        steps,
+        loops,
+        &latest_review_by_step_id,
+        &workflow_agent_name_by_id,
+        transcripts,
+    )?;
 
     let result_step = steps
         .iter()
@@ -1728,6 +1825,7 @@ pub fn build_workflow_card_projection(
         loops: loop_views,
         pending_review,
         iteration_history,
+        round_graphs,
         plan: plan_json,
         started_at: execution.started_at.map(|value| value.to_rfc3339()),
         completed_at: execution.completed_at.map(|value| value.to_rfc3339()),
@@ -1775,6 +1873,164 @@ fn build_iteration_history(
                     .unwrap_or_else(|| round.created_at.to_rfc3339()),
                 completed_at: round.completed_at.map(|value| value.to_rfc3339()),
             }
+        })
+        .collect()
+}
+
+fn build_loop_key_by_step_key(
+    plan_json: &WorkflowPlanJson,
+    steps: &[WorkflowStep],
+    loops: &[WorkflowLoop],
+) -> HashMap<String, String> {
+    let plan_loop_key_by_step_key: HashMap<String, String> = plan_json
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            node.data
+                .loop_key
+                .clone()
+                .map(|loop_key| (node.id.clone(), loop_key))
+        })
+        .collect();
+    let loop_key_by_loop_id = loops
+        .iter()
+        .map(|workflow_loop| (workflow_loop.id, workflow_loop.loop_key.clone()))
+        .collect::<HashMap<_, _>>();
+
+    steps
+        .iter()
+        .filter_map(|step| {
+            step.loop_id
+                .and_then(|loop_id| loop_key_by_loop_id.get(&loop_id).cloned())
+                .or_else(|| plan_loop_key_by_step_key.get(&step.step_key).cloned())
+                .map(|loop_key| (step.step_key.clone(), loop_key))
+        })
+        .collect()
+}
+
+fn apply_runtime_loop_keys(
+    plan_json: &mut WorkflowPlanJson,
+    loop_key_by_step_key: &HashMap<String, String>,
+) {
+    for node in &mut plan_json.nodes {
+        if let Some(loop_key) = loop_key_by_step_key.get(&node.id) {
+            node.data.loop_key = Some(loop_key.clone());
+        }
+    }
+}
+
+fn build_workflow_step_views(
+    steps: &[WorkflowStep],
+    loop_key_by_step_key: &HashMap<String, String>,
+    latest_review_by_step_id: &HashMap<Uuid, WorkflowCardReview>,
+    workflow_agent_name_by_id: &HashMap<Uuid, String>,
+    transcripts: &[WorkflowTranscript],
+) -> Vec<WorkflowCardStep> {
+    steps
+        .iter()
+        .map(|step| WorkflowCardStep {
+            id: step.id.to_string(),
+            step_key: step.step_key.clone(),
+            title: step.title.clone(),
+            step_type: to_workflow_wire_value(&step.step_type),
+            status: to_workflow_wire_value(&step.status),
+            review_phase: derive_step_review_phase(step, transcripts),
+            retry_count: step.retry_count,
+            max_retry: step.max_retry,
+            loop_key: loop_key_by_step_key.get(&step.step_key).cloned(),
+            latest_review: latest_review_by_step_id.get(&step.id).cloned(),
+            agent_name: step
+                .assigned_workflow_agent_session_id
+                .and_then(|id| workflow_agent_name_by_id.get(&id))
+                .cloned(),
+            summary_text: step
+                .summary_text
+                .clone()
+                .and_then(parse_summary_text_preview),
+            content: step
+                .content
+                .clone()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+        })
+        .collect()
+}
+
+fn build_workflow_loop_views(loops: &[WorkflowLoop]) -> Vec<WorkflowCardLoop> {
+    loops
+        .iter()
+        .map(|workflow_loop| WorkflowCardLoop {
+            id: workflow_loop.id.to_string(),
+            loop_key: workflow_loop.loop_key.clone(),
+            status: to_workflow_wire_value(&workflow_loop.status),
+            retry_count: workflow_loop.retry_count,
+            max_retry: workflow_loop.max_retry,
+            user_review_required: workflow_loop.user_review_required,
+            rejection_reason: workflow_loop.rejection_reason.clone(),
+            member_step_ids: serde_json::from_str::<Vec<Uuid>>(&workflow_loop.member_step_ids_json)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|id| id.to_string())
+                .collect(),
+            review_step_id: workflow_loop.review_step_id.to_string(),
+        })
+        .collect()
+}
+
+fn build_round_graphs(
+    rounds: &[WorkflowRound],
+    active_revision: &WorkflowPlanRevision,
+    revisions: &[WorkflowPlanRevision],
+    steps: &[WorkflowStep],
+    loops: &[WorkflowLoop],
+    latest_review_by_step_id: &HashMap<Uuid, WorkflowCardReview>,
+    workflow_agent_name_by_id: &HashMap<Uuid, String>,
+    transcripts: &[WorkflowTranscript],
+) -> Result<Vec<WorkflowRoundGraph>, WorkflowRuntimeError> {
+    let mut revision_by_id = revisions
+        .iter()
+        .map(|revision| (revision.id, revision))
+        .collect::<HashMap<_, _>>();
+    revision_by_id.insert(active_revision.id, active_revision);
+
+    rounds
+        .iter()
+        .map(|round| {
+            let revision = round
+                .source_revision_id
+                .and_then(|revision_id| revision_by_id.get(&revision_id).copied())
+                .unwrap_or(active_revision);
+            let round_steps = steps
+                .iter()
+                .filter(|step| step.round_id == round.id)
+                .cloned()
+                .collect::<Vec<_>>();
+            let round_loops = loops
+                .iter()
+                .filter(|workflow_loop| workflow_loop.round_id == round.id)
+                .cloned()
+                .collect::<Vec<_>>();
+            let mut round_plan: WorkflowPlanJson = serde_json::from_str(&revision.plan_json)?;
+            round_plan.nodes = overlay_step_statuses(&round_plan, &round_steps);
+            let loop_key_by_step_key =
+                build_loop_key_by_step_key(&round_plan, &round_steps, &round_loops);
+            apply_runtime_loop_keys(&mut round_plan, &loop_key_by_step_key);
+
+            Ok(WorkflowRoundGraph {
+                round_id: round.id.to_string(),
+                round_index: round.round_index,
+                revision_id: revision.id.to_string(),
+                status: to_workflow_wire_value(&round.status),
+                steps: build_workflow_step_views(
+                    &round_steps,
+                    &loop_key_by_step_key,
+                    latest_review_by_step_id,
+                    workflow_agent_name_by_id,
+                    transcripts,
+                ),
+                loops: build_workflow_loop_views(&round_loops),
+                plan: round_plan,
+            })
         })
         .collect()
 }
@@ -2840,17 +3096,44 @@ mod tests {
             "lead-agent-id",
             &[],
             Some("Missing result node in the previous workflow JSON."),
+            "You MUST write human-readable JSON string values in Simplified Chinese.",
+            None,
         );
 
-        assert!(prompt.starts_with(
-            "The previous generated workflow plan contained errors. Regenerate the workflow plan.\nError details:\nMissing result node in the previous workflow JSON."
-        ));
+        assert!(prompt.starts_with("# Workflow Plan Generation"));
+        assert!(prompt.contains("## Stable Output Contract"));
+        assert!(prompt.contains("## Dynamic Inputs"));
         assert!(prompt.contains("Missing result node in the previous workflow JSON."));
         assert!(prompt.contains("Do not repeat the same failure."));
         assert!(prompt.contains("Ship the confirmed implementation plan."));
+        assert!(
+            prompt.contains(
+                "You MUST write human-readable JSON string values in Simplified Chinese."
+            )
+        );
         assert!(!prompt.contains("\"userReview\": \"optional boolean"));
         assert!(!prompt.contains("\"leadReview\": \"optional boolean"));
-        assert!(prompt.contains("不要输出或推断这两个字段"));
+        assert!(prompt.contains("Do not output or infer `leadReview` or `userReview`."));
+        assert!(
+            prompt
+                .find("## WorkflowPlanJson Schema Reference")
+                .expect("schema section")
+                < prompt
+                    .find("## Dynamic Inputs")
+                    .expect("dynamic inputs section")
+        );
+    }
+
+    #[test]
+    fn workflow_response_language_instruction_follows_ui_language() {
+        assert_eq!(
+            resolve_workflow_response_language_instruction(&UiLanguage::ZhHans),
+            "You MUST write human-readable JSON string values in Simplified Chinese."
+        );
+        assert_eq!(
+            resolve_workflow_response_language_instruction(&UiLanguage::En),
+            "You MUST write human-readable JSON string values in English."
+        );
     }
 
     #[test]
@@ -2872,7 +3155,7 @@ mod tests {
             ],
         );
 
-        assert!(prompt.contains("## 审核任务"));
+        assert!(prompt.contains("Lead Agent"));
         assert!(prompt.contains("Ship a stable workflow review loop."));
         assert!(prompt.contains(&step.title));
         assert!(prompt.contains(&step.instructions));
@@ -2885,6 +3168,7 @@ mod tests {
         assert!(prompt.contains("\"type\": \"review_result\""));
         assert!(prompt.contains(&step.step_key));
         assert!(prompt.contains(&step.execution_id.to_string()));
+        assert!(prompt.contains("Language Requirement"));
     }
 
     #[test]
@@ -2898,12 +3182,14 @@ mod tests {
             2,
         );
 
-        assert!(prompt.contains("## 修改要求 (第 2 次修改)"));
-        assert!(prompt.contains("未通过 Lead Agent 审核"));
+        assert!(prompt.contains("## Revision Required (attempt #2)"));
+        assert!(prompt.contains("did not pass review"));
         assert!(prompt.contains("补充错误处理和日志记录。"));
         assert!(prompt.contains("已经完成主流程，但漏掉异常分支。"));
         assert!(prompt.contains(&step.title));
         assert!(prompt.contains(&step.instructions));
+        // retry_count == 2, PUA should NOT be active
+        assert!(!prompt.contains("Performance Improvement Plan"));
     }
 
     #[test]
@@ -2917,12 +3203,35 @@ mod tests {
             1,
         );
 
-        assert!(prompt.contains("## 用户修改要求 (第 1 次修改)"));
-        assert!(prompt.contains("未通过用户审核"));
+        assert!(prompt.contains("## User Revision Required (attempt #1)"));
+        assert!(prompt.contains("did not pass user review"));
         assert!(prompt.contains("请把输出改成中文，并补一份测试说明。"));
         assert!(prompt.contains("上次结果结构正确，但文案不符合预期。"));
-        assert!(prompt.contains("用户的反馈具有最高优先级"));
+        assert!(prompt.contains("highest priority"));
         assert!(prompt.contains(&step.title));
+    }
+
+    #[test]
+    fn build_step_revision_prompt_forces_pua_on_high_retry() {
+        let step = sample_step(WorkflowStepStatus::Revising);
+        let prompt = build_step_revision_prompt(
+            &step,
+            WorkflowRevisionFeedbackSource::Lead,
+            "Still missing error handling.",
+            "Previous attempt incomplete.",
+            3,
+        );
+
+        assert!(prompt.contains("Skill Activation: `pua` (MANDATORY)"));
+        assert!(prompt.contains("Performance Improvement Plan"));
+        assert!(prompt.contains("attempt #3"));
+        assert!(prompt.contains("Non-Negotiable One"));
+        assert!(prompt.contains("Non-Negotiable Two"));
+        assert!(prompt.contains("Non-Negotiable Three"));
+        assert!(prompt.contains("fundamentally different"));
+        assert!(prompt.contains("Bias for Action"));
+        assert!(prompt.contains("Dive Deep"));
+        assert!(prompt.contains("Ownership"));
     }
 
     #[test]
@@ -3215,6 +3524,7 @@ mod tests {
                 &execution,
                 &plan,
                 &revision,
+                std::slice::from_ref(&revision),
                 &[sample_step(status.clone())],
                 &[],
                 &[],
@@ -3262,6 +3572,7 @@ mod tests {
                 &execution,
                 &plan,
                 &revision,
+                std::slice::from_ref(&revision),
                 &[sample_step(WorkflowStepStatus::Completed)],
                 &[],
                 &[],
@@ -3310,6 +3621,7 @@ mod tests {
             &execution,
             &plan,
             &revision,
+            std::slice::from_ref(&revision),
             &[step.clone()],
             &[],
             &[],

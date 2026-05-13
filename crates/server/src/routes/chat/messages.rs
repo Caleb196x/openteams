@@ -448,6 +448,7 @@ pub(super) async fn build_execution_workflow_card_projection(
     let revision = WorkflowPlanRevision::find_by_id(pool, revision_id)
         .await?
         .ok_or_else(|| ApiError::BadRequest("Workflow revision was not found.".to_string()))?;
+    let revisions = WorkflowPlanRevision::find_by_plan(pool, plan.id).await?;
     let session_agents = ChatSessionAgent::find_all_for_session(pool, message.session_id).await?;
     let mut agents = Vec::with_capacity(session_agents.len());
     for session_agent in &session_agents {
@@ -479,6 +480,7 @@ pub(super) async fn build_execution_workflow_card_projection(
         &execution,
         &plan,
         &revision,
+        &revisions,
         &steps,
         &edges,
         &rounds,
@@ -576,6 +578,7 @@ async fn build_plan_workflow_card_projection(
         loops: Vec::new(),
         pending_review: None,
         iteration_history: Vec::new(),
+        round_graphs: Vec::new(),
         plan: parsed_plan,
         started_at: None,
         completed_at: None,

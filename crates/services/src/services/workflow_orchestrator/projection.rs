@@ -67,6 +67,7 @@ impl WorkflowOrchestrator {
         let edges = WorkflowStepEdge::find_by_execution(pool, execution.id).await?;
         let rounds = WorkflowRound::find_by_execution(pool, execution.id).await?;
         let loops = WorkflowLoop::find_by_execution(pool, execution.id).await?;
+        let revisions = WorkflowPlanRevision::find_by_plan(pool, plan.id).await?;
         let iteration_feedbacks =
             WorkflowIterationFeedback::find_by_execution(pool, execution.id).await?;
         let step_reviews = WorkflowStepReview::find_by_execution(pool, execution.id).await?;
@@ -76,6 +77,7 @@ impl WorkflowOrchestrator {
             execution,
             plan,
             revision,
+            &revisions,
             &steps,
             &edges,
             &rounds,

@@ -205,11 +205,10 @@ fn normalize_review_action(entry_type: &str, action: &str) -> Result<&'static st
         ("step_review", "reject") | ("step_review", "rejected") => Ok("rejected"),
         ("loop_review", "approve") | ("loop_review", "approved") => Ok("approved"),
         ("loop_review", "reject") | ("loop_review", "rejected") => Ok("rejected"),
-        ("final_review", "approve") | ("final_review", "approved") => Ok("accepted"),
-        ("final_review", "accept") | ("final_review", "accepted") => Ok("accepted"),
-        ("final_review", "reject") | ("final_review", "rejected") => Ok("rejected"),
-        ("final_review", "deny") | ("final_review", "denied") => Ok("rejected"),
-        ("step_review" | "loop_review" | "final_review", _) => Err(ApiError::BadRequest(format!(
+        ("final_review", _) => Err(ApiError::BadRequest(
+            "final_review must be submitted through workflow iteration feedback.".to_string(),
+        )),
+        ("step_review" | "loop_review", _) => Err(ApiError::BadRequest(format!(
             "unsupported action '{}' for review type '{}'.",
             action, entry_type
         ))),
@@ -245,15 +244,9 @@ mod tests {
     }
 
     #[test]
-    fn normalize_final_review_actions() {
-        assert_eq!(
-            normalize_review_action("final_review", "approve").unwrap(),
-            "accepted"
-        );
-        assert_eq!(
-            normalize_review_action("final_review", "reject").unwrap(),
-            "rejected"
-        );
+    fn normalize_final_review_actions_are_rejected() {
+        assert!(normalize_review_action("final_review", "approve").is_err());
+        assert!(normalize_review_action("final_review", "reject").is_err());
     }
 
     #[test]

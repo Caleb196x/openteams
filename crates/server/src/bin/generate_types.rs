@@ -183,6 +183,7 @@ fn generate_types_content() -> String {
         services::services::workflow_runtime::WorkflowReviewPromptTemplate::decl(),
         services::services::workflow_runtime::WorkflowPendingReview::decl(),
         services::services::workflow_runtime::WorkflowIterationSummary::decl(),
+        services::services::workflow_runtime::WorkflowRoundGraph::decl(),
         services::services::workflow_runtime::WorkflowCardStep::decl(),
         services::services::workflow_runtime::WorkflowCardProjection::decl(),
         services::services::workflow_iteration::UserIterationFeedbackDetail::decl(),

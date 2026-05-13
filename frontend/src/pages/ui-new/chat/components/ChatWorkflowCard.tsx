@@ -7,6 +7,7 @@ import {
   WarningCircleIcon,
   PauseIcon,
 } from '@phosphor-icons/react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
 import type { WorkflowCardData } from '@/lib/api';
@@ -14,10 +15,7 @@ import { ChatMarkdown } from '@/components/ui-new/primitives/conversation/ChatMa
 import { WorkflowIterationFeedbackCard } from './WorkflowIterationFeedbackCard';
 import { WorkflowPendingReviewCard } from './WorkflowPendingReviewCard';
 import { WorkflowGraphBoard } from './WorkflowGraphBoard';
-import {
-  type WorkflowFinalReviewActionData,
-  WorkflowFinalReviewCard,
-} from './WorkflowFinalReviewCard';
+import { type WorkflowFinalReviewActionData } from './WorkflowFinalReviewCard';
 import {
   canPauseWorkflowExecution,
   canResumeWorkflowExecution,
@@ -228,11 +226,6 @@ type ChatWorkflowCardProps = {
   retryPlanGenerationPending?: boolean;
   retryPlanGenerationError?: string | null;
   finalReviewAction?: WorkflowFinalReviewActionData | null;
-  onResolveFinalReview?: (
-    executionId: string,
-    transcriptId: string,
-    action: 'accepted' | 'rejected'
-  ) => void;
   onRespondPendingReview?: (
     reviewId: string,
     action: 'approve' | 'reject',
@@ -263,7 +256,6 @@ export function ChatWorkflowCard({
   retryPlanGenerationPending = false,
   retryPlanGenerationError,
   finalReviewAction,
-  onResolveFinalReview,
   onRespondPendingReview,
   onSubmitIterationFeedback,
   pendingActionId,
@@ -271,9 +263,67 @@ export function ChatWorkflowCard({
   const { t } = useTranslation('chat');
   const projection =
     projectionProp ?? extractWorkflowCardProjection(message.meta);
+  const roundGraphs = useMemo(
+    () =>
+      [...(projection?.round_graphs ?? [])].sort(
+        (left, right) => left.round_index - right.round_index
+      ),
+    [projection?.round_graphs]
+  );
+  const defaultRoundIndex = useMemo(() => {
+    if (!projection) return null;
+    return (
+      roundGraphs.find(
+        (graph) => graph.round_index === projection.current_round
+      )?.round_index ??
+      roundGraphs.at(-1)?.round_index ??
+      projection.current_round
+    );
+  }, [projection, roundGraphs]);
+  const [selectedRoundIndex, setSelectedRoundIndex] = useState<number | null>(
+    null
+  );
+
+  useEffect(() => {
+    setSelectedRoundIndex(defaultRoundIndex);
+  }, [
+    defaultRoundIndex,
+    projection?.execution_id,
+    projection?.plan_id,
+    projection?.current_round,
+  ]);
+
+  const selectedRoundGraph = useMemo(() => {
+    if (!projection) return null;
+    const targetRound = selectedRoundIndex ?? defaultRoundIndex;
+    return (
+      roundGraphs.find((graph) => graph.round_index === targetRound) ??
+      roundGraphs.find(
+        (graph) => graph.round_index === projection.current_round
+      ) ??
+      null
+    );
+  }, [defaultRoundIndex, projection, roundGraphs, selectedRoundIndex]);
+  const currentRoundGraph = useMemo(() => {
+    if (!projection) return null;
+    return (
+      roundGraphs.find(
+        (graph) => graph.round_index === projection.current_round
+      ) ?? null
+    );
+  }, [projection, roundGraphs]);
+
   if (!projection) {
     return null;
   }
+
+  const graphPlan = selectedRoundGraph?.plan ?? projection.plan;
+  const graphSteps = selectedRoundGraph?.steps ?? projection.steps;
+  const graphLoops = selectedRoundGraph?.loops ?? projection.loops ?? [];
+  const isViewingCurrentRound =
+    !selectedRoundGraph ||
+    selectedRoundGraph.round_index === projection.current_round;
+  const currentRoundSteps = currentRoundGraph?.steps ?? projection.steps;
 
   const cardType = extractWorkflowCardType(message.meta);
   const isPlanGenerationCard = cardType === 'workflow_plan_generation';
@@ -287,7 +337,7 @@ export function ChatWorkflowCard({
     projection.error_message?.trim() ||
     null;
   const displayGoal = generationMeta?.plan_goal?.trim() || projection.goal;
-  const hasWorkflowGraph = projection.plan.nodes.length > 0;
+  const hasWorkflowGraph = graphPlan.nodes.length > 0;
   const emptyGraphDescription = isPlanGenerationFailed
     ? t('workflow.card.emptyGraph.planGenerationFailed', { defaultValue: 'Plan generation stopped before the preview was created. Retry to generate a fresh plan from the same goal.' })
     : isPlanGenerationPending
@@ -420,13 +470,13 @@ export function ChatWorkflowCard({
       {hasWorkflowGraph ? (
         <div className="mt-4">
           <WorkflowGraphBoard
-            nodes={projection.plan.nodes}
-            edges={projection.plan.edges}
-            steps={projection.steps}
-            loops={projection.loops ?? []}
-            planLoops={projection.plan.loops}
+            nodes={graphPlan.nodes}
+            edges={graphPlan.edges}
+            steps={graphSteps}
+            loops={graphLoops}
+            planLoops={graphPlan.loops}
             agents={projection.agents}
-            onRetryStep={onRetryStep}
+            onRetryStep={isViewingCurrentRound ? onRetryStep : undefined}
             pendingActionId={pendingActionId}
             compact
           />
@@ -462,7 +512,7 @@ export function ChatWorkflowCard({
 
       {!projection.pending_review &&
         projection.execution_id &&
-        (projection.iteration_history.length > 0 || finalReviewAction) && (
+        (projection.iteration_history.length > 0 || canReviewCurrentRound) && (
           <div className="mt-4">
             <WorkflowIterationFeedbackCard
               currentRound={projection.current_round}
@@ -470,11 +520,17 @@ export function ChatWorkflowCard({
               totalSteps={projection.total_step_count}
               isRegeneratingPlan={isExecutionRecompiling}
               runningStepTitle={
-                projection.steps.find(
+                currentRoundSteps.find(
                   (s) => s.status === 'running' || s.status === 'failed'
                 )?.title ?? null
               }
               iterationHistory={projection.iteration_history}
+              roundOptions={roundGraphs.map((graph) => ({
+                roundIndex: graph.round_index,
+                status: graph.status,
+              }))}
+              selectedRoundIndex={selectedRoundIndex ?? defaultRoundIndex}
+              onSelectRound={setSelectedRoundIndex}
               canReviewCurrentRound={canReviewCurrentRound}
               pendingActionId={pendingActionId}
               onSubmit={(payload) => {
@@ -562,30 +618,6 @@ export function ChatWorkflowCard({
           </button>
         )}
       </div>
-
-      {finalReviewAction && onResolveFinalReview && (
-        <div className="mt-4">
-          <WorkflowFinalReviewCard
-            message={finalReviewAction.message}
-            description={finalReviewAction.description}
-            onAccept={() =>
-              onResolveFinalReview(
-                finalReviewAction.executionId,
-                finalReviewAction.transcriptId,
-                'accepted'
-              )
-            }
-            onReject={() =>
-              onResolveFinalReview(
-                finalReviewAction.executionId,
-                finalReviewAction.transcriptId,
-                'rejected'
-              )
-            }
-            disabled={pendingActionId === finalReviewAction.transcriptId}
-          />
-        </div>
-      )}
 
       {projection.pending_review && (
         <div className="mt-4">

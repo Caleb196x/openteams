@@ -1340,31 +1340,14 @@ export function ChatSessions() {
   }, [workflowExecutionCandidates, workflowTranscriptQueries]);
 
   const resolveActionMutation = useMutation({
-    mutationFn: async (
-      variables:
-        | {
-            scope: 'step';
-            stepId: string;
-            transcriptId: string;
-            action: string;
-            inputText?: string;
-          }
-        | {
-            scope: 'final_review';
-            executionId: string;
-            transcriptId: string;
-            action: 'accepted' | 'rejected';
-          }
-    ) => {
+    mutationFn: async (variables: {
+      scope: 'step';
+      stepId: string;
+      transcriptId: string;
+      action: string;
+      inputText?: string;
+    }) => {
       if (!activeSessionId) throw new Error('No active session');
-      if (variables.scope === 'final_review') {
-        return chatApi.resolveWorkflowAction(
-          activeSessionId,
-          variables.executionId,
-          variables.transcriptId,
-          variables.action
-        );
-      }
       if (variables.action === 'granted' || variables.action === 'denied') {
         return chatApi.resolveWorkflowStepPermission(
           activeSessionId,
@@ -1505,21 +1488,6 @@ export function ChatSessions() {
         transcriptId,
         action,
         inputText,
-      });
-    },
-    [resolveActionMutation]
-  );
-  const handleResolveWorkflowFinalReview = useCallback(
-    (
-      executionId: string,
-      transcriptId: string,
-      action: 'accepted' | 'rejected'
-    ) => {
-      resolveActionMutation.mutate({
-        scope: 'final_review',
-        executionId,
-        transcriptId,
-        action,
       });
     },
     [resolveActionMutation]
@@ -5218,9 +5186,6 @@ export function ChatSessions() {
                           }
                           workflowCardProjection={workflowCardProjection}
                           workflowFinalReviewAction={workflowFinalReviewAction}
-                          onResolveWorkflowFinalReview={
-                            handleResolveWorkflowFinalReview
-                          }
                           onRespondPendingReview={
                             handleRespondPendingWorkflowReview
                           }
@@ -5568,7 +5533,6 @@ export function ChatSessions() {
             submitWorkflowStepInputMutation.mutate({ stepId, inputText })
           }
           onApproval={handleResolveWorkflowAction}
-          onResolveFinalReview={handleResolveWorkflowFinalReview}
           onRespondPendingReview={handleRespondPendingWorkflowReview}
           onSubmitIterationFeedback={handleSubmitWorkflowIterationFeedback}
           pendingActionId={pendingWorkflowActionId}

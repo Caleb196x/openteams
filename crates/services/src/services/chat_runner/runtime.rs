@@ -1534,6 +1534,7 @@ impl ChatRunner {
                                 send_count,
                                 plan_check,
                                 workflow_content,
+                                design_doc_paths,
                             }) => {
                                 tracing::info!(
                                     session_id = %session_id,
@@ -1598,6 +1599,7 @@ impl ChatRunner {
                                                 &workflow_content,
                                                 None,
                                                 None,
+                                                design_doc_paths.as_deref(),
                                             )
                                             .await
                                         {

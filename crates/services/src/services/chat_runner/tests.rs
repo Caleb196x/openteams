@@ -177,7 +177,7 @@ async fn setup_chat_runner_db() -> DBService {
     DBService { pool }
 }
 
-async fn insert_test_chat_session(db: &DBService, session_id: Uuid) {
+async fn insert_test_chat_session(db: &DBService, session_id: Uuid) -> ChatSession {
     sqlx::query(
         r#"
         INSERT INTO chat_sessions (id, title, status)
@@ -190,6 +190,11 @@ async fn insert_test_chat_session(db: &DBService, session_id: Uuid) {
     .execute(&db.pool)
     .await
     .expect("insert chat session");
+
+    ChatSession::find_by_id(&db.pool, session_id)
+        .await
+        .expect("find inserted chat session")
+        .expect("inserted chat session exists")
 }
 
 async fn insert_test_chat_agent(db: &DBService, name: &str) -> ChatAgent {
@@ -247,6 +252,7 @@ async fn default_route_for_unmentioned_user_message_uses_first_session_agent() {
     let db = setup_chat_runner_db().await;
     let runner = ChatRunner::new(db.clone());
     let session_id = Uuid::new_v4();
+    let session = insert_test_chat_session(&db, session_id).await;
     let first_agent = insert_test_chat_agent(&db, "first").await;
     let second_agent = insert_test_chat_agent(&db, "second").await;
     insert_test_session_agent(&db, session_id, first_agent.id).await;
@@ -255,7 +261,7 @@ async fn default_route_for_unmentioned_user_message_uses_first_session_agent() {
     let message = test_message("please handle this", json!({}));
 
     let default_mention = runner
-        .resolve_default_mention_for_unmentioned_user_message(session_id, &message)
+        .resolve_default_mention_for_unmentioned_user_message(&session, &message)
         .await
         .expect("resolve default mention");
 
@@ -267,13 +273,14 @@ async fn default_route_ignores_messages_with_explicit_mentions() {
     let db = setup_chat_runner_db().await;
     let runner = ChatRunner::new(db.clone());
     let session_id = Uuid::new_v4();
+    let session = insert_test_chat_session(&db, session_id).await;
     let first_agent = insert_test_chat_agent(&db, "first").await;
     insert_test_session_agent(&db, session_id, first_agent.id).await;
     let mut message = test_message("@someone please handle this", json!({}));
     message.mentions = sqlx::types::Json(vec!["someone".to_string()]);
 
     let default_mention = runner
-        .resolve_default_mention_for_unmentioned_user_message(session_id, &message)
+        .resolve_default_mention_for_unmentioned_user_message(&session, &message)
         .await
         .expect("resolve default mention");
 
@@ -285,6 +292,7 @@ async fn default_route_ignores_unmentioned_agent_messages() {
     let db = setup_chat_runner_db().await;
     let runner = ChatRunner::new(db.clone());
     let session_id = Uuid::new_v4();
+    let session = insert_test_chat_session(&db, session_id).await;
     let first_agent = insert_test_chat_agent(&db, "first").await;
     insert_test_session_agent(&db, session_id, first_agent.id).await;
     let message = test_message_with_sender(
@@ -295,7 +303,7 @@ async fn default_route_ignores_unmentioned_agent_messages() {
     );
 
     let default_mention = runner
-        .resolve_default_mention_for_unmentioned_user_message(session_id, &message)
+        .resolve_default_mention_for_unmentioned_user_message(&session, &message)
         .await
         .expect("resolve default mention");
 
@@ -1388,12 +1396,7 @@ fn build_exact_markdown_prompt_matches_expected_input_template() {
     assert!(prompt.contains("conclusion`: current-turn summary only"));
     assert!(prompt.contains(PROTOCOL_OUTPUT_SCHEMA_JSON));
     assert!(prompt.contains("### Example"));
-    assert!(prompt.contains("### workflow_generate"));
-    assert!(prompt.contains("plan_check"));
-    assert!(prompt.contains(
-        "Emit `workflow_generate` only when the user explicitly asks to start generating an execution plan."
-    ));
-    assert!(prompt.contains("`生成计划`, `开始执行`, `开始落实`, `进入执行`"));
+    assert!(!prompt.contains("`workflow_generate`"));
     assert!(prompt.contains("## Agent"));
     assert!(prompt.contains("- name: fullstack"));
     assert!(prompt.contains("Full-stack Engineer"));
@@ -1414,12 +1417,27 @@ fn build_exact_markdown_prompt_matches_expected_input_template() {
         prompt_normalized
             .contains(".openteams/context/1475cda0-6f11-464e-a61a-7dc81217810e/work_records.jsonl")
     );
+    assert!(prompt.contains("## Current Turn"));
     assert!(prompt.contains("## Envelope"));
     assert!(prompt.contains("- session_id: 1475cda0-6f11-464e-a61a-7dc81217810e"));
     assert!(prompt.contains("- from: user:you"));
     assert!(prompt.contains("- to: agent:fullstack"));
     assert!(prompt.contains("- message_id: 88bd7b05-1ba3-407c-8ca3-a52f14c8aced"));
     assert!(prompt.contains("- timestamp: 2026-03-10 06:22:12.973 UTC"));
+    assert!(
+        prompt
+            .find("## Output Requirements")
+            .expect("output requirements section")
+            < prompt
+                .find("## Current Turn")
+                .expect("current turn section")
+    );
+    assert!(
+        prompt.find("## History").expect("history section")
+            < prompt
+                .find("## Current Turn")
+                .expect("current turn section")
+    );
 }
 
 #[test]
@@ -1450,6 +1468,70 @@ fn build_exact_markdown_prompt_restricts_send_targets_in_workflow_mode() {
     assert!(prompt.contains("Workflow mode: `send.to` may only be `\"you\"`"));
     assert!(prompt.contains("do not send workflow-mode messages to other agents"));
     assert!(!prompt.contains("`send.to` must match a group member name"));
+    assert!(prompt.contains("`workflow_generate`"));
+    assert!(prompt.contains("plan_check"));
+    assert!(prompt.contains(
+        "Emit `workflow_generate` only when the user explicitly asks to start generating an execution plan."
+    ));
+    assert!(prompt.contains("`生成计划`, `开始执行`, `开始落实`, `进入执行`"));
+}
+
+#[test]
+fn build_exact_markdown_prompt_keeps_current_turn_after_stable_prefix() {
+    let agent = test_agent("planner", "Workflow lead");
+    let first_message = test_message(
+        "Generate a workflow plan for task A",
+        json!({ "chat_input_mode": "workflow" }),
+    );
+    let second_message = test_message(
+        "Generate a workflow plan for task B",
+        json!({ "chat_input_mode": "workflow" }),
+    );
+
+    let first_prompt = ChatRunner::build_exact_markdown_prompt(
+        &agent,
+        &first_message,
+        Path::new(r"E:\workspace\projectSS\MainPage2\.openteams\context\demo"),
+        Path::new(r"E:\workspace\projectSS\MainPage2"),
+        &[],
+        None,
+        None,
+        &[],
+        ResolvedPromptLanguage {
+            setting: "simplified_chinese",
+            code: "zh-Hans",
+            instruction: "You MUST respond in Simplified Chinese.",
+        },
+        None,
+    );
+    let second_prompt = ChatRunner::build_exact_markdown_prompt(
+        &agent,
+        &second_message,
+        Path::new(r"E:\workspace\projectSS\MainPage2\.openteams\context\demo"),
+        Path::new(r"E:\workspace\projectSS\MainPage2"),
+        &[],
+        None,
+        None,
+        &[],
+        ResolvedPromptLanguage {
+            setting: "simplified_chinese",
+            code: "zh-Hans",
+            instruction: "You MUST respond in Simplified Chinese.",
+        },
+        None,
+    );
+
+    let first_prefix = first_prompt
+        .split_once("## Current Turn")
+        .expect("current turn section")
+        .0;
+    let second_prefix = second_prompt
+        .split_once("## Current Turn")
+        .expect("current turn section")
+        .0;
+    assert_eq!(first_prefix, second_prefix);
+    assert!(first_prompt.contains("Generate a workflow plan for task A"));
+    assert!(second_prompt.contains("Generate a workflow plan for task B"));
 }
 
 #[test]

@@ -75,17 +75,10 @@ impl WorkflowOrchestrator {
             )));
         }
 
-        // Handle final_review (execution-level, no step_id needed)
         if transcript.entry_type == "final_review" {
-            return Self::resolve_final_review(
-                pool,
-                chat_runner,
-                &transcript,
-                &execution,
-                resolved_action,
-                input_text,
-            )
-            .await;
+            return Err(OrchestratorError::IllegalTransition(
+                "final_review must be resolved through workflow iteration feedback".to_string(),
+            ));
         }
 
         let step_id = transcript.step_id.ok_or_else(|| {

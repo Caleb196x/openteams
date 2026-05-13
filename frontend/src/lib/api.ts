@@ -193,6 +193,64 @@ export interface WorkflowIterationSummaryData {
   completed_at: string | null;
 }
 
+export interface WorkflowCardStepData {
+  id: string;
+  step_key: string;
+  title: string;
+  step_type: string;
+  status: string;
+  review_phase: string | null;
+  retry_count: number;
+  max_retry: number;
+  loop_key: string | null;
+  latest_review: WorkflowCardReviewData | null;
+  agent_name?: string | null;
+  summary_text?: string | null;
+  content?: string | null;
+}
+
+export interface WorkflowCardPlanData {
+  nodes: Array<{
+    id: string;
+    position: { x: number; y: number };
+    data: {
+      stepType: string;
+      title: string;
+      instructions: string;
+      agentId?: string | null;
+      status?: string | null;
+      leadReview?: boolean | null;
+      userReview?: boolean | null;
+      reviewScope?: string[] | null;
+      loopKey?: string | null;
+    };
+  }>;
+  edges: Array<{
+    id: string;
+    source: string;
+    target: string;
+  }>;
+  loops?: Array<{
+    loop_key: string;
+    member_step_keys: string[];
+    review_step_key: string;
+    review_scope_step_keys: string[];
+    max_retry: number;
+    user_review_required: boolean;
+  }> | null;
+  viewport?: { x?: number; y?: number; zoom?: number };
+}
+
+export interface WorkflowRoundGraphData {
+  round_id: string;
+  round_index: number;
+  revision_id: string;
+  status: string;
+  plan: WorkflowCardPlanData;
+  steps: WorkflowCardStepData[];
+  loops: WorkflowCardLoopData[];
+}
+
 export interface WorkflowCardData {
   execution_id?: string | null;
   plan_id?: string;
@@ -209,57 +267,15 @@ export interface WorkflowCardData {
   current_round: number;
   loops: WorkflowCardLoopData[];
   iteration_history: WorkflowIterationSummaryData[];
-  steps: Array<{
-    id: string;
-    step_key: string;
-    title: string;
-    step_type: string;
-    status: string;
-    review_phase: string | null;
-    retry_count: number;
-    max_retry: number;
-    loop_key: string | null;
-    latest_review: WorkflowCardReviewData | null;
-    agent_name?: string | null;
-    summary_text?: string | null;
-    content?: string | null;
-  }>;
+  round_graphs?: WorkflowRoundGraphData[];
+  steps: WorkflowCardStepData[];
   agents?: Array<{
     session_agent_id: string;
     workflow_agent_session_id?: string | null;
     agent_id: string;
     name: string;
   }>;
-  plan: {
-    nodes: Array<{
-      id: string;
-      position: { x: number; y: number };
-      data: {
-        stepType: string;
-        title: string;
-        instructions: string;
-        agentId?: string | null;
-        status?: string | null;
-        leadReview?: boolean | null;
-        userReview?: boolean | null;
-        reviewScope?: string[] | null;
-      };
-    }>;
-    edges: Array<{
-      id: string;
-      source: string;
-      target: string;
-    }>;
-    loops?: Array<{
-      loop_key: string;
-      member_step_keys: string[];
-      review_step_key: string;
-      review_scope_step_keys: string[];
-      max_retry: number;
-      user_review_required: boolean;
-    }> | null;
-    viewport?: { x?: number; y?: number; zoom?: number };
-  };
+  plan: WorkflowCardPlanData;
   pending_review?: WorkflowPendingReviewData | null;
   validation_errors?: string | null;
 }

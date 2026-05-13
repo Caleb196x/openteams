@@ -78,8 +78,8 @@ impl WorkflowOrchestrator {
         }
 
         // Reconstruct the task result from persisted data
-        let summary_payload = parse_summary_payload(step.summary_text.as_deref())
-            .ok_or_else(|| {
+        let summary_payload =
+            parse_summary_payload(step.summary_text.as_deref()).ok_or_else(|| {
                 OrchestratorError::IllegalTransition(
                     "step has no persisted task output, cannot retry review only".to_string(),
                 )
@@ -115,14 +115,8 @@ impl WorkflowOrchestrator {
             Self::activate_execution_for_step_retry(pool, chat_runner, &execution).await?;
 
         // Run only the review phase
-        let execution = Self::retry_review_only(
-            db,
-            chat_runner,
-            &execution,
-            &ready_step,
-            result,
-        )
-        .await?;
+        let execution =
+            Self::retry_review_only(db, chat_runner, &execution, &ready_step, result).await?;
 
         let latest_execution = WorkflowExecution::find_by_id(pool, execution.id)
             .await?
@@ -131,9 +125,7 @@ impl WorkflowOrchestrator {
             })?;
         let latest_step = WorkflowStep::find_by_id(pool, ready_step.id)
             .await?
-            .ok_or_else(|| {
-                OrchestratorError::NotFound(format!("step {} 未找到", ready_step.id))
-            })?;
+            .ok_or_else(|| OrchestratorError::NotFound(format!("step {} 未找到", ready_step.id)))?;
 
         Ok((latest_execution, latest_step))
     }

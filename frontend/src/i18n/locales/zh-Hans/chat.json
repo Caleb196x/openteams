@@ -1019,11 +1019,11 @@
     }
   },
   "leadAgent": {
-    "label": "主导 Agent",
-    "switchError": "切换主导 Agent 失败，请重试。",
+    "label": "主Agent",
+    "switchError": "切换主Agent 失败，请重试。",
     "switchDialog": {
-      "title": "切换主导 Agent",
-      "message": "将主导 Agent 从「{{currentLeadName}}」切换为「{{targetLeadName}}」？",
+      "title": "切换主Agent",
+      "message": "将主Agent 从「{{currentLeadName}}」切换为「{{targetLeadName}}」？",
       "switching": "切换中…",
       "confirm": "确认"
     }

@@ -148,11 +148,6 @@ export interface ChatMessageItemProps {
   workflowPlanGenerationRetryError?: string | null;
   workflowCardProjection?: WorkflowCardProjection | null;
   workflowFinalReviewAction?: WorkflowFinalReviewActionData | null;
-  onResolveWorkflowFinalReview?: (
-    executionId: string,
-    transcriptId: string,
-    action: 'accepted' | 'rejected'
-  ) => void;
   onRespondPendingReview?: (
     reviewId: string,
     action: 'approve' | 'reject',
@@ -203,7 +198,6 @@ export function ChatMessageItem({
   workflowPlanGenerationRetryError,
   workflowCardProjection: workflowCardProjectionOverride,
   workflowFinalReviewAction,
-  onResolveWorkflowFinalReview,
   onRespondPendingReview,
   onSubmitWorkflowIterationFeedback,
   pendingWorkflowActionId,
@@ -372,7 +366,6 @@ export function ChatMessageItem({
                 onResume={onResumeWorkflow}
                 onRetryStep={onRetryWorkflowStep}
                 finalReviewAction={workflowFinalReviewAction}
-                onResolveFinalReview={onResolveWorkflowFinalReview}
                 onRespondPendingReview={onRespondPendingReview}
                 onSubmitIterationFeedback={onSubmitWorkflowIterationFeedback}
                 pendingActionId={pendingWorkflowActionId}

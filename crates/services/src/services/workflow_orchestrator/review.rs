@@ -60,7 +60,7 @@ impl WorkflowOrchestrator {
                     Self::reject_iteration_result(db, chat_runner, &execution, feedback).await?;
                 Ok(IterationFeedbackOutcome {
                     execution,
-                    should_wake_scheduler: true,
+                    should_wake_scheduler: false,
                 })
             }
             _ => Err(OrchestratorError::IllegalTransition(format!(
@@ -185,83 +185,119 @@ impl WorkflowOrchestrator {
             None,
         )
         .await?;
-        let plan = WorkflowPlan::find_by_id(pool, recompiling_execution.plan_id)
-            .await?
-            .ok_or_else(|| {
+        let recompile_result = async {
+            let plan = WorkflowPlan::find_by_id(pool, recompiling_execution.plan_id)
+                .await?
+                .ok_or_else(|| {
+                    OrchestratorError::NotFound(format!(
+                        "plan {} not found",
+                        recompiling_execution.plan_id
+                    ))
+                })?;
+            let revision_id = recompiling_execution.active_revision_id.ok_or_else(|| {
                 OrchestratorError::NotFound(format!(
-                    "plan {} not found",
-                    recompiling_execution.plan_id
+                    "execution {} missing active revision",
+                    recompiling_execution.id
                 ))
             })?;
-        let revision_id = recompiling_execution.active_revision_id.ok_or_else(|| {
-            OrchestratorError::NotFound(format!(
-                "execution {} missing active revision",
-                recompiling_execution.id
-            ))
-        })?;
-        let active_revision = WorkflowPlanRevision::find_by_id(pool, revision_id)
-            .await?
-            .ok_or_else(|| {
-                OrchestratorError::NotFound(format!("revision {revision_id} not found"))
-            })?;
-        let round_id = recompiling_execution.active_round_id.ok_or_else(|| {
-            OrchestratorError::NotFound(format!(
-                "execution {} missing active round",
-                recompiling_execution.id
-            ))
-        })?;
-        let from_round = WorkflowRound::find_by_id(pool, round_id)
-            .await?
-            .ok_or_else(|| OrchestratorError::NotFound(format!("round {round_id} not found")))?;
-        let session = ChatSession::find_by_id(pool, recompiling_execution.session_id)
-            .await?
-            .ok_or_else(|| {
+            let active_revision = WorkflowPlanRevision::find_by_id(pool, revision_id)
+                .await?
+                .ok_or_else(|| {
+                    OrchestratorError::NotFound(format!("revision {revision_id} not found"))
+                })?;
+            let round_id = recompiling_execution.active_round_id.ok_or_else(|| {
                 OrchestratorError::NotFound(format!(
-                    "session {} not found",
-                    recompiling_execution.session_id
+                    "execution {} missing active round",
+                    recompiling_execution.id
                 ))
             })?;
-        let session_agents =
-            ChatSessionAgent::find_all_for_session(pool, recompiling_execution.session_id).await?;
-        let agents = load_agents_for_session(pool, &session_agents).await?;
-        let iteration_manager = IterationManager {
-            db,
-            pool,
-            chat_runner,
-            session: &session,
-            session_agents: &session_agents,
-            agents: &agents,
-        };
-        let user_feedback = super::super::workflow_iteration::UserIterationFeedback {
-            execution_id: recompiling_execution.id.to_string(),
-            round_id: from_round.id.to_string(),
-            action: "reject".to_string(),
-            feedback: Some(feedback),
-        };
-        let iteration_feedback = iteration_manager
-            .collect_user_feedback(&recompiling_execution, &from_round, &user_feedback)
-            .await?;
-        let new_plan_json = iteration_manager
-            .generate_new_plan(
-                &recompiling_execution,
-                &plan,
-                &active_revision,
-                &from_round,
-                &iteration_feedback,
-            )
-            .await?;
-        let result = iteration_manager
-            .create_new_round(
-                &recompiling_execution,
-                &plan,
-                &active_revision,
-                &from_round,
-                &iteration_feedback,
-                &new_plan_json,
-            )
-            .await?;
+            let from_round = WorkflowRound::find_by_id(pool, round_id)
+                .await?
+                .ok_or_else(|| {
+                    OrchestratorError::NotFound(format!("round {round_id} not found"))
+                })?;
+            let session = ChatSession::find_by_id(pool, recompiling_execution.session_id)
+                .await?
+                .ok_or_else(|| {
+                    OrchestratorError::NotFound(format!(
+                        "session {} not found",
+                        recompiling_execution.session_id
+                    ))
+                })?;
+            let session_agents =
+                ChatSessionAgent::find_all_for_session(pool, recompiling_execution.session_id)
+                    .await?;
+            let agents = load_agents_for_session(pool, &session_agents).await?;
+            let iteration_manager = IterationManager {
+                db,
+                pool,
+                chat_runner,
+                session: &session,
+                session_agents: &session_agents,
+                agents: &agents,
+            };
+            let user_feedback = super::super::workflow_iteration::UserIterationFeedback {
+                execution_id: recompiling_execution.id.to_string(),
+                round_id: from_round.id.to_string(),
+                action: "reject".to_string(),
+                feedback: Some(feedback),
+            };
+            let iteration_feedback = iteration_manager
+                .collect_user_feedback(&recompiling_execution, &from_round, &user_feedback)
+                .await?;
+            let new_plan_json = iteration_manager
+                .generate_new_plan(
+                    &recompiling_execution,
+                    &plan,
+                    &active_revision,
+                    &from_round,
+                    &iteration_feedback,
+                )
+                .await?;
+            let result = iteration_manager
+                .create_new_round(
+                    &recompiling_execution,
+                    &plan,
+                    &active_revision,
+                    &from_round,
+                    &iteration_feedback,
+                    &new_plan_json,
+                )
+                .await?;
 
-        Ok(result.execution)
+            Ok::<WorkflowExecution, OrchestratorError>(result.execution)
+        }
+        .await;
+
+        match recompile_result {
+            Ok(execution) => Ok(execution),
+            Err(err) => {
+                let error_message = err.to_string();
+                tracing::error!(
+                    execution_id = %recompiling_execution.id,
+                    error = %error_message,
+                    "workflow iteration recompilation failed; restoring execution to waiting"
+                );
+                if let Err(compensation_err) = Self::transition_execution_and_sync(
+                    pool,
+                    chat_runner,
+                    &recompiling_execution,
+                    WorkflowExecutionStatus::Waiting,
+                    "iteration_recompile_failed",
+                    Some(error_message.clone()),
+                )
+                .await
+                {
+                    tracing::error!(
+                        execution_id = %recompiling_execution.id,
+                        error = %compensation_err,
+                        original_error = %error_message,
+                        "failed to restore workflow iteration recompilation to waiting"
+                    );
+                }
+                Err(err)
+            }
+        }
     }
 
     pub(super) async fn resolve_step_review_action(

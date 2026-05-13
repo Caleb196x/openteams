@@ -25,14 +25,17 @@ use db::{
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use ts_rs::TS;
+use utils::assets::config_path;
 use uuid::Uuid;
 
 use super::{
     chat_runner::ChatRunner,
+    config,
     workflow_compiler::WorkflowCompiler,
-    workflow_orchestrator::{OrchestratorError, WorkflowOrchestrator},
+    workflow_orchestrator::{OrchestratorError, WorkflowOrchestrator, reducer},
     workflow_runtime::{
-        SummaryPayload, extract_json_payload, parse_summary_payload, run_workflow_agent_prompt,
+        SummaryPayload, WorkflowCardAgent, extract_json_payload, parse_summary_payload,
+        resolve_workflow_response_language_instruction, run_workflow_agent_prompt,
     },
 };
 
@@ -172,12 +175,30 @@ impl<'a> IterationManager<'a> {
             self.agents,
         )?;
         let available_agents = self
-            .agents
+            .session_agents
             .iter()
-            .map(|agent| agent.id.to_string())
+            .filter_map(|session_agent| {
+                let agent = self
+                    .agents
+                    .iter()
+                    .find(|agent| agent.id == session_agent.agent_id)?;
+                let workflow_agent_session = workflow_sessions
+                    .iter()
+                    .find(|item| item.session_agent_id == session_agent.id);
+                Some(WorkflowCardAgent {
+                    session_agent_id: session_agent.id.to_string(),
+                    workflow_agent_session_id: workflow_agent_session
+                        .map(|item| item.id.to_string()),
+                    agent_id: agent.id.to_string(),
+                    name: agent.name.clone(),
+                })
+            })
             .collect::<Vec<_>>();
         let history = WorkflowIterationFeedback::find_by_execution(self.pool, execution.id).await?;
         let original_plan: WorkflowPlanJson = serde_json::from_str(&active_revision.plan_json)?;
+        let ui_config = config::load_config_from_file(&config_path()).await;
+        let response_language_instruction =
+            resolve_workflow_response_language_instruction(&ui_config.language);
         let prompt = build_iteration_plan_prompt(
             &plan
                 .summary_text
@@ -191,7 +212,10 @@ impl<'a> IterationManager<'a> {
             &lead_agent.id.to_string(),
             &available_agents,
             &original_plan,
+            response_language_instruction,
         );
+
+        tracing::debug!("Generated iteration plan prompt: {}", prompt);
 
         let raw_output = run_workflow_agent_prompt(
             self.db,
@@ -203,6 +227,11 @@ impl<'a> IterationManager<'a> {
             Uuid::new_v4(),
         )
         .await?;
+
+        tracing::debug!(
+            "Raw output from workflow agent for iteration plan generation: {}",
+            raw_output
+        );
         let payload = extract_json_payload(&raw_output).unwrap_or(raw_output);
         let plan_json: WorkflowPlanJson = serde_json::from_str(&payload)?;
         let valid_agent_ids = self
@@ -492,15 +521,14 @@ impl<'a> IterationManager<'a> {
                 .find(|step| step.id == step_id)
                 .cloned()
             {
-                let ready = WorkflowOrchestrator::transition_step_and_sync(
+                let ready = reducer::transition_step(
                     self.pool,
-                    self.chat_runner,
                     &execution,
                     &step,
                     WorkflowStepStatus::Ready,
-                    "iteration_step_ready",
                 )
-                .await?;
+                .await?
+                .entity;
                 if let Some(existing) = created_steps.iter_mut().find(|step| step.id == step_id) {
                     *existing = ready;
                 }
@@ -606,8 +634,9 @@ pub fn build_iteration_plan_prompt(
     iteration_round: i32,
     history: &[WorkflowIterationFeedback],
     lead_agent_id: &str,
-    available_agents: &[String],
+    available_agents: &[WorkflowCardAgent],
     previous_plan: &WorkflowPlanJson,
+    response_language_instruction: &str,
 ) -> String {
     let history_text = if history.is_empty() {
         "None".to_string()
@@ -625,48 +654,172 @@ pub fn build_iteration_plan_prompt(
     };
     let previous_plan_json =
         serde_json::to_string_pretty(previous_plan).unwrap_or_else(|_| "{}".to_string());
+    let available_agents_json =
+        serde_json::to_string_pretty(available_agents).unwrap_or_else(|_| "[]".to_string());
+    let feedback_text = format_iteration_feedback(user_feedback_json);
 
-    format!(
-        r#"## Iteration Plan Generation (Round {next_round})
+    let plan_schema_definition = r#"{
+  "version": "1",
+  "title": "string",
+  "goal": "string",
+  "agents": {
+    "lead": "string",
+    "available": ["string"]
+  },
+  "globals": {
+    "interrupt_mode": "cooperative",
+    "default_retry": 1,
+    "global_pause_supported": true
+  },
+  "nodes": [
+    {
+      "id": "unique_step_key",
+      "type": "workflowStep",
+      "data": {
+        "stepType": "task | review | result",
+        "agentId": "optional string",
+        "title": "string",
+        "instructions": "string",
+        "acceptance": ["optional string"],
+        "outputs": ["optional string"],
+        "interruptible": true,
+        "status": "optional string",
+        "reviewScope": ["optional node_id list, review nodes only"]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "unique_edge_id",
+      "source": "node_id",
+      "target": "node_id",
+      "type": "optional string",
+      "data": {
+        "kind": "hard | soft"
+      }
+    }
+  ],
+  "policies": {
+    "approval_required_on": ["optional string"],
+    "permission_required_on": ["optional string"],
+    "on_failure": "optional string",
+    "allow_plan_revision": true
+  }
+}"#;
 
-The previous workflow round completed but the user rejected the result. Generate a new incremental workflow plan from the feedback below.
+    let next_round = iteration_round + 1;
 
-### Original Goal
-{original_goal}
+    let mut prompt = String::new();
+    prompt.push_str(&format!(
+        r#"# Workflow Plan Generation
 
-### Previous Round State
-{current_state_summary}
+You are generating an executable workflow plan from a confirmed implementation brief.
+This generation is for workflow iteration round {next_round}: the previous workflow round completed but the user rejected the result.
+The output source of truth is React Flow compatible workflow JSON. Do not output Markdown, YAML, comments, explanations, or prose outside the JSON object.
 
-### User Feedback
-{user_feedback_json}
+## Stable Output Contract
 
-### Iteration History
-{history_text}
+Return exactly one workflow plan JSON object.
 
-### Existing Plan JSON
-{previous_plan_json}
+Hard requirements:
+1. Top-level structure must match the WorkflowPlanJson schema and include at least `version`, `title`, `goal`, `agents`, `nodes`, and `edges`.
+2. `version` must be the string `"1"`.
+3. Every `nodes[].type` must be `"workflowStep"`.
+4. `nodes[].data.stepType` may only be `"task"`, `"review"`, or `"result"`.
+5. There must be exactly one `result` node, and that result node must have no outgoing edges.
+6. All node ids, edge ids, and step keys must be unique.
+7. The graph must be a directed acyclic graph. Dependencies must be represented only through `edges`.
+8. `agents.lead`, `agents.available`, and `nodes[].data.agentId` may only use the provided agent ids.
+9. Leave `nodes[].data.agentId` empty or omit it only when a step does not need a specific agent. Never invent agent ids.
+10. Node `title` and `instructions` must be concrete, actionable, and specific enough for an agent to execute.
+11. Prefer the smallest executable closed loop that can satisfy the goal. Avoid unnecessary step expansion.
+12. Use `stepType: "review"` when execution-review-revision iteration is needed.
+13. A review node with a non-empty `reviewScope` creates a retry loop. `reviewScope` is the list of **task** node ids to re-run on rejection. All listed tasks must be upstream predecessors; include any intermediate tasks between a scoped task and the review. Each task may appear in at most one `reviewScope`. Never include result/review/unknown ids or downstream nodes.
+14. Do not output or infer `leadReview` or `userReview`. The system writes those fields from frontend card selections.
+15. Retry counts are not controlled by the plan JSON.
+16. Your output is validated, compiled, and may start execution directly. Schema errors, cyclic dependencies, invalid agent references, invalid `agents.available`, or missing result nodes will fail this generation.
 
-### Requirements
-1. Preserve correct work from earlier rounds where possible.
-2. Address the user feedback directly and explicitly.
-3. If existing files need revision, make that clear in step instructions.
-4. Keep the standard workflow plan JSON shape.
-5. Use only the available agent ids.
+## WorkflowPlanJson Schema Reference
 
-### Available Agents
-Lead: {lead_agent_id}
-Available: {available_agents}
+"#
+    ));
+    prompt.push_str(plan_schema_definition);
+    prompt.push_str(
+        r#"
 
-Return exactly one complete workflow plan JSON object and no Markdown."#,
-        next_round = iteration_round + 1,
-        original_goal = original_goal,
-        current_state_summary = current_state_summary,
-        user_feedback_json = user_feedback_json,
-        history_text = history_text,
-        previous_plan_json = previous_plan_json,
-        lead_agent_id = lead_agent_id,
-        available_agents = available_agents.join(", ")
-    )
+## Additional Static Constraints
+
+- `version` must be string `"1"`.
+- `agents.available` and `nodes[].data.agentId` may only use the provided `agent_id` values.
+- `globals`, `policies`, and optional node/edge fields may be omitted when unnecessary.
+- `reviewScope` rules: task-only ids, upstream predecessors only, include intermediates, each task in at most one scope, no result/review/unknown/downstream ids. If two loops need similar work, split into separate tasks or keep shared setup outside `reviewScope`.
+
+## Recommended Skills
+- For tasks that include coding, please ensure you utilize the `writing-plans` skill.
+- For general non-coding tasks, use the planning-mode skill.
+- In case of any discrepancy with the skill's format, the specified JSON schema shall prevail.
+- Store the generated plan details in the nodes[].data.instructions field of the workflow plan JSON, using Markdown format.
+
+## Dynamic Inputs
+
+"#,
+    );
+
+    prompt.push_str("Response language requirement:\n");
+    prompt.push_str(response_language_instruction.trim());
+    prompt.push_str("\n\nPlan goal brief:\n");
+    prompt.push_str(original_goal.trim());
+    prompt.push_str("\n\nLead agent id:\n");
+    prompt.push_str(lead_agent_id);
+    prompt.push_str("\n\nAvailable agents JSON:\n");
+    prompt.push_str(&available_agents_json);
+
+    prompt.push_str("\n\n## Iteration Context\n\n");
+    prompt.push_str(&format!(
+        "### User Re-iteration Request\nThe user has requested a new iteration of the workflow plan after rejecting the previous round. Generate a revised plan for iteration round {next_round}, not a first-pass plan.\n\n"
+    ));
+    prompt.push_str("Use this context to revise the plan while keeping the same WorkflowPlanJson output contract.\n");
+    prompt.push_str("- Preserve correct work from earlier rounds where possible. Do not regenerate steps that already succeeded unless the feedback explicitly requires changes to them.\n");
+    prompt.push_str("- Address the user feedback directly and explicitly in the new plan.\n");
+    prompt.push_str("- If existing files need revision, make that clear in step instructions.\n");
+    prompt.push_str("- Reference what changed and why compared to the previous plan.\n");
+    prompt.push_str("\n### Previous Round State\n");
+    prompt.push_str(current_state_summary.trim());
+    prompt.push_str("\n\n### User Feedback (reason for rejection)\n");
+    prompt.push_str(&feedback_text);
+    prompt.push_str("\n\n### Iteration History\n");
+    prompt.push_str(&history_text);
+    // prompt.push_str("\n\n### Previous Plan JSON\n");
+    // prompt.push_str(&previous_plan_json);
+
+    prompt.push_str("\n\nFinal instruction: return the workflow plan JSON object only.");
+    prompt
+}
+
+fn format_iteration_feedback(user_feedback_json: &str) -> String {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(user_feedback_json) else {
+        return user_feedback_json.trim().to_string();
+    };
+    let Some(feedback) = value.get("feedback").and_then(|item| item.as_object()) else {
+        return serde_json::to_string_pretty(&value)
+            .unwrap_or_else(|_| user_feedback_json.trim().to_string());
+    };
+
+    let mut lines = Vec::new();
+    for key in ["what_wrong", "expected", "priority", "additional_notes"] {
+        if let Some(text) = feedback.get(key).and_then(|item| item.as_str()) {
+            if !text.trim().is_empty() {
+                lines.push(format!("- {key}: {}", text.trim()));
+            }
+        }
+    }
+
+    if lines.is_empty() {
+        serde_json::to_string_pretty(&value)
+            .unwrap_or_else(|_| user_feedback_json.trim().to_string())
+    } else {
+        lines.join("\n")
+    }
 }
 
 fn summary_text(summary: &IterationRoundSummary) -> String {
@@ -852,6 +1005,23 @@ mod tests {
         }
     }
 
+    fn sample_card_agents() -> Vec<WorkflowCardAgent> {
+        vec![
+            WorkflowCardAgent {
+                session_agent_id: "lead-session-agent".to_string(),
+                workflow_agent_session_id: Some("lead-workflow-session".to_string()),
+                agent_id: "lead-agent".to_string(),
+                name: "Lead".to_string(),
+            },
+            WorkflowCardAgent {
+                session_agent_id: "worker-session-agent".to_string(),
+                workflow_agent_session_id: Some("worker-workflow-session".to_string()),
+                agent_id: "worker-agent".to_string(),
+                name: "Worker".to_string(),
+            },
+        ]
+    }
+
     #[test]
     fn summarize_round_results_collects_steps_result_and_outputs() {
         let round = sample_round();
@@ -903,17 +1073,23 @@ mod tests {
             1,
             std::slice::from_ref(&feedback),
             "lead-agent",
-            &["lead-agent".to_string(), "worker-agent".to_string()],
+            &sample_card_agents(),
             &sample_plan(),
+            "You MUST write human-readable JSON string values in English.",
         );
 
-        assert!(prompt.contains("Iteration Plan Generation (Round 2)"));
+        assert!(prompt.contains("Workflow Plan Generation"));
+        assert!(prompt.contains("workflow iteration round 2"));
+        assert!(prompt.contains("User Re-iteration Request"));
+        assert!(prompt.contains("not a first-pass plan"));
         assert!(prompt.contains("Ship a stable workflow"));
         assert!(prompt.contains("Round 1 completed without tests"));
-        assert!(prompt.contains("Missing tests"));
-        assert!(prompt.contains("Add regression coverage"));
+        assert!(prompt.contains("- what_wrong: Missing tests"));
+        assert!(prompt.contains("- expected: Add regression coverage"));
+        assert!(prompt.contains("Available agents JSON"));
         assert!(prompt.contains("lead-agent"));
         assert!(prompt.contains("worker-agent"));
-        assert!(prompt.contains("Return exactly one complete workflow plan JSON object"));
+        assert!(prompt.contains("Return exactly one workflow plan JSON object"));
+        assert!(prompt.contains("Final instruction: return the workflow plan JSON object only."));
     }
 }

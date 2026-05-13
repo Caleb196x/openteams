@@ -1019,11 +1019,11 @@
     }
   },
   "leadAgent": {
-    "label": "主導 Agent",
-    "switchError": "切換主導 Agent 失敗，請重試。",
+    "label": "主Agent",
+    "switchError": "切換主Agent 失敗，請重試。",
     "switchDialog": {
-      "title": "切換主導 Agent",
-      "message": "將主導 Agent 從「{{currentLeadName}}」切換為「{{targetLeadName}}」？",
+      "title": "切換主Agent",
+      "message": "將主Agent 從「{{currentLeadName}}」切換為「{{targetLeadName}}」？",
       "switching": "切換中…",
       "confirm": "確認"
     }

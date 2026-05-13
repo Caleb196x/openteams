@@ -746,7 +746,7 @@
           "description": "描述",
           "descriptionPlaceholder": "此團隊的用途",
           "members": "團隊成員",
-          "leadAgent": "主導 Agent",
+          "leadAgent": "主Agent",
           "leadAgentDescription": "負責在工作流程模式下產生執行計畫的成員。未設定時預設為第一個成員。",
           "leadAgentDefault": "預設（第一個成員）"
         }
@@ -841,7 +841,7 @@
           "description": "描述",
           "descriptionPlaceholder": "例如：端到端開發團隊",
           "members": "團隊成員",
-          "leadAgent": "主導 Agent",
+          "leadAgent": "主Agent",
           "leadAgentDescription": "負責在工作流程模式下產生執行計畫的成員。未設定時預設為第一個成員。",
           "leadAgentDefault": "預設（第一個成員）"
         }

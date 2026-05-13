@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { ChevronUp } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { WorkflowIterationSummaryData } from '@/lib/api';
@@ -21,6 +21,9 @@ type WorkflowIterationFeedbackCardProps = {
   runningStepTitle?: string | null;
   isRegeneratingPlan?: boolean;
   iterationHistory: WorkflowIterationSummaryData[];
+  roundOptions?: Array<{ roundIndex: number; status: string }>;
+  selectedRoundIndex?: number | null;
+  onSelectRound?: (roundIndex: number) => void;
   canReviewCurrentRound?: boolean;
   pendingActionId?: string | null;
   onSubmit?: (payload: WorkflowIterationFeedbackPayload) => void;
@@ -32,7 +35,9 @@ export function WorkflowIterationFeedbackCard({
   totalSteps,
   runningStepTitle,
   isRegeneratingPlan = false,
-  iterationHistory,
+  roundOptions = [],
+  selectedRoundIndex,
+  onSelectRound,
   canReviewCurrentRound: canReviewCurrentRoundProp = false,
   pendingActionId,
   onSubmit,
@@ -46,19 +51,9 @@ export function WorkflowIterationFeedbackCard({
   const [additionalNotes, setAdditionalNotes] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  const orderedHistory = useMemo(
-    () =>
-      [...iterationHistory].sort(
-        (left, right) => right.round_index - left.round_index
-      ),
-    [iterationHistory]
-  );
-
-  const latestIteration = orderedHistory[0] ?? null;
   const canReviewCurrentRound =
     canReviewCurrentRoundProp &&
-    currentRound > 0 &&
-    latestIteration?.round_index === currentRound;
+    currentRound > 0;
   const canSubmit = !!onSubmit;
   const disabled = !!pendingActionId;
 
@@ -110,6 +105,15 @@ export function WorkflowIterationFeedbackCard({
     : runningStepTitle
       ? 'text-emerald-600'
       : 'text-slate-400';
+  const visibleRoundOptions = roundOptions
+    .filter(
+      (round, index, source) =>
+        source.findIndex((item) => item.roundIndex === round.roundIndex) ===
+        index
+    )
+    .sort((left, right) => left.roundIndex - right.roundIndex);
+  const selectedRound = selectedRoundIndex ?? currentRound;
+  const canSwitchRounds = visibleRoundOptions.length > 1 && !!onSelectRound;
 
   if (isCollapsed) {
     return (
@@ -171,6 +175,37 @@ export function WorkflowIterationFeedbackCard({
           </div>
           <ChevronUp className="w-4 h-4 text-slate-300 group-hover:text-blue-500 transition-colors" />
         </div>
+
+        {canSwitchRounds && (
+          <div
+            className="mt-3 flex items-center gap-1 overflow-x-auto rounded-xl bg-slate-50 p-1"
+            onClick={(event) => event.stopPropagation()}
+          >
+            {visibleRoundOptions.map((round) => {
+              const isSelected = round.roundIndex === selectedRound;
+              return (
+                <button
+                  key={round.roundIndex}
+                  type="button"
+                  onClick={() => onSelectRound?.(round.roundIndex)}
+                  className={cn(
+                    'min-w-10 rounded-lg px-2.5 py-1.5 text-[10px] font-bold transition-colors',
+                    isSelected
+                      ? 'bg-white text-[#2563EB] shadow-sm'
+                      : 'text-slate-500 hover:bg-white/70 hover:text-slate-700'
+                  )}
+                  title={t('workflow.iterationFeedback.roundStatus', {
+                    round: round.roundIndex,
+                    status: round.status,
+                    defaultValue: `Round ${round.roundIndex}: ${round.status}`,
+                  })}
+                >
+                  R{round.roundIndex}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {runningStepTitle && (
           <div className="mt-3 py-2 px-3 bg-slate-50 rounded-xl border border-slate-100">

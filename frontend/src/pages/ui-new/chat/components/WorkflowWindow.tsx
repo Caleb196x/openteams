@@ -118,6 +118,14 @@ const WORKFLOW_REVIEW_ENTRY_TYPES = new Set([
 ]);
 const REVIEW_SETTINGS_EXECUTION_FINISHED_ERROR =
   'Review settings cannot be changed after execution has finished.';
+const workflowDetailMarkdownTextClassName = [
+  'text-[13px] text-slate-700 leading-relaxed',
+  '[&_:not(pre)>code]:bg-slate-100',
+  '[&_:not(pre)>code]:text-slate-800',
+  '[&_:not(pre)>code]:px-1.5',
+  '[&_:not(pre)>code]:py-0.5',
+  '[&_:not(pre)>code]:rounded-md',
+].join(' ');
 
 function getReviewSettingsErrorMessage(error: unknown, t: (key: string, opts?: Record<string, unknown>) => string): string {
   const message =
@@ -529,11 +537,6 @@ export type WorkflowWindowProps = {
     action: string,
     transcriptId: string,
     inputText?: string
-  ) => void;
-  onResolveFinalReview?: (
-    executionId: string,
-    transcriptId: string,
-    action: 'accepted' | 'rejected'
   ) => void;
   onRespondPendingReview?: (
     reviewId: string,
@@ -1004,8 +1007,13 @@ function InspectorCard({
               <h3 className="text-base font-bold text-slate-800 mb-3 pl-3 border-l-4 border-[#5094fb] capitalize">
                 {t('workflow.inspector.instructionHeading', { defaultValue: 'Instruction' })}
               </h3>
-              <div className="bg-slate-50/80 border border-slate-100 rounded-xl p-4 text-[13px] leading-relaxed text-slate-700 whitespace-pre-wrap">
-                {instruction}
+              <div className="bg-slate-50/80 border border-slate-100 rounded-xl p-4">
+                <ChatMarkdown
+                  content={instruction}
+                  maxWidth="100%"
+                  textClassName={workflowDetailMarkdownTextClassName}
+                  className="w-full select-text"
+                />
               </div>
             </div>
 
@@ -1018,7 +1026,7 @@ function InspectorCard({
                   <ChatMarkdown
                     content={summaryText}
                     maxWidth="100%"
-                    textClassName="text-[13px] text-slate-700 leading-relaxed [&_:not(pre)>code]:bg-slate-100 [&_:not(pre)>code]:text-slate-800 [&_:not(pre)>code]:px-1.5 [&_:not(pre)>code]:py-0.5 [&_:not(pre)>code]:rounded-md"
+                    textClassName={workflowDetailMarkdownTextClassName}
                     className="w-full select-text"
                   />
                 </div>
@@ -1034,7 +1042,7 @@ function InspectorCard({
                   <ChatMarkdown
                     content={latestReviewFeedback || latestReviewLabel}
                     maxWidth="100%"
-                    textClassName="text-[13px] text-slate-700 leading-relaxed [&_:not(pre)>code]:bg-slate-100 [&_:not(pre)>code]:text-slate-800 [&_:not(pre)>code]:px-1.5 [&_:not(pre)>code]:py-0.5 [&_:not(pre)>code]:rounded-md"
+                    textClassName={workflowDetailMarkdownTextClassName}
                     className="w-full select-text"
                   />
                 </div>
@@ -1085,7 +1093,7 @@ function InspectorCard({
                           <ChatMarkdown
                             content={markdownContent || entry.content}
                             maxWidth="100%"
-                            textClassName="text-[13px] text-slate-700 leading-relaxed [&_:not(pre)>code]:bg-slate-100 [&_:not(pre)>code]:text-slate-800 [&_:not(pre)>code]:px-1.5 [&_:not(pre)>code]:py-0.5 [&_:not(pre)>code]:rounded-md"
+                            textClassName={workflowDetailMarkdownTextClassName}
                             className="w-full select-text"
                           />
                         </div>
@@ -1106,8 +1114,13 @@ function InspectorCard({
                   <AlertCircle className="w-4 h-4" />
                   {t('workflow.inspector.errorHeading', { defaultValue: 'Error' })}
                 </h3>
-                <div className="bg-rose-50/50 border border-rose-100 rounded-xl p-4 max-h-40 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-rose-700">
-                  {loopRejectionReason || summaryText}
+                <div className="bg-rose-50/50 border border-rose-100 rounded-xl p-4 max-h-40 overflow-y-auto">
+                  <ChatMarkdown
+                    content={loopRejectionReason || summaryText}
+                    maxWidth="100%"
+                    textClassName={workflowDetailMarkdownTextClassName}
+                    className="w-full select-text"
+                  />
                 </div>
               </div>
             )}
@@ -1280,7 +1293,7 @@ function InspectorCard({
                   type="button"
                   onClick={() => onRetryStep(step.id)}
                   disabled={pendingActionId === step.id}
-                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-2xl text-xs font-medium bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300 shadow-sm transition-all disabled:opacity-50"
+                  className="flex-none flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-2xl text-xs font-medium bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300 shadow-sm transition-all disabled:opacity-50 min-w-[100px]"
                 >
                   <RotateCcw
                     className={cn(
@@ -1587,7 +1600,6 @@ export function WorkflowWindow({
   onUpdateReviewSettings,
   onSubmitStepInput,
   onApproval,
-  onResolveFinalReview,
   onRespondPendingReview,
   onSubmitIterationFeedback,
   pendingActionId,
@@ -1610,8 +1622,73 @@ export function WorkflowWindow({
     null
   );
   const [isSavingReviewSettings, setIsSavingReviewSettings] = useState(false);
+  const [selectedRoundIndex, setSelectedRoundIndex] = useState<number | null>(
+    null
+  );
   const initializedWorkflowKeyRef = useRef<string | null>(null);
   const previousExecutionIdRef = useRef<string | null>(null);
+
+  const roundGraphs = useMemo(
+    () =>
+      [...(projection.round_graphs ?? [])].sort(
+        (left, right) => left.round_index - right.round_index
+      ),
+    [projection.round_graphs]
+  );
+  const defaultRoundIndex = useMemo(
+    () =>
+      roundGraphs.find(
+        (graph) => graph.round_index === projection.current_round
+      )?.round_index ??
+      roundGraphs.at(-1)?.round_index ??
+      projection.current_round,
+    [projection.current_round, roundGraphs]
+  );
+
+  useEffect(() => {
+    setSelectedRoundIndex(defaultRoundIndex);
+  }, [
+    defaultRoundIndex,
+    projection.execution_id,
+    projection.plan_id,
+    projection.current_round,
+  ]);
+
+  const selectedRoundGraph = useMemo(() => {
+    const targetRound = selectedRoundIndex ?? defaultRoundIndex;
+    return (
+      roundGraphs.find((graph) => graph.round_index === targetRound) ??
+      roundGraphs.find(
+        (graph) => graph.round_index === projection.current_round
+      ) ??
+      null
+    );
+  }, [
+    defaultRoundIndex,
+    projection.current_round,
+    roundGraphs,
+    selectedRoundIndex,
+  ]);
+  const currentRoundGraph = useMemo(
+    () =>
+      roundGraphs.find(
+        (graph) => graph.round_index === projection.current_round
+      ) ?? null,
+    [projection.current_round, roundGraphs]
+  );
+  const graphPlan = selectedRoundGraph?.plan ?? projection.plan;
+  const graphSteps = selectedRoundGraph?.steps ?? projection.steps;
+  const graphLoops = selectedRoundGraph?.loops ?? projection.loops ?? [];
+  const isViewingCurrentRound =
+    !selectedRoundGraph ||
+    selectedRoundGraph.round_index === projection.current_round;
+  const currentRoundSteps = currentRoundGraph?.steps ?? projection.steps;
+
+  useEffect(() => {
+    if (isViewingCurrentRound) return;
+    setActiveNodeId(null);
+    setIsChatVisible(false);
+  }, [isViewingCurrentRound]);
 
   const isPreview =
     projection.state === 'preview_ready' ||
@@ -2122,7 +2199,10 @@ export function WorkflowWindow({
       });
     }
 
-    if (workflowFinalReviewAction) {
+    if (
+      workflowFinalReviewAction &&
+      openedReviewNotificationId !== workflowFinalReviewAction.transcriptId
+    ) {
       items.push({
         id: workflowFinalReviewAction.transcriptId,
         type: 'final_review',
@@ -2488,15 +2568,15 @@ export function WorkflowWindow({
 
         {/* Workflow Canvas */}
         <WorkflowGraphBoard
-          nodes={projection.plan.nodes}
-          edges={projection.plan.edges}
-          steps={projection.steps}
-          loops={workflowLoops}
-          planLoops={projection.plan.loops}
+          nodes={graphPlan.nodes}
+          edges={graphPlan.edges}
+          steps={graphSteps}
+          loops={graphLoops}
+          planLoops={graphPlan.loops}
           agents={agents}
-          selectedStepId={activeNodeId}
-          onSelectStep={handleNodeClick}
-          onRetryStep={onRetryStep}
+          selectedStepId={isViewingCurrentRound ? activeNodeId : undefined}
+          onSelectStep={isViewingCurrentRound ? handleNodeClick : undefined}
+          onRetryStep={isViewingCurrentRound ? onRetryStep : undefined}
           pendingActionId={pendingActionId}
           className="flex-1 w-full h-full"
         />
@@ -2536,42 +2616,22 @@ export function WorkflowWindow({
                   </div>
                   <div className="flex gap-2 mt-2">
                     {notif.type === 'final_review' &&
-                    workflowFinalReviewAction &&
-                    onResolveFinalReview ? (
+                    workflowFinalReviewAction ? (
                       <>
                         <button
                           type="button"
                           onClick={() =>
-                            onResolveFinalReview(
-                              workflowFinalReviewAction.executionId,
-                              workflowFinalReviewAction.transcriptId,
-                              'accepted'
+                            setOpenedReviewNotificationId(
+                              workflowFinalReviewAction.transcriptId
                             )
                           }
                           disabled={
                             pendingActionId ===
-                            workflowFinalReviewAction.transcriptId
+                            workflowFinalReviewAction.executionId
                           }
                           className="flex-1 py-1.5 bg-[#5094fb] text-white rounded-md text-[10px] font-bold shadow-sm hover:bg-[#4080e0] transition-colors disabled:opacity-50"
                         >
-                          {t('workflow.notifications.accept', { defaultValue: 'ACCEPT' })}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            onResolveFinalReview(
-                              workflowFinalReviewAction.executionId,
-                              workflowFinalReviewAction.transcriptId,
-                              'rejected'
-                            )
-                          }
-                          disabled={
-                            pendingActionId ===
-                            workflowFinalReviewAction.transcriptId
-                          }
-                          className="flex-1 py-1.5 bg-slate-100 text-slate-700 rounded-md text-[10px] font-bold hover:bg-slate-200 transition-colors disabled:opacity-50"
-                        >
-                          {t('workflow.notifications.reject', { defaultValue: 'REJECT' })}
+                          {t('workflow.notifications.review', { defaultValue: 'REVIEW' })}
                         </button>
                       </>
                     ) : projection.pending_review && onRespondPendingReview ? (
@@ -2610,7 +2670,7 @@ export function WorkflowWindow({
         {/* Iteration feedback card overlay (bottom-left) */}
         {!isPreview &&
           (projection.iteration_history.length > 0 ||
-            workflowFinalReviewAction) && (
+            canReviewCurrentRound) && (
             <div className="absolute bottom-6 left-6 z-40 w-80">
               <WorkflowIterationFeedbackCard
                 currentRound={projection.current_round}
@@ -2618,11 +2678,17 @@ export function WorkflowWindow({
                 totalSteps={projection.total_step_count}
                 isRegeneratingPlan={isExecutionRecompiling}
                 runningStepTitle={
-                  projection.steps.find(
+                  currentRoundSteps.find(
                     (s) => s.status === 'running' || s.status === 'failed'
                   )?.title ?? null
                 }
                 iterationHistory={projection.iteration_history}
+                roundOptions={roundGraphs.map((graph) => ({
+                  roundIndex: graph.round_index,
+                  status: graph.status,
+                }))}
+                selectedRoundIndex={selectedRoundIndex ?? defaultRoundIndex}
+                onSelectRound={setSelectedRoundIndex}
                 canReviewCurrentRound={canReviewCurrentRound}
                 pendingActionId={pendingActionId}
                 onSubmit={(payload) => {
