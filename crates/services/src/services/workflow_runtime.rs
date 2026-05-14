@@ -64,6 +64,7 @@ use super::{
 
 const WORKFLOW_EXECUTION_TIMEOUT: Duration = Duration::from_secs(4800);
 const WORKFLOW_DRAIN_TIMEOUT: Duration = Duration::from_millis(35);
+const WORKFLOW_SESSION_ID_DRAIN_TIMEOUT: Duration = Duration::from_millis(350);
 const WORKFLOW_REAP_TIMEOUT: Duration = Duration::from_secs(3);
 const WORKFLOW_KILL_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
 const EXECUTOR_PROFILE_VARIANT_KEY: &str = "executor_profile_variant";
@@ -128,6 +129,8 @@ pub struct WorkflowCardStep {
     pub step_type: String,
     pub status: String,
     pub review_phase: Option<String>,
+    pub lead_review_required: bool,
+    pub user_review_required: bool,
     pub retry_count: i32,
     pub max_retry: i32,
     pub loop_key: Option<String>,
@@ -240,6 +243,10 @@ pub struct WorkflowCardProjection {
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
     pub validation_errors: Option<String>,
+    #[serde(default)]
+    pub is_terminal: bool,
+    #[serde(default)]
+    pub has_transcripts: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1263,8 +1270,8 @@ pub fn build_step_execution_prompt(
     let mut prompt = String::with_capacity(4096);
     if step.step_type == WorkflowStepType::Task {
         prompt.push_str("You are implementing a task in an workflow step.\n\n");
-    } else if step.step_type == WorkflowStepType::Review 
-                || step.step_type == WorkflowStepType::Result 
+    } else if step.step_type == WorkflowStepType::Review
+        || step.step_type == WorkflowStepType::Result
     {
         prompt.push_str("You are reviewing the output of the workers' implementation.\n\n");
     }
@@ -1845,6 +1852,11 @@ pub fn build_workflow_card_projection(
         _ => WorkflowCardState::Running,
     };
 
+    let is_terminal = matches!(
+        execution.status,
+        WorkflowExecutionStatus::Completed | WorkflowExecutionStatus::Failed
+    );
+
     Ok(WorkflowCardProjection {
         execution_id: Some(execution.id.to_string()),
         plan_id: plan.id.to_string(),
@@ -1873,6 +1885,181 @@ pub fn build_workflow_card_projection(
         started_at: execution.started_at.map(|value| value.to_rfc3339()),
         completed_at: execution.completed_at.map(|value| value.to_rfc3339()),
         validation_errors: None,
+        is_terminal,
+        has_transcripts: None,
+    })
+}
+
+pub fn build_workflow_card_projection_lightweight(
+    execution: &WorkflowExecution,
+    plan: &WorkflowPlan,
+    revision: &WorkflowPlanRevision,
+    steps: &[WorkflowStep],
+    _edges: &[WorkflowStepEdge],
+    rounds: &[WorkflowRound],
+    loops: &[WorkflowLoop],
+    iteration_feedbacks: &[WorkflowIterationFeedback],
+    step_reviews: &[WorkflowStepReview],
+    transcripts: &[WorkflowTranscript],
+    workflow_agent_sessions: &[WorkflowAgentSession],
+    session_agents: &[ChatSessionAgent],
+    agents: &[ChatAgent],
+    transcript_count: Option<i64>,
+    error_message: Option<String>,
+) -> Result<WorkflowCardProjection, WorkflowRuntimeError> {
+    let mut plan_json: WorkflowPlanJson = serde_json::from_str(&revision.plan_json)?;
+    plan_json.nodes = overlay_step_statuses(&plan_json, steps);
+
+    let session_agent_name_by_id: HashMap<Uuid, String> = session_agents
+        .iter()
+        .filter_map(|session_agent| {
+            let agent_name = agents
+                .iter()
+                .find(|agent| agent.id == session_agent.agent_id)
+                .map(|agent| agent.name.clone())?;
+            Some((session_agent.id, agent_name))
+        })
+        .collect();
+
+    let workflow_agent_name_by_id: HashMap<Uuid, String> = workflow_agent_sessions
+        .iter()
+        .filter_map(|workflow_session| {
+            let name = session_agent_name_by_id
+                .get(&workflow_session.session_agent_id)?
+                .clone();
+            Some((workflow_session.id, name))
+        })
+        .collect();
+
+    let completed_step_count = steps
+        .iter()
+        .filter(|step| step.status == WorkflowStepStatus::Completed)
+        .count();
+    let total_step_count = steps.len();
+
+    let latest_review_by_step_id: HashMap<Uuid, WorkflowCardReview> = step_reviews
+        .iter()
+        .map(|review| {
+            (
+                review.step_id,
+                WorkflowCardReview {
+                    reviewer_type: to_workflow_wire_value(&review.reviewer_type),
+                    verdict: to_workflow_wire_value(&review.verdict),
+                    feedback: review.feedback.clone(),
+                    review_round: review.review_round,
+                    created_at: review.created_at.to_rfc3339(),
+                },
+            )
+        })
+        .collect();
+    let loop_key_by_step_key = build_loop_key_by_step_key(&plan_json, steps, loops);
+    apply_runtime_loop_keys(&mut plan_json, &loop_key_by_step_key);
+
+    let pending_review = build_pending_review(steps, loops, transcripts);
+
+    let step_views = steps
+        .iter()
+        .map(|step| WorkflowCardStep {
+            id: step.id.to_string(),
+            step_key: step.step_key.clone(),
+            title: step.title.clone(),
+            step_type: to_workflow_wire_value(&step.step_type),
+            status: to_workflow_wire_value(&step.status),
+            review_phase: derive_step_review_phase(step, transcripts),
+            lead_review_required: step.lead_review_required,
+            user_review_required: step.user_review_required,
+            retry_count: step.retry_count,
+            max_retry: step.max_retry,
+            loop_key: loop_key_by_step_key.get(&step.step_key).cloned(),
+            latest_review: latest_review_by_step_id.get(&step.id).cloned(),
+            agent_name: step
+                .assigned_workflow_agent_session_id
+                .and_then(|id| workflow_agent_name_by_id.get(&id))
+                .cloned(),
+            summary_text: step
+                .summary_text
+                .clone()
+                .and_then(parse_summary_text_preview),
+            content: None,
+        })
+        .collect();
+
+    let agent_views = session_agents
+        .iter()
+        .filter_map(|session_agent| {
+            let agent = agents
+                .iter()
+                .find(|agent| agent.id == session_agent.agent_id)?;
+            Some(WorkflowCardAgent {
+                session_agent_id: session_agent.id.to_string(),
+                workflow_agent_session_id: workflow_agent_sessions
+                    .iter()
+                    .find(|workflow_session| workflow_session.session_agent_id == session_agent.id)
+                    .map(|workflow_session| workflow_session.id.to_string()),
+                agent_id: agent.id.to_string(),
+                name: agent.name.clone(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let loop_views = build_workflow_loop_views(loops);
+    let iteration_history = build_iteration_history(rounds, steps, iteration_feedbacks);
+
+    let result_step = steps
+        .iter()
+        .find(|step| step.step_type == WorkflowStepType::Result);
+    let (result_summary, outputs) = result_step
+        .and_then(|step| parse_summary_payload(step.summary_text.as_deref()))
+        .map(|payload| (Some(payload.summary), payload.outputs))
+        .unwrap_or_else(|| (None, Vec::new()));
+
+    let state = match execution.status {
+        WorkflowExecutionStatus::Pending => WorkflowCardState::Pending,
+        WorkflowExecutionStatus::Completed => WorkflowCardState::Completed,
+        WorkflowExecutionStatus::Failed => WorkflowCardState::Failed,
+        WorkflowExecutionStatus::Paused => WorkflowCardState::Paused,
+        WorkflowExecutionStatus::Waiting => WorkflowCardState::Waiting,
+        WorkflowExecutionStatus::Recompiling => WorkflowCardState::Running,
+        _ => WorkflowCardState::Running,
+    };
+
+    let is_terminal = matches!(
+        execution.status,
+        WorkflowExecutionStatus::Completed | WorkflowExecutionStatus::Failed
+    );
+
+    let has_transcripts = transcript_count.map(|count| count > 0);
+
+    Ok(WorkflowCardProjection {
+        execution_id: Some(execution.id.to_string()),
+        plan_id: plan.id.to_string(),
+        revision_id: revision.id.to_string(),
+        title: plan.title.clone(),
+        goal: plan
+            .summary_text
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| plan.title.clone()),
+        state,
+        execution_status: to_workflow_wire_value(&execution.status),
+        error_message,
+        completed_step_count,
+        total_step_count,
+        result_summary,
+        outputs,
+        agents: agent_views,
+        steps: step_views,
+        current_round: execution.current_round,
+        loops: loop_views,
+        pending_review,
+        iteration_history,
+        round_graphs: Vec::new(),
+        plan: plan_json,
+        started_at: execution.started_at.map(|value| value.to_rfc3339()),
+        completed_at: execution.completed_at.map(|value| value.to_rfc3339()),
+        validation_errors: None,
+        is_terminal,
+        has_transcripts,
     })
 }
 
@@ -1978,6 +2165,8 @@ fn build_workflow_step_views(
             step_type: to_workflow_wire_value(&step.step_type),
             status: to_workflow_wire_value(&step.status),
             review_phase: derive_step_review_phase(step, transcripts),
+            lead_review_required: step.lead_review_required,
+            user_review_required: step.user_review_required,
             retry_count: step.retry_count,
             max_retry: step.max_retry,
             loop_key: loop_key_by_step_key.get(&step.step_key).cloned(),
@@ -2111,6 +2300,105 @@ async fn finish_workflow_runtime_stream(
     if let Some(task) = stream_task.take() {
         let _ = time::timeout(WORKFLOW_DRAIN_TIMEOUT, task).await;
     }
+}
+
+async fn finish_workflow_runtime_session_id_persistor(
+    session_id_task: &mut Option<tokio::task::JoinHandle<()>>,
+) {
+    if let Some(task) = session_id_task.take() {
+        time::sleep(WORKFLOW_SESSION_ID_DRAIN_TIMEOUT).await;
+        task.abort();
+        let _ = task.await;
+    }
+}
+
+fn spawn_workflow_runtime_session_id_persistor(
+    pool: SqlitePool,
+    session_agent_id: Uuid,
+    workflow_agent_session_id: Option<Uuid>,
+    msg_store: Arc<MsgStore>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut stream = msg_store.history_plus_stream();
+        let mut last_agent_session_id: Option<String> = None;
+        let mut last_agent_message_id: Option<String> = None;
+
+        while let Some(item) = stream.next().await {
+            match item {
+                Ok(LogMsg::SessionId(agent_session_id)) => {
+                    if last_agent_session_id.as_deref() == Some(agent_session_id.as_str()) {
+                        continue;
+                    }
+                    last_agent_session_id = Some(agent_session_id.clone());
+
+                    if let Err(error) = ChatSessionAgent::update_agent_session_id(
+                        &pool,
+                        session_agent_id,
+                        Some(agent_session_id.clone()),
+                    )
+                    .await
+                    {
+                        tracing::warn!(
+                            session_agent_id = %session_agent_id,
+                            %error,
+                            "failed to persist workflow runtime agent_session_id on session agent"
+                        );
+                    }
+
+                    if let Some(workflow_agent_session_id) = workflow_agent_session_id
+                        && let Err(error) = WorkflowAgentSession::update_agent_session_id(
+                            &pool,
+                            workflow_agent_session_id,
+                            Some(agent_session_id),
+                        )
+                        .await
+                    {
+                        tracing::warn!(
+                            workflow_agent_session_id = %workflow_agent_session_id,
+                            %error,
+                            "failed to persist workflow runtime agent_session_id on workflow agent session"
+                        );
+                    }
+                }
+                Ok(LogMsg::MessageId(agent_message_id)) => {
+                    if last_agent_message_id.as_deref() == Some(agent_message_id.as_str()) {
+                        continue;
+                    }
+                    last_agent_message_id = Some(agent_message_id.clone());
+
+                    if let Err(error) = ChatSessionAgent::update_agent_message_id(
+                        &pool,
+                        session_agent_id,
+                        Some(agent_message_id.clone()),
+                    )
+                    .await
+                    {
+                        tracing::warn!(
+                            session_agent_id = %session_agent_id,
+                            %error,
+                            "failed to persist workflow runtime agent_message_id on session agent"
+                        );
+                    }
+
+                    if let Some(workflow_agent_session_id) = workflow_agent_session_id
+                        && let Err(error) = WorkflowAgentSession::update_agent_message_id(
+                            &pool,
+                            workflow_agent_session_id,
+                            Some(agent_message_id),
+                        )
+                        .await
+                    {
+                        tracing::warn!(
+                            workflow_agent_session_id = %workflow_agent_session_id,
+                            %error,
+                            "failed to persist workflow runtime agent_message_id on workflow agent session"
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2416,6 +2704,12 @@ async fn run_workflow_agent_prompt_inner(
     let msg_store = Arc::new(MsgStore::new());
     spawn_log_forwarders(&mut spawned.child, msg_store.clone())?;
     executor.normalize_logs(msg_store.clone(), workspace_path.as_path());
+    let mut session_id_task = Some(spawn_workflow_runtime_session_id_persistor(
+        db.pool.clone(),
+        session_agent.id,
+        workflow_session.map(|item| item.id),
+        msg_store.clone(),
+    ));
     let mut workflow_stream_task = stream_context.as_ref().map(|context| {
         spawn_workflow_runtime_stream(
             context.pool.clone(),
@@ -2454,6 +2748,7 @@ async fn run_workflow_agent_prompt_inner(
                 terminate_child(&mut spawned).await;
                 RUNNING_STEPS.remove(&step_id);
                 finish_workflow_runtime_stream(&msg_store, &mut workflow_stream_task).await;
+                finish_workflow_runtime_session_id_persistor(&mut session_id_task).await;
                 return Err(WorkflowRuntimeError::Validation(format!(
                     "workflow 执行超时：{}",
                     agent.name
@@ -2467,6 +2762,7 @@ async fn run_workflow_agent_prompt_inner(
                 Ok(Err(err)) => {
                     RUNNING_STEPS.remove(&step_id);
                     finish_workflow_runtime_stream(&msg_store, &mut workflow_stream_task).await;
+                    finish_workflow_runtime_session_id_persistor(&mut session_id_task).await;
                     return Err(WorkflowRuntimeError::Io(err));
                 }
                 Err(_) => terminate_child(&mut spawned).await,
@@ -2479,6 +2775,7 @@ async fn run_workflow_agent_prompt_inner(
     // Unregister from the running steps map.
     RUNNING_STEPS.remove(&step_id);
     finish_workflow_runtime_stream(&msg_store, &mut workflow_stream_task).await;
+    finish_workflow_runtime_session_id_persistor(&mut session_id_task).await;
 
     if interrupted {
         // Ensure the child is cleaned up.
@@ -2670,9 +2967,9 @@ fn review_dependency_contexts(
 }
 
 fn result_dependency_contexts(
-    step: &WorkflowStep,
-    steps: &[WorkflowStep],
-    edges: &[WorkflowStepEdge],
+    _step: &WorkflowStep,
+    _steps: &[WorkflowStep],
+    _edges: &[WorkflowStepEdge],
     plan: Option<&WorkflowPlan>,
 ) -> Vec<String> {
     let mut contexts = Vec::new();
@@ -3037,6 +3334,79 @@ fn extract_latest_assistant_from_history(history: &[LogMsg]) -> Option<String> {
         .filter(|content| !content.is_empty())
 }
 
+const WORKFLOW_CLEANUP_RETENTION_DAYS: i64 = 5;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WorkflowCleanupResult {
+    pub execution_id: Uuid,
+    pub transcripts_removed: u64,
+    pub events_removed: u64,
+    pub steps_cleared: u64,
+}
+
+pub async fn run_workflow_retention_janitor(
+    pool: &SqlitePool,
+) -> Result<Vec<WorkflowCleanupResult>, WorkflowRuntimeError> {
+    let cutoff = Utc::now() - chrono::Duration::days(WORKFLOW_CLEANUP_RETENTION_DAYS);
+    let executions =
+        db::models::workflow_execution::WorkflowExecution::find_completed_before(pool, &cutoff)
+            .await?;
+
+    if executions.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    tracing::info!(
+        execution_count = executions.len(),
+        "Running workflow retention janitor for completed executions older than {} days",
+        WORKFLOW_CLEANUP_RETENTION_DAYS
+    );
+
+    let mut results = Vec::new();
+    for execution in executions {
+        let transcripts_removed =
+            db::models::workflow_transcript::WorkflowTranscript::delete_non_essential_by_execution(
+                pool,
+                execution.id,
+            )
+            .await?;
+
+        let events_removed =
+            db::models::workflow_event::WorkflowEvent::delete_by_execution(pool, execution.id)
+                .await?;
+
+        let steps_cleared = db::models::workflow_step::WorkflowStep::clear_content_for_execution(
+            pool,
+            execution.id,
+        )
+        .await?;
+
+        db::models::workflow_execution::WorkflowExecution::mark_cleaned(
+            pool,
+            execution.id,
+            "retention_janitor",
+        )
+        .await?;
+
+        tracing::info!(
+            execution_id = %execution.id,
+            transcripts_removed,
+            events_removed,
+            steps_cleared,
+            "Cleaned up completed workflow execution"
+        );
+
+        results.push(WorkflowCleanupResult {
+            execution_id: execution.id,
+            transcripts_removed,
+            events_removed,
+            steps_cleared,
+        });
+    }
+
+    Ok(results)
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
@@ -3098,6 +3468,8 @@ mod tests {
             compiled_graph_hash: Some("hash".to_string()),
             started_at: None,
             completed_at: None,
+            cleaned_at: None,
+            cleaned_reason: None,
             created_at: now,
             updated_at: now,
         }
@@ -3924,5 +4296,85 @@ mod tests {
                 .map(|item| item.target_id.as_str()),
             Some(projection.steps[0].id.as_str())
         );
+    }
+
+    #[test]
+    fn lightweight_projection_excludes_content_and_round_graphs() {
+        let execution = sample_execution(WorkflowExecutionStatus::Completed);
+        let plan_json = sample_plan_json();
+        let plan = sample_plan(execution.plan_id);
+        let revision = sample_revision(plan.id, plan_json);
+        let (session_agents, agents) = sample_agent_views();
+        let mut step = sample_step(WorkflowStepStatus::Completed);
+        step.execution_id = execution.id;
+        step.content = Some("Detailed implementation content".to_string());
+        step.summary_text = Some(r#"{"summary":"Fixed the bug","outputs":[]}"#.to_string());
+
+        let projection = build_workflow_card_projection_lightweight(
+            &execution,
+            &plan,
+            &revision,
+            &[step.clone()],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &session_agents,
+            &agents,
+            Some(42i64),
+            None,
+        )
+        .expect("build lightweight projection");
+        assert_eq!(projection.has_transcripts, Some(true));
+        assert!(projection.round_graphs.is_empty());
+        assert!(projection.steps[0].content.is_none());
+        assert_eq!(
+            projection.steps[0].summary_text.as_deref(),
+            Some("Fixed the bug")
+        );
+    }
+
+    #[test]
+    fn is_terminal_true_for_completed_and_failed() {
+        for (status, expected_terminal) in [
+            (WorkflowExecutionStatus::Completed, true),
+            (WorkflowExecutionStatus::Failed, true),
+            (WorkflowExecutionStatus::Running, false),
+            (WorkflowExecutionStatus::Pending, false),
+            (WorkflowExecutionStatus::Paused, false),
+            (WorkflowExecutionStatus::Waiting, false),
+        ] {
+            let execution = sample_execution(status);
+            let plan_json = sample_plan_json();
+            let plan = sample_plan(execution.plan_id);
+            let revision = sample_revision(plan.id, plan_json);
+            let (session_agents, agents) = sample_agent_views();
+            let projection = build_workflow_card_projection_lightweight(
+                &execution,
+                &plan,
+                &revision,
+                &[sample_step(WorkflowStepStatus::Completed)],
+                &[],
+                &[],
+                &[],
+                &[],
+                &[],
+                &[],
+                &[],
+                &session_agents,
+                &agents,
+                None,
+                None,
+            )
+            .expect("build lightweight projection");
+            assert_eq!(
+                projection.is_terminal, expected_terminal,
+                "is_terminal mismatch for status {:?}",
+                execution.status
+            );
+        }
     }
 }

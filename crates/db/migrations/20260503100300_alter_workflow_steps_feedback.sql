@@ -38,7 +38,7 @@ CREATE TABLE chat_workflow_steps (
     content                            TEXT,
     loop_id                            BLOB    REFERENCES chat_workflow_loops(id),
     lead_review_required               INTEGER NOT NULL DEFAULT 1,
-    user_review_required               INTEGER NOT NULL DEFAULT 0,
+    user_review_required               INTEGER NOT NULL DEFAULT 1,
     revision_context                   TEXT,
     created_at                         TEXT    NOT NULL DEFAULT (datetime('now', 'subsec')),
     updated_at                         TEXT    NOT NULL DEFAULT (datetime('now', 'subsec')),

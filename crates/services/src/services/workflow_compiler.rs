@@ -77,8 +77,6 @@ impl WorkflowCompiler {
                 display_order: order as i32,
                 loop_key: None,
                 review_scope: node.data.review_scope.clone(),
-                lead_review: node.data.lead_review,
-                user_review: node.data.user_review,
             });
         }
 
@@ -191,16 +189,6 @@ impl WorkflowCompiler {
                     hasher.update(step_key.as_bytes());
                 }
             }
-            hasher.update(match step.lead_review {
-                Some(true) => &[1u8],
-                Some(false) => &[2u8],
-                None => &[0u8],
-            });
-            hasher.update(match step.user_review {
-                Some(true) => &[1u8],
-                Some(false) => &[2u8],
-                None => &[0u8],
-            });
         }
         for edge in edges {
             hasher.update(edge.edge_id.as_bytes());
@@ -283,15 +271,13 @@ impl WorkflowCompiler {
             claimed_nodes.insert(node.id.clone(), loop_key.clone());
 
             let max_retry = node.data.max_retry.unwrap_or(default_retry);
-            let user_review_required = node.data.user_review.unwrap_or(false);
-
             loops.push(CompiledLoopDef {
                 loop_key,
                 member_step_keys,
                 review_step_key: node.id.clone(),
                 review_scope_step_keys: review_scope,
                 max_retry,
-                user_review_required,
+                user_review_required: true,
             });
         }
 
@@ -589,7 +575,7 @@ mod tests {
                 {
                     "id": "review", "type": "workflowStep",
                     "position": { "x": 400, "y": 0 },
-                    "data": { "stepType": "review", "title": "审核", "instructions": "审核回路结果", "reviewScope": ["draft", "revise"], "userReview": true, "maxRetry": 2 }
+                    "data": { "stepType": "review", "title": "审核", "instructions": "审核回路结果", "reviewScope": ["draft", "revise"], "maxRetry": 2 }
                 },
                 {
                     "id": "result", "type": "workflowStep",

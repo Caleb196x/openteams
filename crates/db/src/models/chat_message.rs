@@ -104,6 +104,50 @@ impl ChatMessage {
         }
     }
 
+    pub async fn find_by_session_id_lightweight(
+        pool: &SqlitePool,
+        session_id: Uuid,
+        limit: Option<i64>,
+    ) -> Result<Vec<Self>, sqlx::Error> {
+        let base_sql = r#"
+            SELECT id, session_id, sender_type, sender_id, content, mentions,
+                CASE
+                    WHEN json_valid(meta)
+                         AND json_extract(meta, '$.card_type') IN ('workflow_execution', 'workflow_plan_generation')
+                         AND json_extract(meta, '$.workflow_card') IS NOT NULL
+                    THEN json_insert(
+                        json_remove(meta, '$.workflow_card'),
+                        '$.workflow_card_summary',
+                        json_object(
+                            'execution_id', json_extract(meta, '$.workflow_card.execution_id'),
+                            'state', json_extract(meta, '$.workflow_card.state'),
+                            'is_terminal', json_extract(meta, '$.workflow_card.is_terminal'),
+                            'has_transcripts', json_extract(meta, '$.workflow_card.has_transcripts'),
+                            'execution_status', json_extract(meta, '$.workflow_card.execution_status'),
+                            'error_message', json_extract(meta, '$.workflow_card.error_message')
+                        )
+                    )
+                    ELSE meta
+                END as meta,
+                created_at
+            FROM chat_messages
+            WHERE session_id = ?
+            ORDER BY created_at ASC"#;
+        if let Some(limit) = limit {
+            let sql = format!("{base_sql} LIMIT ?");
+            sqlx::query_as::<_, ChatMessage>(&sql)
+                .bind(session_id)
+                .bind(limit)
+                .fetch_all(pool)
+                .await
+        } else {
+            sqlx::query_as::<_, ChatMessage>(base_sql)
+                .bind(session_id)
+                .fetch_all(pool)
+                .await
+        }
+    }
+
     pub async fn create(
         pool: &SqlitePool,
         data: &CreateChatMessage,

@@ -10,7 +10,8 @@ const EXECUTION_SELECT: &str = r#"
     SELECT id, session_id, plan_id, active_revision_id, active_round_id,
            workflow_card_message_id, lead_session_agent_id, status,
            current_round, title, compiled_graph_hash,
-           started_at, completed_at, created_at, updated_at
+           started_at, completed_at, cleaned_at, cleaned_reason,
+           created_at, updated_at
     FROM chat_workflow_executions
 "#;
 
@@ -29,6 +30,8 @@ pub struct WorkflowExecution {
     pub compiled_graph_hash: Option<String>,
     pub started_at: Option<DateTime<Utc>>,
     pub completed_at: Option<DateTime<Utc>>,
+    pub cleaned_at: Option<DateTime<Utc>>,
+    pub cleaned_reason: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -86,9 +89,21 @@ mod tests {
         .await
         .expect("create workflow execution");
 
-        WorkflowExecution::update_status(pool, execution.id, status)
+        let is_terminal = matches!(
+            status,
+            WorkflowExecutionStatus::Completed | WorkflowExecutionStatus::Failed
+        );
+        let execution = WorkflowExecution::update_status(pool, execution.id, status)
             .await
-            .expect("update workflow execution status")
+            .expect("update workflow execution status");
+
+        if is_terminal {
+            WorkflowExecution::set_completed(pool, execution.id)
+                .await
+                .expect("set completed at")
+        } else {
+            execution
+        }
     }
 
     #[tokio::test]
@@ -123,6 +138,107 @@ mod tests {
         assert_eq!(
             blocking_statuses,
             vec!["paused", "pending", "recompiling", "running", "waiting"]
+        );
+    }
+
+    #[tokio::test]
+    async fn find_completed_before_excludes_running_and_already_cleaned() {
+        let pool = SqlitePool::connect("sqlite::memory:")
+            .await
+            .expect("create sqlite memory pool");
+        run_migrations(&pool).await.expect("run migrations");
+
+        let session_id = Uuid::new_v4();
+
+        let completed =
+            create_execution_with_status(&pool, session_id, WorkflowExecutionStatus::Completed)
+                .await;
+        let _running =
+            create_execution_with_status(&pool, session_id, WorkflowExecutionStatus::Running).await;
+        let failed =
+            create_execution_with_status(&pool, session_id, WorkflowExecutionStatus::Failed).await;
+
+        let cutoff = Utc::now() + chrono::Duration::days(1);
+        let found = WorkflowExecution::find_completed_before(&pool, &cutoff)
+            .await
+            .expect("find completed before");
+        let found_ids: Vec<Uuid> = found.iter().map(|e| e.id).collect();
+        assert!(found_ids.contains(&completed.id));
+        assert!(found_ids.contains(&failed.id));
+        assert!(!found_ids.contains(&_running.id));
+
+        WorkflowExecution::mark_cleaned(&pool, completed.id, "test")
+            .await
+            .expect("mark cleaned");
+
+        let found_after_clean = WorkflowExecution::find_completed_before(&pool, &cutoff)
+            .await
+            .expect("find completed before after clean");
+        let cleaned_ids: Vec<Uuid> = found_after_clean.iter().map(|e| e.id).collect();
+        assert!(!cleaned_ids.contains(&completed.id));
+        assert!(cleaned_ids.contains(&failed.id));
+    }
+
+    #[tokio::test]
+    async fn find_completed_before_uses_datetime_comparison_not_lexical_order() {
+        let pool = SqlitePool::connect("sqlite::memory:")
+            .await
+            .expect("create sqlite memory pool");
+        run_migrations(&pool).await.expect("run migrations");
+
+        let session_id = Uuid::new_v4();
+        let completed =
+            create_execution_with_status(&pool, session_id, WorkflowExecutionStatus::Completed)
+                .await;
+
+        sqlx::query(
+            "UPDATE chat_workflow_executions SET completed_at = '2026-05-13 23:59:59', updated_at = '2026-05-13 23:59:59' WHERE id = ?1",
+        )
+        .bind(completed.id)
+        .execute(&pool)
+        .await
+        .expect("seed completed_at");
+
+        let cutoff = DateTime::parse_from_rfc3339("2026-05-13T00:00:00Z")
+            .expect("parse cutoff")
+            .with_timezone(&Utc);
+        let found = WorkflowExecution::find_completed_before(&pool, &cutoff)
+            .await
+            .expect("find completed before");
+        let found_ids: Vec<Uuid> = found.iter().map(|e| e.id).collect();
+        assert!(
+            !found_ids.contains(&completed.id),
+            "same-day later time must not be considered before cutoff"
+        );
+    }
+
+    #[tokio::test]
+    async fn find_completed_before_includes_failed_with_null_completed_at_by_updated_at() {
+        let pool = SqlitePool::connect("sqlite::memory:")
+            .await
+            .expect("create sqlite memory pool");
+        run_migrations(&pool).await.expect("run migrations");
+
+        let session_id = Uuid::new_v4();
+        let failed =
+            create_execution_with_status(&pool, session_id, WorkflowExecutionStatus::Failed).await;
+
+        sqlx::query(
+            "UPDATE chat_workflow_executions SET completed_at = NULL, updated_at = '2020-01-01 00:00:00' WHERE id = ?1",
+        )
+        .bind(failed.id)
+        .execute(&pool)
+        .await
+        .expect("clear completed_at for failed");
+
+        let cutoff = Utc::now();
+        let found = WorkflowExecution::find_completed_before(&pool, &cutoff)
+            .await
+            .expect("find completed before");
+        let found_ids: Vec<Uuid> = found.iter().map(|e| e.id).collect();
+        assert!(
+            found_ids.contains(&failed.id),
+            "failed execution with null completed_at should use updated_at as fallback"
         );
     }
 }
@@ -197,7 +313,8 @@ impl WorkflowExecution {
             RETURNING id, session_id, plan_id, active_revision_id, active_round_id,
                       workflow_card_message_id, lead_session_agent_id, status,
                       current_round, title, compiled_graph_hash,
-                      started_at, completed_at, created_at, updated_at
+                      started_at, completed_at, cleaned_at, cleaned_reason,
+                      created_at, updated_at
             "#,
         )
         .bind(id)
@@ -223,7 +340,8 @@ impl WorkflowExecution {
             RETURNING id, session_id, plan_id, active_revision_id, active_round_id,
                       workflow_card_message_id, lead_session_agent_id, status,
                       current_round, title, compiled_graph_hash,
-                      started_at, completed_at, created_at, updated_at
+                      started_at, completed_at, cleaned_at, cleaned_reason,
+                      created_at, updated_at
             "#,
         )
         .bind(id)
@@ -246,7 +364,8 @@ impl WorkflowExecution {
             RETURNING id, session_id, plan_id, active_revision_id, active_round_id,
                       workflow_card_message_id, lead_session_agent_id, status,
                       current_round, title, compiled_graph_hash,
-                      started_at, completed_at, created_at, updated_at
+                      started_at, completed_at, cleaned_at, cleaned_reason,
+                      created_at, updated_at
             "#,
         )
         .bind(id)
@@ -272,7 +391,8 @@ impl WorkflowExecution {
             RETURNING id, session_id, plan_id, active_revision_id, active_round_id,
                       workflow_card_message_id, lead_session_agent_id, status,
                       current_round, title, compiled_graph_hash,
-                      started_at, completed_at, created_at, updated_at
+                      started_at, completed_at, cleaned_at, cleaned_reason,
+                      created_at, updated_at
             "#,
         )
         .bind(id)
@@ -298,7 +418,8 @@ impl WorkflowExecution {
             RETURNING id, session_id, plan_id, active_revision_id, active_round_id,
                       workflow_card_message_id, lead_session_agent_id, status,
                       current_round, title, compiled_graph_hash,
-                      started_at, completed_at, created_at, updated_at
+                      started_at, completed_at, cleaned_at, cleaned_reason,
+                      created_at, updated_at
             "#,
         )
         .bind(id)
@@ -318,7 +439,8 @@ impl WorkflowExecution {
             RETURNING id, session_id, plan_id, active_revision_id, active_round_id,
                       workflow_card_message_id, lead_session_agent_id, status,
                       current_round, title, compiled_graph_hash,
-                      started_at, completed_at, created_at, updated_at
+                      started_at, completed_at, cleaned_at, cleaned_reason,
+                      created_at, updated_at
             "#,
         )
         .bind(id)
@@ -340,7 +462,8 @@ impl WorkflowExecution {
             RETURNING id, session_id, plan_id, active_revision_id, active_round_id,
                       workflow_card_message_id, lead_session_agent_id, status,
                       current_round, title, compiled_graph_hash,
-                      started_at, completed_at, created_at, updated_at
+                      started_at, completed_at, cleaned_at, cleaned_reason,
+                      created_at, updated_at
             "#,
         )
         .bind(id)
@@ -359,10 +482,52 @@ impl WorkflowExecution {
             RETURNING id, session_id, plan_id, active_revision_id, active_round_id,
                       workflow_card_message_id, lead_session_agent_id, status,
                       current_round, title, compiled_graph_hash,
-                      started_at, completed_at, created_at, updated_at
+                      started_at, completed_at, cleaned_at, cleaned_reason,
+                      created_at, updated_at
             "#,
         )
         .bind(id)
+        .fetch_one(pool)
+        .await
+    }
+
+    pub async fn find_completed_before(
+        pool: &SqlitePool,
+        before: &chrono::DateTime<Utc>,
+    ) -> Result<Vec<Self>, sqlx::Error> {
+        let cutoff = before
+            .naive_utc()
+            .format("%Y-%m-%d %H:%M:%S%.f")
+            .to_string();
+        sqlx::query_as::<_, Self>(&format!(
+            "{EXECUTION_SELECT}\nWHERE status IN ('completed', 'failed') AND datetime(COALESCE(completed_at, updated_at)) < datetime(?1) AND cleaned_at IS NULL\nORDER BY datetime(COALESCE(completed_at, updated_at)) ASC"
+        ))
+        .bind(cutoff)
+        .fetch_all(pool)
+        .await
+    }
+
+    pub async fn mark_cleaned(
+        pool: &SqlitePool,
+        id: Uuid,
+        reason: &str,
+    ) -> Result<Self, sqlx::Error> {
+        sqlx::query_as::<_, Self>(
+            r#"
+            UPDATE chat_workflow_executions
+            SET cleaned_at = datetime('now', 'subsec'),
+                cleaned_reason = ?2,
+                updated_at = datetime('now', 'subsec')
+            WHERE id = ?1
+            RETURNING id, session_id, plan_id, active_revision_id, active_round_id,
+                      workflow_card_message_id, lead_session_agent_id, status,
+                      current_round, title, compiled_graph_hash,
+                      started_at, completed_at, cleaned_at, cleaned_reason,
+                      created_at, updated_at
+            "#,
+        )
+        .bind(id)
+        .bind(reason)
         .fetch_one(pool)
         .await
     }

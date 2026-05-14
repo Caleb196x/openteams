@@ -198,7 +198,7 @@ export type WorkflowPlanNode = { id: string, type: string, position: WorkflowNod
 
 export type WorkflowNodePosition = { x: number, y: number, };
 
-export type WorkflowNodeData = { stepType: string, agentId: string | null, title: string, instructions: string, acceptance: Array<string> | null, outputs: Array<string> | null, interruptible: boolean, maxRetry: number | null, status: string | null, loopKey: string | null, reviewScope: Array<string> | null, leadReview: boolean | null, userReview: boolean | null, };
+export type WorkflowNodeData = { stepType: string, agentId: string | null, title: string, instructions: string, acceptance: Array<string> | null, outputs: Array<string> | null, interruptible: boolean, maxRetry: number | null, status: string | null, loopKey: string | null, reviewScope: Array<string> | null, };
 
 export type WorkflowLoopDef = { loopKey: string, memberSteps: Array<string>, reviewStep: string, maxRetry: number | null, userReviewRequired: boolean | null, };
 
@@ -210,7 +210,7 @@ export type WorkflowPlanPolicies = { approval_required_on: Array<string> | null,
 
 export type CompiledGraph = { plan_hash: string, compiled_graph_hash: string, steps: Array<CompiledStep>, edges: Array<CompiledEdge>, ready_step_keys: Array<string>, loops: Array<CompiledLoopDef> | null, };
 
-export type CompiledStep = { step_key: string, step_type: WorkflowStepType, title: string, instructions: string, assigned_agent_id: string | null, acceptance: Array<string> | null, outputs: Array<string> | null, interruptible: boolean, max_retry: number, display_order: number, loop_key: string | null, review_scope: Array<string> | null, lead_review: boolean | null, user_review: boolean | null, };
+export type CompiledStep = { step_key: string, step_type: WorkflowStepType, title: string, instructions: string, assigned_agent_id: string | null, acceptance: Array<string> | null, outputs: Array<string> | null, interruptible: boolean, max_retry: number, display_order: number, loop_key: string | null, review_scope: Array<string> | null, };
 
 export type CompiledEdge = { edge_id: string, from_step_key: string, to_step_key: string, edge_kind: WorkflowEdgeKind, };
 
@@ -432,9 +432,9 @@ export type WorkflowIterationSummary = { round_index: number, status: string, us
 
 export type WorkflowRoundGraph = { round_id: string, round_index: number, revision_id: string, status: string, plan: WorkflowPlanJson, steps: Array<WorkflowCardStep>, loops: Array<WorkflowCardLoop>, };
 
-export type WorkflowCardStep = { id: string, step_key: string, title: string, step_type: string, status: string, review_phase: string | null, retry_count: number, max_retry: number, loop_key: string | null, latest_review: WorkflowCardReview | null, agent_name: string | null, summary_text: string | null, content: string | null, };
+export type WorkflowCardStep = { id: string, step_key: string, title: string, step_type: string, status: string, review_phase: string | null, lead_review_required: boolean, user_review_required: boolean, retry_count: number, max_retry: number, loop_key: string | null, latest_review: WorkflowCardReview | null, agent_name: string | null, summary_text: string | null, content: string | null, };
 
-export type WorkflowCardProjection = { execution_id: string | null, plan_id: string, revision_id: string, title: string, goal: string, state: WorkflowCardState, execution_status: string, error_message: string | null, completed_step_count: number, total_step_count: number, result_summary: string | null, outputs: Array<string>, agents: Array<WorkflowCardAgent>, steps: Array<WorkflowCardStep>, current_round: number, loops: Array<WorkflowCardLoop>, pending_review: WorkflowPendingReview | null, iteration_history: Array<WorkflowIterationSummary>, round_graphs: Array<WorkflowRoundGraph>, plan: WorkflowPlanJson, started_at: string | null, completed_at: string | null, validation_errors: string | null, };
+export type WorkflowCardProjection = { execution_id: string | null, plan_id: string, revision_id: string, title: string, goal: string, state: WorkflowCardState, execution_status: string, error_message: string | null, completed_step_count: number, total_step_count: number, result_summary: string | null, outputs: Array<string>, agents: Array<WorkflowCardAgent>, steps: Array<WorkflowCardStep>, current_round: number, loops: Array<WorkflowCardLoop>, pending_review: WorkflowPendingReview | null, iteration_history: Array<WorkflowIterationSummary>, round_graphs: Array<WorkflowRoundGraph>, plan: WorkflowPlanJson, started_at: string | null, completed_at: string | null, validation_errors: string | null, is_terminal: boolean, has_transcripts: boolean | null, };
 
 export type UserIterationFeedbackDetail = { what_wrong: string, expected: string, priority: string | null, additional_notes: string | null, };
 

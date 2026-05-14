@@ -57,6 +57,7 @@ import { formatTokenUsage } from '@/utils/string';
 import {
   ChatWorkflowCard,
   extractWorkflowCardProjection,
+  isWorkflowCardMessageMeta,
   type WorkflowCardProjection,
 } from './ChatWorkflowCard';
 import { type WorkflowFinalReviewActionData } from './WorkflowFinalReviewCard';
@@ -141,7 +142,10 @@ export interface ChatMessageItemProps {
   onExecutePlan?: (planId: string) => void;
   onPauseAll?: (executionId: string) => void;
   onResumeWorkflow?: (executionId: string) => void;
-  onRetryWorkflowStep?: (stepId: string, retryTarget?: 'task' | 'review') => void;
+  onRetryWorkflowStep?: (
+    stepId: string,
+    retryTarget?: 'task' | 'review'
+  ) => void;
   onOpenWorkflowWindow?: (projection: unknown) => void;
   onRetryWorkflowPlanGeneration?: (messageId: string) => void;
   workflowPlanGenerationRetryPending?: boolean;
@@ -283,6 +287,7 @@ export function ChatMessageItem({
   const workflowCardProjection =
     workflowCardProjectionOverride ??
     extractWorkflowCardProjection(message.meta);
+  const isWorkflowCardMessage = isWorkflowCardMessageMeta(message.meta);
   const messageI18nMeta = extractMessageI18nMeta(message.meta);
   const errorInfo = extractErrorFromMeta(message.meta);
   const apiError =
@@ -330,7 +335,7 @@ export function ChatMessageItem({
 
   // System messages
   if (message.sender_type === ChatSenderType.system) {
-    if (workflowCardProjection) {
+    if (isWorkflowCardMessage) {
       return (
         <div className="chat-session-message-row is-system flex items-start gap-base">
           {isCleanupMode && (
@@ -358,29 +363,48 @@ export function ChatMessageItem({
             tabIndex={isCleanupMode ? 0 : undefined}
           >
             <div className="flex w-full flex-col gap-3">
-              <ChatWorkflowCard
-                message={message}
-                projection={workflowCardProjection}
-                onExecute={onExecutePlan}
-                onPauseAll={onPauseAll}
-                onResume={onResumeWorkflow}
-                onRetryStep={onRetryWorkflowStep}
-                finalReviewAction={workflowFinalReviewAction}
-                onRespondPendingReview={onRespondPendingReview}
-                onSubmitIterationFeedback={onSubmitWorkflowIterationFeedback}
-                pendingActionId={pendingWorkflowActionId}
-                onRetryPlanGeneration={onRetryWorkflowPlanGeneration}
-                retryPlanGenerationPending={workflowPlanGenerationRetryPending}
-                retryPlanGenerationError={workflowPlanGenerationRetryError}
-                onOpenWindow={
-                  onOpenWorkflowWindow
-                    ? () => {
-                        const proj = workflowCardProjection;
-                        if (proj) onOpenWorkflowWindow(proj);
-                      }
-                    : undefined
-                }
-              />
+              {workflowCardProjection ? (
+                <ChatWorkflowCard
+                  message={message}
+                  projection={workflowCardProjection}
+                  onExecute={onExecutePlan}
+                  onPauseAll={onPauseAll}
+                  onResume={onResumeWorkflow}
+                  onRetryStep={onRetryWorkflowStep}
+                  finalReviewAction={workflowFinalReviewAction}
+                  onRespondPendingReview={onRespondPendingReview}
+                  onSubmitIterationFeedback={onSubmitWorkflowIterationFeedback}
+                  pendingActionId={pendingWorkflowActionId}
+                  onRetryPlanGeneration={onRetryWorkflowPlanGeneration}
+                  retryPlanGenerationPending={workflowPlanGenerationRetryPending}
+                  retryPlanGenerationError={workflowPlanGenerationRetryError}
+                  onOpenWindow={
+                    onOpenWorkflowWindow
+                      ? () => {
+                          const proj = workflowCardProjection;
+                          if (proj) onOpenWorkflowWindow(proj);
+                        }
+                      : undefined
+                  }
+                />
+              ) : (
+                <div className="w-full max-w-[640px] rounded-[24px] border border-[#D8E2F0] bg-white p-4 shadow-sm">
+                  <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[#64748B]">
+                    <ArrowClockwiseIcon
+                      className="size-icon-sm animate-spin text-[#2563EB]"
+                      weight="bold"
+                    />
+                    <span>
+                      {t('workflow.card.loading', {
+                        defaultValue: 'Loading Workflow',
+                      })}
+                    </span>
+                  </div>
+                  <div className="mt-2 text-[20px] font-semibold leading-tight text-[#0F172A]">
+                    {message.content || 'Workflow execution'}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -620,7 +644,7 @@ export function ChatMessageItem({
               'chat-session-message-header',
               isUser && 'hidden'
             )}
-            bodyClassName="chat-session-message-body"
+            bodyClassName="chat-session-message-body select-text"
             style={
               isUser
                 ? {

@@ -435,8 +435,6 @@ mod tests {
                         status: None,
                         loop_key: None,
                         review_scope: None,
-                        lead_review: None,
-                        user_review: None,
                     },
                 },
                 WorkflowPlanNode {
@@ -455,8 +453,6 @@ mod tests {
                         status: None,
                         loop_key: None,
                         review_scope: None,
-                        lead_review: None,
-                        user_review: None,
                     },
                 },
             ],
@@ -569,8 +565,6 @@ mod tests {
                 status: None,
                 loop_key: None,
                 review_scope: None,
-                lead_review: None,
-                user_review: None,
             },
         });
         let result = validate_semantics(&plan, &valid_agents());
@@ -596,8 +590,6 @@ mod tests {
                 status: None,
                 loop_key: None,
                 review_scope: None,
-                lead_review: None,
-                user_review: None,
             },
         });
         plan.edges.push(WorkflowPlanEdge {

@@ -201,6 +201,8 @@ impl WorkflowOrchestrator {
                     step_type: step_type_str,
                     status: "pending".to_string(),
                     review_phase: None,
+                    lead_review_required: true,
+                    user_review_required: true,
                     retry_count: 0,
                     max_retry: n.data.max_retry.unwrap_or(1) as i32,
                     loop_key: loop_key_by_step_key
@@ -248,6 +250,8 @@ impl WorkflowOrchestrator {
             started_at: None,
             completed_at: None,
             validation_errors: None,
+            is_terminal: false,
+            has_transcripts: None,
         };
 
         let card_meta = serde_json::json!({

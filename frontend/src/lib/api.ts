@@ -74,6 +74,10 @@ import type {
   SyncToCliRequest,
   SyncToCliResponse,
 } from '@/types/cliConfig';
+import {
+  buildWorkflowCardUrl,
+  type WorkflowCardDetailLevel,
+} from '@/lib/workflowRequestPolicy';
 
 export interface AgentInfo {
   id: string;
@@ -200,6 +204,8 @@ export interface WorkflowCardStepData {
   step_type: string;
   status: string;
   review_phase: string | null;
+  lead_review_required: boolean;
+  user_review_required: boolean;
   retry_count: number;
   max_retry: number;
   loop_key: string | null;
@@ -219,8 +225,6 @@ export interface WorkflowCardPlanData {
       instructions: string;
       agentId?: string | null;
       status?: string | null;
-      leadReview?: boolean | null;
-      userReview?: boolean | null;
       reviewScope?: string[] | null;
       loopKey?: string | null;
     };
@@ -231,12 +235,19 @@ export interface WorkflowCardPlanData {
     target: string;
   }>;
   loops?: Array<{
-    loop_key: string;
-    member_step_keys: string[];
-    review_step_key: string;
-    review_scope_step_keys: string[];
-    max_retry: number;
-    user_review_required: boolean;
+    loopKey: string;
+    memberSteps: string[];
+    reviewStep: string;
+    maxRetry?: number | null;
+    userReviewRequired?: boolean | null;
+    // Legacy aliases kept so archived workflow cards created before the
+    // camelCase protocol change can still render.
+    loop_key?: string;
+    member_step_keys?: string[];
+    review_step_key?: string;
+    review_scope_step_keys?: string[];
+    max_retry?: number;
+    user_review_required?: boolean;
   }> | null;
   viewport?: { x?: number; y?: number; zoom?: number };
 }
@@ -278,6 +289,8 @@ export interface WorkflowCardData {
   plan: WorkflowCardPlanData;
   pending_review?: WorkflowPendingReviewData | null;
   validation_errors?: string | null;
+  is_terminal?: boolean;
+  has_transcripts?: boolean | null;
 }
 
 export interface ResolveActionResponse {
@@ -1267,9 +1280,12 @@ export const chatApi = {
     return handleApiResponse<ChatMessage>(response);
   },
 
-  getWorkflowCard: async (messageId: string): Promise<WorkflowCardData> => {
+  getWorkflowCard: async (
+    messageId: string,
+    options?: { detail?: WorkflowCardDetailLevel }
+  ): Promise<WorkflowCardData> => {
     const response = await makeRequest(
-      `/api/chat/messages/${messageId}/workflow-card`
+      buildWorkflowCardUrl(messageId, options?.detail ?? 'summary')
     );
     return handleApiResponse<WorkflowCardData>(response);
   },

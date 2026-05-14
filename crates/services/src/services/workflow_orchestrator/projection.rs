@@ -6,14 +6,17 @@ use db::models::{
     workflow_iteration_feedback::WorkflowIterationFeedback, workflow_loop::WorkflowLoop,
     workflow_plan::WorkflowPlan, workflow_plan_revision::WorkflowPlanRevision,
     workflow_round::WorkflowRound, workflow_step::WorkflowStep,
-    workflow_step_edge::WorkflowStepEdge, workflow_step_review::WorkflowStepReview,
+    workflow_step_review::WorkflowStepReview,
     workflow_transcript::WorkflowTranscript,
 };
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use super::{
-    super::{chat_runner::ChatRunner, workflow_runtime::build_workflow_card_projection},
+    super::{
+        chat_runner::ChatRunner,
+        workflow_runtime::{build_workflow_card_projection_lightweight},
+    },
     OrchestratorError, WorkflowOrchestrator, load_agents_for_session,
 };
 
@@ -63,23 +66,24 @@ impl WorkflowOrchestrator {
             .await?
             .ok_or_else(|| OrchestratorError::NotFound(format!("message {} 未找到", message_id)))?;
         let workflow_sessions = WorkflowAgentSession::find_by_execution(pool, execution.id).await?;
-        let steps = WorkflowStep::find_by_execution(pool, execution.id).await?;
-        let edges = WorkflowStepEdge::find_by_execution(pool, execution.id).await?;
+        let steps = WorkflowStep::find_summary_by_execution(pool, execution.id).await?;
         let rounds = WorkflowRound::find_by_execution(pool, execution.id).await?;
         let loops = WorkflowLoop::find_by_execution(pool, execution.id).await?;
-        let revisions = WorkflowPlanRevision::find_by_plan(pool, plan.id).await?;
         let iteration_feedbacks =
             WorkflowIterationFeedback::find_by_execution(pool, execution.id).await?;
         let step_reviews = WorkflowStepReview::find_by_execution(pool, execution.id).await?;
-        let transcripts = WorkflowTranscript::find_by_execution(pool, execution.id).await?;
+        let transcripts =
+            WorkflowTranscript::find_unresolved_reviews_by_execution(pool, execution.id).await?;
+        let transcript_count = WorkflowTranscript::count_by_execution(pool, execution.id)
+            .await
+            .ok();
 
-        let projection = build_workflow_card_projection(
+        let projection = build_workflow_card_projection_lightweight(
             execution,
             plan,
             revision,
-            &revisions,
             &steps,
-            &edges,
+            &[],
             &rounds,
             &loops,
             &iteration_feedbacks,
@@ -88,6 +92,7 @@ impl WorkflowOrchestrator {
             &workflow_sessions,
             session_agents,
             agents,
+            transcript_count,
             error_message,
         )?;
         let mut meta = message.meta.0.clone();

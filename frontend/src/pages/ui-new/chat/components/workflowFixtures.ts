@@ -75,17 +75,31 @@ type WorkflowStepFixture = WorkflowCardData['steps'][number];
 function createStep(
   step: Omit<
     WorkflowStepFixture,
-    'review_phase' | 'retry_count' | 'max_retry' | 'loop_key' | 'latest_review'
+    | 'review_phase'
+    | 'lead_review_required'
+    | 'user_review_required'
+    | 'retry_count'
+    | 'max_retry'
+    | 'loop_key'
+    | 'latest_review'
   > &
     Partial<
       Pick<
         WorkflowStepFixture,
-        'review_phase' | 'retry_count' | 'max_retry' | 'loop_key' | 'latest_review'
+        | 'review_phase'
+        | 'lead_review_required'
+        | 'user_review_required'
+        | 'retry_count'
+        | 'max_retry'
+        | 'loop_key'
+        | 'latest_review'
       >
     >
 ): WorkflowStepFixture {
   return {
     review_phase: null,
+    lead_review_required: true,
+    user_review_required: true,
     retry_count: 0,
     max_retry: 0,
     loop_key: null,
@@ -123,9 +137,9 @@ function createProjection(
     agents: workflowAgents,
     plan: workflowPlan,
     pending_review: null,
-     validation_errors: null,
-     ...rest,
-   };
+    validation_errors: null,
+    ...rest,
+  };
 }
 
 export const workflowProjectionFixtures = {

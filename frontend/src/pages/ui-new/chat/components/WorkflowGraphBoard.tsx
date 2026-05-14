@@ -24,6 +24,15 @@ type WorkflowGraphPlanLoop = NonNullable<
   WorkflowCardData['plan']['loops']
 >[number];
 
+const getPlanLoopKey = (loop: WorkflowGraphPlanLoop) =>
+  loop.loopKey ?? loop.loop_key ?? '';
+
+const getPlanLoopMemberStepKeys = (loop: WorkflowGraphPlanLoop) =>
+  loop.memberSteps ?? loop.member_step_keys ?? [];
+
+const getPlanLoopReviewStepKey = (loop: WorkflowGraphPlanLoop) =>
+  loop.reviewStep ?? loop.review_step_key ?? null;
+
 type WorkflowGraphBoardProps = {
   nodes: WorkflowGraphNode[];
   edges: WorkflowGraphEdge[];
@@ -89,13 +98,16 @@ function buildElkGraph(
       label: l.loop_key,
     })),
     ...planLoops
-      .filter((l) => !runtimeLoopKeys.has(l.loop_key))
+      .filter((l) => {
+        const loopKey = getPlanLoopKey(l);
+        return loopKey && !runtimeLoopKeys.has(loopKey);
+      })
       .map((l) => ({
-        loopKey: l.loop_key,
-        memberStepKeys: l.member_step_keys,
-        reviewStepKey: l.review_step_key,
+        loopKey: getPlanLoopKey(l),
+        memberStepKeys: getPlanLoopMemberStepKeys(l),
+        reviewStepKey: getPlanLoopReviewStepKey(l),
         status: null as string | null,
-        label: l.loop_key,
+        label: getPlanLoopKey(l),
       })),
   ];
 
@@ -373,7 +385,9 @@ export function WorkflowGraphBoard({
   const [layoutError, setLayoutError] = useState<string | null>(null);
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
-  const [retryDialogStepId, setRetryDialogStepId] = useState<string | null>(null);
+  const [retryDialogStepId, setRetryDialogStepId] = useState<string | null>(
+    null
+  );
   const containerRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
   const lastMousePos = useRef({ x: 0, y: 0 });
@@ -406,9 +420,9 @@ export function WorkflowGraphBoard({
           loop.review_step_id,
         ]),
         planLoops: (planLoops ?? []).map((loop) => [
-          loop.loop_key,
-          loop.member_step_keys,
-          loop.review_step_key,
+          getPlanLoopKey(loop),
+          getPlanLoopMemberStepKeys(loop),
+          getPlanLoopReviewStepKey(loop),
         ]),
         steps: steps.map((step) => [step.id, step.step_key]),
       }),
@@ -663,7 +677,12 @@ export function WorkflowGraphBoard({
         const step = stepByKey.get(child.id);
         const status = step?.status ?? dataNode.data.status ?? 'pending';
         const retryStepId = step?.id ?? null;
-        const canRetryReviewStep = !!step && step.latest_review?.feedback !== null && isRetryableWorkflowStepStatus(step.status);
+        const leadReviewRequired = step?.lead_review_required ?? true;
+        const canRetryReviewStep =
+          !!step &&
+          leadReviewRequired &&
+          !!step.latest_review &&
+          isRetryableWorkflowStepStatus(step.status);
 
         const canRetryStep =
           !!onRetryStep &&
@@ -756,14 +775,14 @@ export function WorkflowGraphBoard({
                   onClick={(e) => {
                     e.stopPropagation();
                     if (!retryStepId) return;
-                    if (dataNode?.data.leadReview) {
+                    if (leadReviewRequired) {
                       setRetryDialogStepId(retryStepId);
                     } else {
                       onRetryStep?.(retryStepId);
                     }
                   }}
                   disabled={isRetryPending}
-                    className="inline-flex items-center gap-1 rounded-2xl bg-rose-600 px-2.5 py-1 text-[10px] font-semibold text-white shadow-sm hover:bg-rose-700 disabled:opacity-60 transition-colors"
+                  className="inline-flex items-center gap-1 rounded-2xl bg-rose-600 px-2.5 py-1 text-[10px] font-semibold text-white shadow-sm hover:bg-rose-700 disabled:opacity-60 transition-colors"
                 >
                   <ArrowClockwiseIcon
                     className={cn('size-3', isRetryPending && 'animate-spin')}
@@ -843,10 +862,16 @@ export function WorkflowGraphBoard({
       }}
     >
       <div className="absolute top-4 left-4 pointer-events-none z-10 text-xs text-slate-600 font-medium flex flex-col gap-1">
-        <span>{t('workflow.graph.tip', { defaultValue: '(Tip: Scroll to zoom, drag to pan)' })}</span>
+        <span>
+          {t('workflow.graph.tip', {
+            defaultValue: '(Tip: Scroll to zoom, drag to pan)',
+          })}
+        </span>
         {layoutError && (
           <span className="text-amber-500 font-semibold pointer-events-auto">
-            {t('workflow.graph.layoutWarning', { defaultValue: 'Layout warning: using fallback layout' })}
+            {t('workflow.graph.layoutWarning', {
+              defaultValue: 'Layout warning: using fallback layout',
+            })}
           </span>
         )}
       </div>

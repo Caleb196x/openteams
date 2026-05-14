@@ -79,4 +79,25 @@ impl WorkflowEvent {
         .fetch_one(pool)
         .await
     }
+
+    pub async fn delete_by_execution(
+        pool: &SqlitePool,
+        execution_id: Uuid,
+    ) -> Result<u64, sqlx::Error> {
+        let result = sqlx::query(
+            r#"
+            DELETE FROM chat_workflow_events
+            WHERE execution_id = ?1
+              AND event_type NOT IN (
+                  'ExecutionCreated', 'ExecutionRunning', 'ExecutionFailed',
+                  'ExecutionCompleted', 'ExecutionPaused', 'ExecutionWaiting',
+                  'UserAccepted', 'UserRejected'
+              )
+            "#,
+        )
+        .bind(execution_id)
+        .execute(pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
 }

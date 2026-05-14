@@ -321,8 +321,8 @@ impl WorkflowOrchestrator {
                     round_index: 1,
                     display_order: compiled_step.display_order,
                     loop_id: None,
-                    lead_review_required: compiled_step.lead_review,
-                    user_review_required: compiled_step.user_review,
+                    lead_review_required: None,
+                    user_review_required: None,
                     revision_context: None,
                 },
                 step_id,
@@ -1182,8 +1182,10 @@ impl WorkflowOrchestrator {
             execution = WorkflowExecution::set_started(pool, execution.id).await?;
         }
 
-        if execution.status == WorkflowExecutionStatus::Completed
-            && execution.completed_at.is_none()
+        if matches!(
+            execution.status,
+            WorkflowExecutionStatus::Completed | WorkflowExecutionStatus::Failed
+        ) && execution.completed_at.is_none()
         {
             execution = WorkflowExecution::set_completed(pool, execution.id).await?;
         }
@@ -1240,7 +1242,9 @@ impl WorkflowOrchestrator {
         if to == WorkflowExecutionStatus::Running && transitioned.started_at.is_none() {
             transitioned = WorkflowExecution::set_started(pool, transitioned.id).await?;
         }
-        if to == WorkflowExecutionStatus::Completed && transitioned.completed_at.is_none() {
+        if matches!(to, WorkflowExecutionStatus::Completed | WorkflowExecutionStatus::Failed)
+            && transitioned.completed_at.is_none()
+        {
             transitioned = WorkflowExecution::set_completed(pool, transitioned.id).await?;
         }
         Self::refresh_execution_projection_with_reason(

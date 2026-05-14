@@ -411,10 +411,6 @@ pub struct WorkflowNodeData {
     pub loop_key: Option<String>,
     #[serde(default)]
     pub review_scope: Option<Vec<String>>,
-    #[serde(default)]
-    pub lead_review: Option<bool>,
-    #[serde(default)]
-    pub user_review: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
@@ -493,10 +489,6 @@ pub struct CompiledStep {
     pub loop_key: Option<String>,
     #[serde(default)]
     pub review_scope: Option<Vec<String>>,
-    #[serde(default)]
-    pub lead_review: Option<bool>,
-    #[serde(default)]
-    pub user_review: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]

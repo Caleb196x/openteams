@@ -811,6 +811,8 @@ impl ChatRunner {
             started_at: None,
             completed_at: None,
             validation_errors: None,
+            is_terminal: false,
+            has_transcripts: None,
         };
 
         Ok(serde_json::json!({

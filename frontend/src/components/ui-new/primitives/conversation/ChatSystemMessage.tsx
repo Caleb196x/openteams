@@ -40,16 +40,18 @@ export function ChatSystemMessage({
   return (
     <div
       className={cn(
-        'flex items-start gap-base text-low cursor-pointer',
+        'flex items-start gap-base text-low select-text',
+        onToggle ? 'cursor-pointer' : 'cursor-text',
         textClassName,
         className
       )}
       onClick={onToggle}
-      role="button"
+      role={onToggle ? 'button' : undefined}
     >
       <InfoIcon className="shrink-0 size-icon-base mt-0.5" />
       <span
         className={cn(
+          'select-text',
           !expanded && 'truncate',
           expanded && 'whitespace-pre-wrap break-all'
         )}

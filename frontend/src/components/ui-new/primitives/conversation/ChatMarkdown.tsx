@@ -452,7 +452,10 @@ export function ChatMarkdown({
   );
 
   return (
-    <div className={cn('group relative', className)} style={{ maxWidth }}>
+    <div
+      className={cn('group relative select-text', className)}
+      style={{ maxWidth }}
+    >
       {!hideCopyButton && (
         <div className="sticky top-0 right-2 z-10 h-0 pointer-events-none">
           <div className="flex justify-end opacity-0 transition-opacity duration-150 group-hover:opacity-100">
@@ -472,7 +475,7 @@ export function ChatMarkdown({
       )}
       <div
         className={cn(
-          'wysiwyg min-w-0 whitespace-normal break-words',
+          'wysiwyg min-w-0 whitespace-normal break-words select-text',
           textClassName
         )}
       >

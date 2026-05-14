@@ -168,7 +168,9 @@ function GeneratingPlanAnimation({ label }: { label?: string }) {
   );
 }
 
-const extractWorkflowCardType = (meta: unknown): WorkflowCardType | null => {
+export const extractWorkflowCardType = (
+  meta: unknown
+): WorkflowCardType | null => {
   if (!isRecord(meta)) return null;
 
   if (
@@ -181,6 +183,9 @@ const extractWorkflowCardType = (meta: unknown): WorkflowCardType | null => {
 
   return null;
 };
+
+export const isWorkflowCardMessageMeta = (meta: unknown): boolean =>
+  extractWorkflowCardType(meta) !== null;
 
 const extractWorkflowPlanGenerationMeta = (
   meta: unknown
@@ -198,6 +203,51 @@ const extractWorkflowPlanGenerationMeta = (
   return generationMeta as WorkflowPlanGenerationMeta;
 };
 
+const buildWorkflowPlanGenerationProjection = (
+  meta: unknown
+): WorkflowCardProjection | null => {
+  const generationMeta = extractWorkflowPlanGenerationMeta(meta);
+  if (!generationMeta) return null;
+
+  const status = generationMeta.status === 'failed' ? 'failed' : 'pending';
+  const planGoal = generationMeta.plan_goal?.trim() ?? '';
+  const errorMessage =
+    generationMeta.error_message === undefined
+      ? null
+      : generationMeta.error_message;
+
+  return {
+    execution_id: null,
+    plan_id: '',
+    revision_id: '',
+    title: 'Workflow Plan',
+    goal: planGoal,
+    state: status === 'failed' ? 'failed' : 'pending',
+    execution_status: 'plan_generation',
+    error_message: errorMessage,
+    completed_step_count: 0,
+    total_step_count: 0,
+    result_summary: null,
+    outputs: [],
+    current_round: 0,
+    loops: [],
+    iteration_history: [],
+    round_graphs: [],
+    steps: [],
+    agents: [],
+    plan: {
+      nodes: [],
+      edges: [],
+      viewport: undefined,
+      loops: null,
+    },
+    pending_review: null,
+    validation_errors: null,
+    is_terminal: status === 'failed',
+    has_transcripts: null,
+  };
+};
+
 export function extractWorkflowCardProjection(
   meta: unknown
 ): WorkflowCardProjection | null {
@@ -207,11 +257,15 @@ export function extractWorkflowCardProjection(
   }
 
   const workflowCard = (meta as Record<string, unknown>).workflow_card;
-  if (!isRecord(workflowCard)) {
-    return null;
+  if (isRecord(workflowCard)) {
+    return workflowCard as unknown as WorkflowCardProjection;
   }
 
-  return workflowCard as unknown as WorkflowCardProjection;
+  if (cardType === 'workflow_plan_generation') {
+    return buildWorkflowPlanGenerationProjection(meta);
+  }
+
+  return null;
 }
 
 type ChatWorkflowCardProps = {
@@ -410,7 +464,7 @@ export function ChatWorkflowCard({
   return (
     <div className="w-full max-w-[640px] rounded-[24px] border border-[#D8E2F0] bg-white p-4 shadow-sm flex flex-col">
       <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1 select-text">
           <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[#64748B]">
             {stateIcon}
             <span>{stateLabel}</span>
@@ -432,19 +486,19 @@ export function ChatWorkflowCard({
             </div>
           )}
         </div>
-        <div className="flex items-center gap-2 self-start">
+        <div className="flex shrink-0 items-center gap-2 self-start">
           {isPlanGenerationCard ? (
             <div
               className={
                 isPlanGenerationFailed
-                  ? 'rounded-full bg-[#FEF2F2] px-3 py-1 text-xs font-semibold text-[#B91C1C]'
-                  : 'rounded-full bg-[#EEF4FF] px-3 py-1 text-xs font-semibold text-[#1D4ED8]'
+                  ? 'rounded-full bg-[#FEF2F2] px-3 py-1 text-xs font-semibold text-[#B91C1C] whitespace-nowrap'
+                  : 'rounded-full bg-[#EEF4FF] px-3 py-1 text-xs font-semibold text-[#1D4ED8] whitespace-nowrap'
               }
             >
               {isPlanGenerationFailed ? t('workflow.card.badges.failed', { defaultValue: 'Failed' }) : t('workflow.card.badges.generating', { defaultValue: 'Generating' })}
             </div>
           ) : (
-            <div className="rounded-full bg-[#EEF4FF] px-3 py-1 text-xs font-semibold text-[#1D4ED8]">
+            <div className="rounded-full bg-[#EEF4FF] px-3 py-1 text-xs font-semibold text-[#1D4ED8] whitespace-nowrap">
               {projection.completed_step_count}/{projection.total_step_count}
             </div>
           )}

@@ -25,7 +25,8 @@ use services::services::{
     analytics_events::{AnalyticsProjector, DomainEvent},
     chat::{ChatAttachmentMeta, extract_attachments},
     workflow_runtime::{
-        WorkflowCardProjection, WorkflowCardState, WorkflowCardStep, build_workflow_card_projection,
+        WorkflowCardProjection, WorkflowCardState, WorkflowCardStep,
+        build_workflow_card_projection, build_workflow_card_projection_lightweight,
     },
 };
 use tokio::{fs, fs::File};
@@ -133,12 +134,39 @@ pub async fn get_messages(
     State(deployment): State<DeploymentImpl>,
     Query(query): Query<ChatMessageListQuery>,
 ) -> Result<ResponseJson<ApiResponse<Vec<ChatMessage>>>, ApiError> {
-    let messages = ChatMessage::find_by_session_id(&deployment.db().pool, session.id, query.limit)
-        .await?
-        .into_iter()
-        .filter(services::services::chat::should_include_message_in_history)
-        .collect();
+    let mut messages =
+        ChatMessage::find_by_session_id_lightweight(&deployment.db().pool, session.id, query.limit)
+            .await?
+            .into_iter()
+            .filter(services::services::chat::should_include_message_in_history)
+            .collect::<Vec<_>>();
+    for message in &mut messages {
+        inject_workflow_card_summary_into_message_meta(&mut message.meta.0);
+    }
     Ok(ResponseJson(ApiResponse::success(messages)))
+}
+
+fn inject_workflow_card_summary_into_message_meta(meta: &mut serde_json::Value) {
+    let Some(meta_obj) = meta.as_object_mut() else {
+        return;
+    };
+    let is_workflow_card = meta_obj
+        .get("card_type")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|ct| ct == "workflow_execution" || ct == "workflow_plan_generation");
+    if !is_workflow_card {
+        return;
+    }
+    if meta_obj.contains_key("workflow_card_summary") || meta_obj.contains_key("workflow_card") {
+        return;
+    }
+    meta_obj.insert(
+        "workflow_card_summary".to_string(),
+        serde_json::json!({
+            "is_terminal": false,
+            "has_transcripts": null,
+        }),
+    );
 }
 
 pub async fn create_message(
@@ -391,9 +419,15 @@ pub async fn get_message(
     Ok(ResponseJson(ApiResponse::success(message)))
 }
 
+#[derive(Debug, Deserialize, TS)]
+pub struct WorkflowCardQuery {
+    pub detail: Option<String>,
+}
+
 pub async fn get_workflow_card(
     State(deployment): State<DeploymentImpl>,
     Path(message_id): Path<Uuid>,
+    Query(query): Query<WorkflowCardQuery>,
 ) -> Result<ResponseJson<ApiResponse<WorkflowCardProjection>>, ApiError> {
     let pool = &deployment.db().pool;
     let message = ChatMessage::find_by_id(pool, message_id)
@@ -407,8 +441,16 @@ pub async fn get_workflow_card(
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| ApiError::BadRequest("Workflow card metadata is missing.".to_string()))?;
 
+    let is_lightweight = query.detail.as_deref() != Some("full");
+
     let projection = match card_type {
-        "workflow_execution" => build_execution_workflow_card_projection(pool, &message).await?,
+        "workflow_execution" => {
+            if is_lightweight {
+                build_execution_workflow_card_projection_lightweight(pool, &message).await?
+            } else {
+                build_execution_workflow_card_projection(pool, &message).await?
+            }
+        }
         "workflow_plan" => build_plan_workflow_card_projection(pool, &message).await?,
         "workflow_plan_generation" => {
             serde_json::from_value(message.meta.0.get("workflow_card").cloned().ok_or_else(
@@ -496,6 +538,80 @@ pub(super) async fn build_execution_workflow_card_projection(
     .map_err(|err| ApiError::BadRequest(err.to_string()))
 }
 
+pub(super) async fn build_execution_workflow_card_projection_lightweight(
+    pool: &sqlx::SqlitePool,
+    message: &ChatMessage,
+) -> Result<WorkflowCardProjection, ApiError> {
+    let execution = WorkflowExecution::find_by_session(pool, message.session_id)
+        .await?
+        .into_iter()
+        .find(|item| item.workflow_card_message_id == Some(message.id))
+        .ok_or_else(|| ApiError::BadRequest("Workflow execution was not found.".to_string()))?;
+    let plan = WorkflowPlan::find_by_id(pool, execution.plan_id)
+        .await?
+        .ok_or_else(|| ApiError::BadRequest("Workflow plan was not found.".to_string()))?;
+    let revision_id = execution.active_revision_id.ok_or_else(|| {
+        ApiError::BadRequest("Workflow execution revision is missing.".to_string())
+    })?;
+    let revision = WorkflowPlanRevision::find_by_id(pool, revision_id)
+        .await?
+        .ok_or_else(|| ApiError::BadRequest("Workflow revision was not found.".to_string()))?;
+    let session_agents = ChatSessionAgent::find_all_for_session(pool, message.session_id).await?;
+    let mut agents = Vec::with_capacity(session_agents.len());
+    for session_agent in &session_agents {
+        if let Some(agent) = ChatAgent::find_by_id(pool, session_agent.agent_id).await? {
+            agents.push(agent);
+        }
+    }
+    let workflow_sessions = WorkflowAgentSession::find_by_execution(pool, execution.id).await?;
+    let steps = WorkflowStep::find_summary_by_execution(pool, execution.id).await?;
+    let edges =
+        db::models::workflow_step_edge::WorkflowStepEdge::find_by_execution(pool, execution.id)
+            .await?;
+    let rounds =
+        db::models::workflow_round::WorkflowRound::find_by_execution(pool, execution.id).await?;
+    let loops =
+        db::models::workflow_loop::WorkflowLoop::find_by_execution(pool, execution.id).await?;
+    let iteration_feedbacks =
+        db::models::workflow_iteration_feedback::WorkflowIterationFeedback::find_by_execution(
+            pool,
+            execution.id,
+        )
+        .await?;
+    let step_reviews =
+        db::models::workflow_step_review::WorkflowStepReview::find_by_execution(pool, execution.id)
+            .await?;
+    let transcripts =
+        db::models::workflow_transcript::WorkflowTranscript::find_unresolved_reviews_by_execution(
+            pool,
+            execution.id,
+        )
+        .await?;
+    let transcript_count =
+        db::models::workflow_transcript::WorkflowTranscript::count_by_execution(pool, execution.id)
+            .await
+            .ok();
+
+    build_workflow_card_projection_lightweight(
+        &execution,
+        &plan,
+        &revision,
+        &steps,
+        &edges,
+        &rounds,
+        &loops,
+        &iteration_feedbacks,
+        &step_reviews,
+        &transcripts,
+        &workflow_sessions,
+        &session_agents,
+        &agents,
+        transcript_count,
+        None,
+    )
+    .map_err(|err| ApiError::BadRequest(err.to_string()))
+}
+
 async fn build_plan_workflow_card_projection(
     pool: &sqlx::SqlitePool,
     message: &ChatMessage,
@@ -545,6 +661,8 @@ async fn build_plan_workflow_card_projection(
             },
             status: "pending".to_string(),
             review_phase: None,
+            lead_review_required: true,
+            user_review_required: true,
             retry_count: 0,
             max_retry: node.data.max_retry.unwrap_or(1) as i32,
             loop_key: node.data.loop_key.clone(),
@@ -583,6 +701,8 @@ async fn build_plan_workflow_card_projection(
         started_at: None,
         completed_at: None,
         validation_errors: None,
+        is_terminal: false,
+        has_transcripts: None,
     })
 }
 
@@ -662,7 +782,7 @@ pub async fn resend_message(
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_chat_input_mode;
+    use super::{inject_workflow_card_summary_into_message_meta, normalize_chat_input_mode};
 
     #[test]
     fn normalize_chat_input_mode_accepts_only_workflow() {
@@ -670,5 +790,40 @@ mod tests {
         assert_eq!(normalize_chat_input_mode(" workflow "), Some("workflow"));
         assert_eq!(normalize_chat_input_mode("free"), None);
         assert_eq!(normalize_chat_input_mode(""), None);
+    }
+
+    #[test]
+    fn inject_summary_adds_placeholder_when_card_already_stripped() {
+        let mut meta = serde_json::json!({
+            "card_type": "workflow_execution"
+        });
+        inject_workflow_card_summary_into_message_meta(&mut meta);
+        let summary = meta.get("workflow_card_summary").expect("summary should exist");
+        assert_eq!(summary["is_terminal"], false);
+    }
+
+    #[test]
+    fn inject_summary_skips_when_summary_already_present() {
+        let mut meta = serde_json::json!({
+            "card_type": "workflow_execution",
+            "workflow_card_summary": {
+                "execution_id": "abc",
+                "is_terminal": true
+            }
+        });
+        inject_workflow_card_summary_into_message_meta(&mut meta);
+        let summary = meta.get("workflow_card_summary").expect("summary should exist");
+        assert_eq!(summary["execution_id"], "abc");
+    }
+
+    #[test]
+    fn inject_summary_skips_non_workflow_messages() {
+        let mut meta = serde_json::json!({
+            "card_type": "other_type",
+            "workflow_card": {"some": "data"}
+        });
+        inject_workflow_card_summary_into_message_meta(&mut meta);
+        assert!(meta.get("workflow_card").is_some(), "non-workflow card should be preserved");
+        assert!(meta.get("workflow_card_summary").is_none());
     }
 }
