@@ -9,6 +9,13 @@ pub(super) struct ProtocolNoticeArgs<'a> {
     output_is_empty: bool,
 }
 
+#[derive(Debug, Clone)]
+struct PlanGenerationPreviousPlanContext {
+    plan_id: Uuid,
+    revision_id: Uuid,
+    plan_json: String,
+}
+
 impl ChatRunner {
     pub(super) fn emit_protocol_notice(
         &self,
@@ -751,6 +758,77 @@ impl ChatRunner {
         }))
     }
 
+    async fn find_plan_generation_previous_plan_context(
+        &self,
+        session_id: Uuid,
+        preferred_message_id: Option<Uuid>,
+    ) -> Result<Option<PlanGenerationPreviousPlanContext>, ChatRunnerError> {
+        use db::models::{
+            chat_message::ChatMessage as DbChatMessage, workflow_plan::WorkflowPlan,
+            workflow_plan_revision::WorkflowPlanRevision,
+        };
+
+        fn read_uuid(value: Option<&serde_json::Value>) -> Option<Uuid> {
+            value
+                .and_then(serde_json::Value::as_str)
+                .and_then(|value| Uuid::parse_str(value).ok())
+        }
+
+        let message_id = match preferred_message_id {
+            Some(message_id) => Some(message_id),
+            None => self.find_session_plan_card_message_id(session_id).await?,
+        };
+        let Some(message_id) = message_id else {
+            return Ok(None);
+        };
+        let Some(message) = DbChatMessage::find_by_id(&self.db.pool, message_id).await? else {
+            return Ok(None);
+        };
+        if message.session_id != session_id {
+            return Ok(None);
+        }
+
+        let meta = &message.meta.0;
+        let generation_meta = meta.get("workflow_plan_generation");
+        let workflow_card = meta.get("workflow_card");
+        let revision_id = read_uuid(
+            generation_meta
+                .and_then(|value| value.get("previous_revision_id"))
+                .or_else(|| meta.get("active_revision_id"))
+                .or_else(|| workflow_card.and_then(|value| value.get("revision_id"))),
+        );
+        let plan_id = read_uuid(
+            generation_meta
+                .and_then(|value| value.get("previous_plan_id"))
+                .or_else(|| meta.get("workflow_plan_id"))
+                .or_else(|| workflow_card.and_then(|value| value.get("plan_id"))),
+        );
+
+        let revision = if let Some(revision_id) = revision_id {
+            WorkflowPlanRevision::find_by_id(&self.db.pool, revision_id).await?
+        } else if let Some(plan_id) = plan_id {
+            WorkflowPlanRevision::find_latest_by_plan(&self.db.pool, plan_id).await?
+        } else {
+            None
+        };
+        let Some(revision) = revision else {
+            return Ok(None);
+        };
+        let plan = WorkflowPlan::find_by_id(&self.db.pool, revision.plan_id).await?;
+        if plan
+            .as_ref()
+            .is_some_and(|plan| plan.session_id != session_id)
+        {
+            return Ok(None);
+        }
+
+        Ok(Some(PlanGenerationPreviousPlanContext {
+            plan_id: revision.plan_id,
+            revision_id: revision.id,
+            plan_json: revision.plan_json,
+        }))
+    }
+
     fn build_plan_generation_placeholder_meta(
         session_id: Uuid,
         message_id: Uuid,
@@ -759,6 +837,7 @@ impl ChatRunner {
         available_agents: &[super::super::workflow_runtime::WorkflowCardAgent],
         state: super::super::workflow_runtime::WorkflowCardState,
         error_message: Option<String>,
+        previous_plan_context: Option<&PlanGenerationPreviousPlanContext>,
     ) -> Result<serde_json::Value, ChatRunnerError> {
         use db::models::workflow_types::{WorkflowPlanAgents, WorkflowPlanJson};
 
@@ -816,19 +895,33 @@ impl ChatRunner {
             has_transcripts: None,
         };
 
+        let mut generation_meta = serde_json::json!({
+            "status": status,
+            "plan_goal": plan_goal,
+            "retryable": status == "failed",
+            "retry_endpoint": format!(
+                "/api/chat/sessions/{session_id}/workflow/plan-generations/{message_id}/retry"
+            ),
+            "error_message": error_message,
+        });
+        if let Some(previous_plan_context) = previous_plan_context
+            && let Some(meta) = generation_meta.as_object_mut()
+        {
+            meta.insert(
+                "previous_plan_id".to_string(),
+                serde_json::json!(previous_plan_context.plan_id),
+            );
+            meta.insert(
+                "previous_revision_id".to_string(),
+                serde_json::json!(previous_plan_context.revision_id),
+            );
+        }
+
         Ok(serde_json::json!({
             "card_type": "workflow_plan_generation",
             "display_state": status,
             "workflow_card": serde_json::to_value(&projection)?,
-            "workflow_plan_generation": {
-                "status": status,
-                "plan_goal": plan_goal,
-                "retryable": status == "failed",
-                "retry_endpoint": format!(
-                    "/api/chat/sessions/{session_id}/workflow/plan-generations/{message_id}/retry"
-                ),
-                "error_message": error_message,
-            }
+            "workflow_plan_generation": generation_meta
         }))
     }
 
@@ -841,6 +934,7 @@ impl ChatRunner {
         available_agents: &[super::super::workflow_runtime::WorkflowCardAgent],
         state: super::super::workflow_runtime::WorkflowCardState,
         error_message: Option<String>,
+        previous_plan_context: Option<&PlanGenerationPreviousPlanContext>,
     ) -> Result<db::models::chat_message::ChatMessage, ChatRunnerError> {
         use db::models::chat_message::{ChatMessage as DbChatMessage, ChatSenderType};
 
@@ -866,6 +960,7 @@ impl ChatRunner {
             available_agents,
             state,
             error_message,
+            previous_plan_context,
         )?;
 
         let existing_message = DbChatMessage::find_by_id(&self.db.pool, message_id).await?;
@@ -901,6 +996,7 @@ impl ChatRunner {
         lead_agent_id: &str,
         available_agents: &[super::super::workflow_runtime::WorkflowCardAgent],
         error_message: impl Into<String>,
+        previous_plan_context: Option<&PlanGenerationPreviousPlanContext>,
     ) -> Result<(), ChatRunnerError> {
         let _ = self
             .upsert_plan_generation_placeholder_card(
@@ -911,6 +1007,7 @@ impl ChatRunner {
                 available_agents,
                 super::super::workflow_runtime::WorkflowCardState::Failed,
                 Some(error_message.into()),
+                previous_plan_context,
             )
             .await?;
         Ok(())
@@ -1012,12 +1109,16 @@ impl ChatRunner {
                     &lead_agent_id,
                     &available_agents,
                     "workflow_generate.content is required to build the execution plan.",
+                    None,
                 )
                 .await?;
             }
             return Ok(());
         }
 
+        let previous_plan_context = self
+            .find_plan_generation_previous_plan_context(session_id, preferred_card_message_id)
+            .await?;
         let placeholder = self
             .upsert_plan_generation_placeholder_card(
                 session_id,
@@ -1027,6 +1128,7 @@ impl ChatRunner {
                 &available_agents,
                 WorkflowCardState::Pending,
                 None,
+                previous_plan_context.as_ref(),
             )
             .await?;
 
@@ -1047,6 +1149,7 @@ impl ChatRunner {
                 &lead_agent_id,
                 &available_agents,
                 "A workflow execution is already active in this session.",
+                previous_plan_context.as_ref(),
             )
             .await?;
             return Ok(());
@@ -1066,6 +1169,9 @@ impl ChatRunner {
             &lead_agent_id,
             &available_agents,
             previous_failure_reason,
+            previous_plan_context
+                .as_ref()
+                .map(|context| context.plan_json.as_str()),
             response_language_instruction,
             design_doc_paths,
         );
@@ -1076,6 +1182,7 @@ impl ChatRunner {
             lead_agent_id = %lead_agent_id,
             available_agent_ids = ?available_agents.iter().map(|a| &a.agent_id).collect::<Vec<_>>(),
             previous_failure_reason = ?previous_failure_reason,
+            previous_plan_id = ?previous_plan_context.as_ref().map(|context| context.plan_id),
             "[plan_generation] built plan generation prompt",
         );
 
@@ -1104,6 +1211,7 @@ impl ChatRunner {
                     &lead_agent_id,
                     &available_agents,
                     err.to_string(),
+                    previous_plan_context.as_ref(),
                 )
                 .await?;
                 return Ok(());
@@ -1130,6 +1238,7 @@ impl ChatRunner {
                     &lead_agent_id,
                     &available_agents,
                     "Lead agent did not return a workflow JSON object.",
+                    previous_plan_context.as_ref(),
                 )
                 .await?;
                 return Ok(());
@@ -1151,6 +1260,7 @@ impl ChatRunner {
                     &lead_agent_id,
                     &available_agents,
                     format!("Lead agent returned invalid workflow JSON: {err}"),
+                    previous_plan_context.as_ref(),
                 )
                 .await?;
                 return Ok(());
@@ -1179,6 +1289,7 @@ impl ChatRunner {
                 &lead_agent_id,
                 &available_agents,
                 validation_summary,
+                previous_plan_context.as_ref(),
             )
             .await?;
             return Ok(());

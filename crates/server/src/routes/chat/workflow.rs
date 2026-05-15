@@ -137,6 +137,7 @@ pub async fn generate_plan_and_run(
         &lead_agent.id.to_string(),
         &available_agents,
         None,
+        None,
         response_language_instruction,
         None,
     );

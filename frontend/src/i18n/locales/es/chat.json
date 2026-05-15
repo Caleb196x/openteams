@@ -102,26 +102,26 @@
       "label": "Opciones de modo de trabajo",
       "workflow": {
         "label": "Modo de flujo de trabajo",
-        "description": "El usuario y el agente principal confirman requisitos, diseñan la solucion y luego generan y ejecutan un plan.",
-        "detail": "El modo de flujo de trabajo guia la confirmacion de requisitos y el diseño de la solucion mediante el agente principal; despues genera un plan de ejecucion y coordina a los miembros paso a paso."
+        "description": "Confirma requisitos, conversa sobre la solución, genera un plan y ejecuta tareas con el agente principal. Adecuado para tareas complejas.",
+        "detail": "En el modo de flujo de trabajo, conversarás con el agente principal, que genera el plan y asigna tareas a otros miembros.\nEl sistema convierte el plan en un grafo visual de nodos de tarea y lo programa automáticamente, para que puedas seguir claramente la ejecución de cada tarea.\nAntes de que el flujo empiece a ejecutarse, el plan se puede modificar libremente; si la primera ronda no cumple las expectativas, puedes iniciar una nueva iteración.\nPuedes cambiar el agente principal haciendo clic en la tarjeta de un miembro en la lista de miembros de IA."
       },
       "free": {
         "label": "Modo de chat libre",
-        "description": "El usuario puede hablar con cualquier agente, y los agentes tambien pueden conversar y colaborar entre si.",
-        "detail": "El modo de chat libre mantiene una conversacion abierta: puedes mencionar directamente a cualquier miembro, y los agentes pueden debatir, transferir contexto y colaborar entre si."
+        "description": "Usa @ para hablar con cualquier agente. Los agentes pueden comunicarse libremente entre sí, adecuado para tareas simples o chats grupales diarios.",
+        "detail": "En el modo de chat libre, puedes usar @ directamente para asignar trabajo a cualquier miembro.\nLos agentes pueden debatir y colaborar libremente respetando el protocolo del equipo.\nEl modo de chat libre puede guiar el comportamiento y la colaboración de los miembros mediante el protocolo del equipo, explorando formas de colaboración más flexibles."
       },
-      "switchHint": "Haz clic en una tarjeta para cambiar el modo de trabajo del cuadro de entrada."
+      "switchHint": "Usa el botón de cambio en la parte inferior del cuadro de mensaje para cambiar el modo de trabajo en cualquier momento. El contexto sigue compartido después del cambio."
     },
-    "mentionAgents": "Mencionar agentes",
-    "chatModeName": "modo chat",
+    "mentionAgents": "@Miembros del equipo",
+    "chatModeName": "modo de chat libre",
     "workflowModeName": "modo de flujo de trabajo",
-    "modeSwitchTooltip": "Actualmente en {{currentMode}}, haz clic para cambiar a {{targetMode}}.",
+    "modeSwitchTooltip": "Actualmente en {{currentMode}}, haz clic para cambiar a {{targetMode}}",
     "switchToFreeMode": "Cambiar a chat libre",
     "switchToWorkflowMode": "Cambiar a modo de flujo de trabajo",
     "freeModeDescription": "Chat libre: usa @ para enrutar mensajes a los miembros.",
     "workflowModeDescription": "Modo de flujo de trabajo: los mensajes se enrutan al agente principal.",
     "workflowModeLabel": "- Modo de flujo de trabajo",
-    "workflowPlaceholder": "Describe la solicitud del flujo de trabajo...",
+    "workflowPlaceholder": "Habla con el agente principal sobre la solución, genera un plan y ejecútalo...",
     "mentionAllOption": "Todos los miembros (@all)",
     "mentionAllSuggestion": "@Todos los miembros",
     "mentionAllBadge": "@all",

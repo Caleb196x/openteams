@@ -88,16 +88,16 @@
     "emptyAction": "开始输入"
   },
   "input": {
-    "mentionAgents": "提及 Agent",
-    "chatModeName": "聊天模式",
+    "mentionAgents": "@团队成员",
+    "chatModeName": "自由聊天模式",
     "workflowModeName": "工作流模式",
-    "modeSwitchTooltip": "当前{{currentMode}}，点击切换到{{targetMode}}。",
+    "modeSwitchTooltip": "当前{{currentMode}}，点击切换到{{targetMode}}",
     "switchToFreeMode": "切换到自由聊天模式",
     "switchToWorkflowMode": "切换到工作流模式",
     "freeModeDescription": "自由聊天模式：使用 @ 将消息指派给成员。",
-    "workflowModeDescription": "工作流模式：消息统一路由到 lead agent。",
+    "workflowModeDescription": "工作流模式：消息统一路由到主Agent。",
     "workflowModeLabel": "- 工作流模式",
-    "workflowPlaceholder": "描述工作流请求...",
+    "workflowPlaceholder": "与主Agent讨论方案，生成计划并执行...",
     "mentionAllOption": "所有成员（@all）",
     "mentionAllSuggestion": "@所有成员",
     "mentionAllBadge": "@all",
@@ -134,15 +134,15 @@
       "label": "工作模式选项",
       "workflow": {
         "label": "工作流模式",
-        "description": "用户与主 agent 先确认需求、设计方案，再生成计划并协同执行。",
-        "detail": "工作流模式会由主 agent 引导完成需求确认和方案设计，随后生成执行计划并协调成员逐步推进，适合复杂项目和需要明确产出的任务。"
+        "description": "与主Agent确认需求、讨论方案、生成计划和执行任务，适合复杂任务。",
+        "detail": "工作流模式下，您将与主Agent对话，由主Agent负责生成计划并为其他成员分配任务。\n系统会将计划转换为可视化任务节点图，并自动调度运行，您能清晰地跟踪每个任务的执行情况。\n工作流在正式开始执行前可以任意修改计划；如果第一轮计划没有达到预期结果可以开启新一轮迭代。\n您可以通过点击AI成员列表中的成员信息卡片来切换主Agent。"
       },
       "free": {
         "label": "自由聊天模式",
-        "description": "用户可与任意 agent 对话，agent 之间也能在会话中对话协作。",
-        "detail": "自由聊天模式保持开放对话体验，用户可以直接 @ 任意成员，也允许 agent 与 agent 之间进行讨论、交接和协作。"
+        "description": "使用@与任意Agent对话，Agent之间可以自由交流，适合简单任务或日常群聊。",
+        "detail": "自由聊天模式下，您可以直接 @ 任意成员布置任务。\n支持Agent与Agent之间在遵守团队准则的基础上进行自由讨论和协作。\n自由聊天模式能通过团队准则来引导成员的行为和协作，进而探索出更多好玩的协作方式。"
       },
-      "switchHint": "点击卡片即可切换底部输入框的工作模式。"
+      "switchHint": "使用消息框底部切换按钮可以随时切换工作模式，切换后依然共享上下文。"
     }
   },
   "message": {
@@ -404,7 +404,7 @@
     "roleSettingsRequired": "角色设定为必填项。",
     "presetDisplay": {
       "members": {
-        "coordinator_pmo": "专案经理",
+        "coordinator_pmo": "项目经理",
         "product_manager": "产品经理",
         "system_architect": "系统架构师",
         "prompt_engineer": "提示工程师",

@@ -1008,6 +1008,7 @@ pub fn build_plan_generation_prompt(
     lead_agent_id: &str,
     available_agents: &[WorkflowCardAgent],
     previous_failure_reason: Option<&str>,
+    previous_plan_json: Option<&str>,
     response_language_instruction: &str,
     design_doc_paths: Option<&[String]>,
 ) -> String {
@@ -1133,6 +1134,16 @@ Hard requirements:
     prompt.push_str(response_language_instruction.trim());
     prompt.push_str("\n\nPlan goal brief:\n");
     prompt.push_str(plan_goal.trim());
+    if let Some(previous_plan) = previous_plan_json
+        .map(str::trim)
+        .filter(|previous_plan| !previous_plan.is_empty())
+    {
+        prompt.push_str("\n\nExisting workflow plan JSON:\n```json\n");
+        prompt.push_str(previous_plan);
+        prompt.push_str(
+            "\n```\nUse this existing plan as the baseline. Apply the requested changes from the plan goal brief, preserve correct unchanged work, and return the complete revised workflow plan JSON.",
+        );
+    }
     prompt.push_str("\n\nLead agent id:\n");
     prompt.push_str(lead_agent_id);
     prompt.push_str("\n\nAvailable agents JSON:\n");
@@ -3729,6 +3740,7 @@ mod tests {
             "lead-agent-id",
             &[],
             Some("Missing result node in the previous workflow JSON."),
+            None,
             "You MUST write human-readable JSON string values in Simplified Chinese.",
             None,
         );
@@ -3755,6 +3767,25 @@ mod tests {
                     .find("## Dynamic Inputs")
                     .expect("dynamic inputs section")
         );
+    }
+
+    #[test]
+    fn build_plan_generation_prompt_includes_previous_plan_json() {
+        let previous_plan_json = r#"{"version":"1","title":"Existing Plan","goal":"Original goal","agents":{"lead":"lead-agent-id","available":["lead-agent-id"]},"nodes":[],"edges":[]}"#;
+        let prompt = build_plan_generation_prompt(
+            "Add regression coverage to the existing plan.",
+            "lead-agent-id",
+            &[],
+            None,
+            Some(previous_plan_json),
+            "You MUST write human-readable JSON string values in English.",
+            None,
+        );
+
+        assert!(prompt.contains("Existing workflow plan JSON"));
+        assert!(prompt.contains(previous_plan_json));
+        assert!(prompt.contains("Use this existing plan as the baseline."));
+        assert!(prompt.contains("return the complete revised workflow plan JSON"));
     }
 
     #[test]

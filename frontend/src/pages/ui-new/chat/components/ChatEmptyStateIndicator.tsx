@@ -57,6 +57,11 @@ export function ChatEmptyStateIndicator({
       ];
   const selectedModeCard =
     modeCards.find((modeCard) => modeCard.id === selectedMode) ?? modeCards[0];
+  const selectedModeDetailItems =
+    selectedModeCard?.detail
+      .split(/\r?\n/)
+      .map((item) => item.replace(/^[-*]\s*/, '').trim())
+      .filter(Boolean) ?? [];
 
   return (
     <div
@@ -163,7 +168,15 @@ export function ChatEmptyStateIndicator({
 
           {selectedModeCard ? (
             <div className="chat-session-empty-state-mode-detail">
-              <p>{selectedModeCard.detail}</p>
+              {selectedModeDetailItems.length > 1 ? (
+                <ul>
+                  {selectedModeDetailItems.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p>{selectedModeCard.detail}</p>
+              )}
               <span>{t('input.modeCards.switchHint')}</span>
             </div>
           ) : null}

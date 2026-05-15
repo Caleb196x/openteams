@@ -1716,7 +1716,7 @@ export function ChatSessions() {
       setChatInputModeBySessionId((prev) => {
         const nextMode: ChatInputMode =
           mode ??
-          ((prev[activeSessionId] ?? 'free') === 'workflow'
+          ((prev[activeSessionId] ?? 'workflow') === 'workflow'
             ? 'free'
             : 'workflow');
         return {

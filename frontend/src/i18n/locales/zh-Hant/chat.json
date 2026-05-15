@@ -102,26 +102,26 @@
       "label": "工作模式選項",
       "workflow": {
         "label": "工作流模式",
-        "description": "使用者與主 agent 先確認需求、設計方案，再生成計畫並協同執行。",
-        "detail": "工作流模式會由主 agent 引導完成需求確認和方案設計，隨後生成執行計畫並協調成員逐步推進，適合複雜專案和需要明確產出的任務。"
+        "description": "與主Agent確認需求、討論方案、生成計畫和執行任務，適合複雜任務。",
+        "detail": "工作流模式下，您將與主Agent對話，由主Agent負責生成計畫並為其他成員分配任務。\n系統會將計畫轉換為視覺化任務節點圖，並自動調度運行，您能清楚追蹤每個任務的執行情況。\n工作流正式開始執行前可以任意修改計畫；如果第一輪計畫沒有達到預期結果，可以開啟新一輪迭代。\n您可以點擊AI成員列表中的成員資訊卡片來切換主Agent。"
       },
       "free": {
         "label": "自由聊天模式",
-        "description": "使用者可與任意 agent 對話，agent 之間也能在會話中對話協作。",
-        "detail": "自由聊天模式保持開放對話體驗，使用者可以直接 @ 任意成員，也允許 agent 與 agent 之間進行討論、交接和協作。"
+        "description": "使用@與任意Agent對話，Agent之間可以自由交流，適合簡單任務或日常群聊。",
+        "detail": "自由聊天模式下，您可以直接 @ 任意成員佈置任務。\n支援Agent與Agent之間在遵守團隊準則的基礎上自由討論和協作。\n自由聊天模式能透過團隊準則引導成員的行為和協作，進而探索更多有趣的協作方式。"
       },
-      "switchHint": "點擊卡片即可切換底部輸入框的工作模式。"
+      "switchHint": "使用訊息框底部切換按鈕可以隨時切換工作模式，切換後依然共享上下文。"
     },
-    "mentionAgents": "提及 Agent",
-    "chatModeName": "聊天模式",
+    "mentionAgents": "@團隊成員",
+    "chatModeName": "自由聊天模式",
     "workflowModeName": "工作流模式",
-    "modeSwitchTooltip": "當前{{currentMode}}，點擊切換到{{targetMode}}。",
+    "modeSwitchTooltip": "目前{{currentMode}}，點擊切換到{{targetMode}}",
     "switchToFreeMode": "切換到自由聊天模式",
     "switchToWorkflowMode": "切換到工作流模式",
     "freeModeDescription": "自由聊天模式：使用 @ 將訊息指派給成員。",
-    "workflowModeDescription": "工作流模式：訊息統一路由到 lead agent。",
+    "workflowModeDescription": "工作流模式：訊息統一路由到主Agent。",
     "workflowModeLabel": "- 工作流模式",
-    "workflowPlaceholder": "描述工作流請求...",
+    "workflowPlaceholder": "與主Agent討論方案，生成計畫並執行...",
     "mentionAllOption": "所有成員（@all）",
     "mentionAllSuggestion": "@所有成員",
     "mentionAllBadge": "@all",
@@ -399,7 +399,7 @@
     "roleSettingsRequired": "角色設定為必填欄位。",
     "presetDisplay": {
       "members": {
-        "coordinator_pmo": "專案經理",
+        "coordinator_pmo": "項目經理",
         "product_manager": "產品經理",
         "system_architect": "系統架構師",
         "prompt_engineer": "提示工程師",

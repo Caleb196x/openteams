@@ -917,19 +917,21 @@ impl ChatRunner {
                 markdown.push_str("\n```\n");
             }
 
-            markdown.push_str("## Team Protocol\n");
-            if let Some(protocol) = team_protocol {
-                if !protocol.trim().is_empty() {
-                    markdown.push_str("\n````\n");
-                    markdown.push_str(protocol.trim());
-                    markdown.push_str("\n````\n");
+            if !is_workflow_mode {
+                markdown.push_str("## Team Protocol\n");
+                if let Some(protocol) = team_protocol {
+                    if !protocol.trim().is_empty() {
+                        markdown.push_str("\n````\n");
+                        markdown.push_str(protocol.trim());
+                        markdown.push_str("\n````\n");
+                    } else {
+                        markdown.push_str("No team protocol configured.\n");
+                    }
                 } else {
                     markdown.push_str("No team protocol configured.\n");
                 }
-            } else {
-                markdown.push_str("No team protocol configured.\n");
+                markdown.push('\n');
             }
-            markdown.push('\n');
         }
 
         markdown.push_str("## Group Members\n");

@@ -102,26 +102,26 @@
       "label": "Options de mode de travail",
       "workflow": {
         "label": "Mode workflow",
-        "description": "L'utilisateur et l'agent principal confirment les besoins, conçoivent la solution, puis generent et executent un plan.",
-        "detail": "Le mode workflow fait passer la demande par l'agent principal pour confirmer les besoins et concevoir la solution, puis generer un plan d'execution et coordonner les membres etape par etape."
+        "description": "Confirmez les besoins, discutez de la solution, générez un plan et exécutez les tâches avec l’agent principal. Adapté aux tâches complexes.",
+        "detail": "En mode workflow, vous échangez avec l’agent principal, qui génère le plan et attribue les tâches aux autres membres.\nLe système transforme le plan en graphe visuel de nœuds de tâches et le planifie automatiquement, afin que vous puissiez suivre clairement l’exécution de chaque tâche.\nAvant le début de l’exécution, le plan peut être modifié librement ; si le premier tour ne répond pas aux attentes, vous pouvez lancer une nouvelle itération.\nVous pouvez changer d’agent principal en cliquant sur la carte d’un membre dans la liste des membres IA."
       },
       "free": {
         "label": "Mode discussion libre",
-        "description": "L'utilisateur peut parler avec n'importe quel agent, et les agents peuvent aussi echanger et collaborer entre eux.",
-        "detail": "Le mode discussion libre garde une conversation ouverte : vous pouvez mentionner directement n'importe quel membre, et les agents peuvent discuter, transmettre le contexte et collaborer entre eux."
+        "description": "Utilisez @ pour parler à n’importe quel agent. Les agents peuvent communiquer librement entre eux, adapté aux tâches simples ou aux discussions de groupe quotidiennes.",
+        "detail": "En mode discussion libre, vous pouvez directement utiliser @ pour confier une tâche à n’importe quel membre.\nLes agents peuvent discuter et collaborer librement tout en respectant le protocole d’équipe.\nLe mode discussion libre peut guider le comportement et la collaboration des membres via le protocole d’équipe, afin d’explorer des modes de collaboration plus ouverts."
       },
-      "switchHint": "Cliquez sur une carte pour changer le mode de travail du champ de saisie."
+      "switchHint": "Utilisez le bouton de bascule en bas du champ de message pour changer de mode de travail à tout moment. Le contexte reste partagé après le changement."
     },
-    "mentionAgents": "Mentionner des agents",
-    "chatModeName": "mode chat",
+    "mentionAgents": "@Membres de l’équipe",
+    "chatModeName": "mode discussion libre",
     "workflowModeName": "mode workflow",
-    "modeSwitchTooltip": "Mode actuel {{currentMode}}, cliquez pour passer en {{targetMode}}.",
+    "modeSwitchTooltip": "Mode actuel {{currentMode}}, cliquez pour passer en {{targetMode}}",
     "switchToFreeMode": "Basculer en discussion libre",
     "switchToWorkflowMode": "Basculer en mode workflow",
     "freeModeDescription": "Discussion libre : utilisez @ pour router les messages aux membres.",
-    "workflowModeDescription": "Mode workflow : les messages sont routés vers l'agent principal.",
+    "workflowModeDescription": "Mode workflow : les messages sont routés vers l’agent principal.",
     "workflowModeLabel": "- Mode workflow",
-    "workflowPlaceholder": "Décrivez la demande de workflow...",
+    "workflowPlaceholder": "Discutez de la solution avec l’agent principal, générez un plan et exécutez-le...",
     "mentionAllOption": "Tous les membres (@all)",
     "mentionAllSuggestion": "@Tous les membres",
     "mentionAllBadge": "@all",
