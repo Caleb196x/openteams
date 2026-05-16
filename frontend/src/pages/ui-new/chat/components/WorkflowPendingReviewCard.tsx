@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { AlertCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { WorkflowPendingReviewData } from '@/lib/api';
+import { localizeWorkflowGeneratedText } from './workflowGeneratedText';
 
 type WorkflowPendingReviewCardProps = {
   pendingReview: WorkflowPendingReviewData;
@@ -48,6 +49,11 @@ export function WorkflowPendingReviewCard({
     [pendingReview.prompt_template.fields]
   );
   const disabled = pendingActionId === pendingReview.review_id;
+  const reviewMessage = pendingReview.prompt_template.message
+    ? localizeWorkflowGeneratedText(pendingReview.prompt_template.message, t)
+    : t('workflow.pendingReview.defaultMessage', {
+        defaultValue: 'Please review the current result.',
+      });
 
   const handleApprove = () => {
     setExpandedReject(false);
@@ -92,10 +98,7 @@ export function WorkflowPendingReviewCard({
       </div>
 
       <p className="text-[11px] text-slate-600 mb-3 leading-relaxed font-medium">
-        {pendingReview.prompt_template.message ||
-          t('workflow.pendingReview.defaultMessage', {
-            defaultValue: 'Please review the current result.',
-          })}
+        {reviewMessage}
       </p>
 
       {pendingReview.context_summary && (

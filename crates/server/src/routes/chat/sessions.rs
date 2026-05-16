@@ -24,8 +24,9 @@ use deployment::Deployment;
 use git::{Commit, DiffTarget, GitCli, GitService};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use services::services::analytics_events::{
-    AnalyticsProjector, DomainEvent, extract_executor_profile_variant,
+use services::services::{
+    analytics_events::{AnalyticsProjector, DomainEvent},
+    workflow_analytics::{self, hash_user_id},
 };
 use sqlx::FromRow;
 use ts_rs::TS;
@@ -62,20 +63,15 @@ pub async fn create_session(
     Json(payload): Json<CreateChatSession>,
 ) -> Result<ResponseJson<ApiResponse<ChatSession>>, ApiError> {
     let session = ChatSession::create(&deployment.db().pool, &payload, Uuid::new_v4()).await?;
-
-    let analytics_projector = AnalyticsProjector::new(
-        &deployment.db().pool,
-        deployment.analytics().as_ref(),
-        deployment.analytics_enabled(),
+    let user_id_hash = hash_user_id(deployment.user_id());
+    workflow_analytics::track_session_created(
+        workflow_analytics::analytics_if_enabled(
+            deployment.analytics().as_ref(),
+            deployment.analytics_enabled(),
+        ),
+        session.id,
+        Some(&user_id_hash),
     );
-    let title_length = payload.title.as_ref().map(|t| t.len()).unwrap_or(0);
-    analytics_projector
-        .project_or_warn(DomainEvent::SessionCreated {
-            session_id: session.id,
-            actor_user_id: deployment.user_id().to_string(),
-            title_length,
-        })
-        .await;
 
     // Initialize session stats
     let _ = AnalyticsSessionStats::upsert(&deployment.db().pool, session.id, None).await;
@@ -125,7 +121,10 @@ pub async fn delete_session(
 
     let analytics_projector = AnalyticsProjector::new(
         &deployment.db().pool,
-        deployment.analytics().as_ref(),
+        workflow_analytics::analytics_if_enabled(
+            deployment.analytics().as_ref(),
+            deployment.analytics_enabled(),
+        ),
         deployment.analytics_enabled(),
     );
     analytics_projector
@@ -1184,13 +1183,44 @@ pub async fn get_session_workspace_changes(
 ) -> Result<ResponseJson<ApiResponse<WorkspaceChangesResponse>>, ApiError> {
     let workspace_path = query.path.trim();
     let include_diff = query.include_diff.unwrap_or(true);
+    let user_id_hash = hash_user_id(deployment.user_id());
     if workspace_path.is_empty() {
+        workflow_analytics::track_api_failure(
+            workflow_analytics::analytics_if_enabled(
+                deployment.analytics().as_ref(),
+                deployment.analytics_enabled(),
+            ),
+            Some(session.id),
+            Some(&user_id_hash),
+            "chat.sessions.workspace_changes",
+            400,
+            "workspace_path_required",
+        );
         return Err(ApiError::BadRequest(
             "Workspace path is required.".to_string(),
         ));
     }
 
     if !session_has_workspace_path(&deployment.db().pool, session.id, workspace_path).await? {
+        workflow_analytics::track_permission_denied(
+            workflow_analytics::analytics_if_enabled(
+                deployment.analytics().as_ref(),
+                deployment.analytics_enabled(),
+            ),
+            session.id,
+            "workspace_path_not_in_session",
+        );
+        workflow_analytics::track_api_failure(
+            workflow_analytics::analytics_if_enabled(
+                deployment.analytics().as_ref(),
+                deployment.analytics_enabled(),
+            ),
+            Some(session.id),
+            Some(&user_id_hash),
+            "chat.sessions.workspace_changes",
+            400,
+            "workspace_path_not_in_session",
+        );
         return Err(ApiError::BadRequest(
             "Workspace path is not part of this session.".to_string(),
         ));
@@ -1205,7 +1235,41 @@ pub async fn get_session_workspace_changes(
         collect_workspace_changes(session_id, &workspace_path_owned, include_diff, runs)
     })
     .await
-    .map_err(|err| ApiError::BadRequest(format!("Failed to inspect workspace changes: {err}")))?;
+    .map_err(|err| {
+        workflow_analytics::track_api_failure(
+            workflow_analytics::analytics_if_enabled(
+                deployment.analytics().as_ref(),
+                deployment.analytics_enabled(),
+            ),
+            Some(session.id),
+            Some(&user_id_hash),
+            "chat.sessions.workspace_changes",
+            400,
+            "workspace_changes_task_failed",
+        );
+        ApiError::BadRequest(format!("Failed to inspect workspace changes: {err}"))
+    })?;
+
+    let diff_file_count = response
+        .changes
+        .as_ref()
+        .map(|changes| {
+            changes.modified.len()
+                + changes.added.len()
+                + changes.deleted.len()
+                + changes.untracked.len()
+        })
+        .unwrap_or(0);
+    workflow_analytics::track_diff_viewed(
+        workflow_analytics::analytics_if_enabled(
+            deployment.analytics().as_ref(),
+            deployment.analytics_enabled(),
+        ),
+        session.id,
+        Some(&user_id_hash),
+        None,
+        diff_file_count,
+    );
 
     Ok(ResponseJson(ApiResponse::success(response)))
 }
@@ -1297,22 +1361,17 @@ pub async fn create_session_agent(
     )
     .await?;
 
-    let analytics_projector = AnalyticsProjector::new(
-        &deployment.db().pool,
-        deployment.analytics().as_ref(),
-        deployment.analytics_enabled(),
+    let user_id_hash = hash_user_id(deployment.user_id());
+    workflow_analytics::track_agent_added(
+        workflow_analytics::analytics_if_enabled(
+            deployment.analytics().as_ref(),
+            deployment.analytics_enabled(),
+        ),
+        session.id,
+        Some(&user_id_hash),
+        Some(&agent.runner_type),
+        created.workspace_path.is_some(),
     );
-    analytics_projector
-        .project_or_warn(DomainEvent::AgentAdded {
-            session_id: session.id,
-            actor_user_id: deployment.user_id().to_string(),
-            agent_id: agent.id,
-            agent_name: agent.name.clone(),
-            runner_type: agent.runner_type.clone(),
-            executor_profile_variant: extract_executor_profile_variant(&agent.tools_enabled.0),
-            has_workspace: created.workspace_path.is_some(),
-        })
-        .await;
     Ok(ResponseJson(ApiResponse::success(created)))
 }
 
@@ -1465,22 +1524,17 @@ pub async fn archive_session(
     )
     .await?;
 
-    if let Some(stats) = session_stats {
-        let analytics_projector = AnalyticsProjector::new(
-            &deployment.db().pool,
-            deployment.analytics().as_ref(),
-            deployment.analytics_enabled(),
+    if session_stats.is_some() {
+        let user_id_hash = hash_user_id(deployment.user_id());
+        workflow_analytics::track_session_archived(
+            workflow_analytics::analytics_if_enabled(
+                deployment.analytics().as_ref(),
+                deployment.analytics_enabled(),
+            ),
+            session.id,
+            Some(&user_id_hash),
+            false,
         );
-        let duration_seconds = (chrono::Utc::now() - session.created_at).num_seconds();
-        analytics_projector
-            .project_or_warn(DomainEvent::SessionArchived {
-                session_id: session.id,
-                actor_user_id: deployment.user_id().to_string(),
-                duration_seconds,
-                message_count: stats.message_count,
-                agent_count: stats.agent_count,
-            })
-            .await;
     }
 
     Ok(ResponseJson(ApiResponse::success(updated)))
@@ -1511,17 +1565,16 @@ pub async fn restore_session(
     )
     .await?;
 
-    let analytics_projector = AnalyticsProjector::new(
-        &deployment.db().pool,
-        deployment.analytics().as_ref(),
-        deployment.analytics_enabled(),
+    let user_id_hash = hash_user_id(deployment.user_id());
+    workflow_analytics::track_session_archived(
+        workflow_analytics::analytics_if_enabled(
+            deployment.analytics().as_ref(),
+            deployment.analytics_enabled(),
+        ),
+        session.id,
+        Some(&user_id_hash),
+        true,
     );
-    analytics_projector
-        .project_or_warn(DomainEvent::SessionRestored {
-            session_id: session.id,
-            actor_user_id: deployment.user_id().to_string(),
-        })
-        .await;
 
     Ok(ResponseJson(ApiResponse::success(updated)))
 }
@@ -1535,6 +1588,14 @@ pub async fn stream_session_ws(
 
     Ok(ws.on_upgrade(move |socket| async move {
         if let Err(err) = handle_chat_stream_ws(socket, rx).await {
+            workflow_analytics::track_websocket_disconnected(
+                workflow_analytics::analytics_if_enabled(
+                    deployment.analytics().as_ref(),
+                    deployment.analytics_enabled(),
+                ),
+                session.id,
+                "chat_stream_closed",
+            );
             tracing::warn!("chat stream ws closed: {}", err);
         }
     }))

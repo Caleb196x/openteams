@@ -287,7 +287,7 @@ type ChatWorkflowCardProps = {
   projection?: WorkflowCardProjection | null;
   onExecute?: (projection: WorkflowCardProjection) => void;
   onPauseAll?: (executionId: string) => void;
-  onResume?: (executionId: string) => void;
+  onResume?: (executionId: string, projection: WorkflowCardProjection) => void;
   onRetryStep?: (stepId: string, retryTarget?: 'task' | 'review') => void;
   onOpenWindow?: () => void;
   onRetryPlanGeneration?: (messageId: string) => void;
@@ -687,7 +687,7 @@ export function ChatWorkflowCard({
         {canResumeExecution && projection.execution_id && onResume && (
           <button
             type="button"
-            onClick={() => onResume(projection.execution_id!)}
+            onClick={() => onResume(projection.execution_id!, projection)}
             className="flex items-center gap-2 rounded-full bg-[var(--chat-session-send-blue,#5094fb)] px-5 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[var(--chat-session-send-blue-hover,#4084eb)]"
           >
             <PlayIcon className="size-4" weight="bold" />

@@ -1929,7 +1929,9 @@ pub fn build_workflow_card_projection(
     let state = match execution.status {
         WorkflowExecutionStatus::Pending => WorkflowCardState::Pending,
         WorkflowExecutionStatus::Completed => WorkflowCardState::Completed,
-        WorkflowExecutionStatus::Failed => WorkflowCardState::Failed,
+        WorkflowExecutionStatus::Failed | WorkflowExecutionStatus::Cancelled => {
+            WorkflowCardState::Failed
+        }
         WorkflowExecutionStatus::Paused => WorkflowCardState::Paused,
         WorkflowExecutionStatus::Waiting => WorkflowCardState::Waiting,
         WorkflowExecutionStatus::Recompiling => WorkflowCardState::Running,
@@ -1938,7 +1940,9 @@ pub fn build_workflow_card_projection(
 
     let is_terminal = matches!(
         execution.status,
-        WorkflowExecutionStatus::Completed | WorkflowExecutionStatus::Failed
+        WorkflowExecutionStatus::Completed
+            | WorkflowExecutionStatus::Failed
+            | WorkflowExecutionStatus::Cancelled
     );
 
     Ok(WorkflowCardProjection {
@@ -2094,7 +2098,9 @@ pub fn build_workflow_card_projection_lightweight(
     let state = match execution.status {
         WorkflowExecutionStatus::Pending => WorkflowCardState::Pending,
         WorkflowExecutionStatus::Completed => WorkflowCardState::Completed,
-        WorkflowExecutionStatus::Failed => WorkflowCardState::Failed,
+        WorkflowExecutionStatus::Failed | WorkflowExecutionStatus::Cancelled => {
+            WorkflowCardState::Failed
+        }
         WorkflowExecutionStatus::Paused => WorkflowCardState::Paused,
         WorkflowExecutionStatus::Waiting => WorkflowCardState::Waiting,
         WorkflowExecutionStatus::Recompiling => WorkflowCardState::Running,
@@ -2103,7 +2109,9 @@ pub fn build_workflow_card_projection_lightweight(
 
     let is_terminal = matches!(
         execution.status,
-        WorkflowExecutionStatus::Completed | WorkflowExecutionStatus::Failed
+        WorkflowExecutionStatus::Completed
+            | WorkflowExecutionStatus::Failed
+            | WorkflowExecutionStatus::Cancelled
     );
 
     let has_transcripts = transcript_count.map(|count| count > 0);
@@ -3675,12 +3683,26 @@ fn review_dependency_contexts(
 }
 
 fn result_dependency_contexts(
-    _step: &WorkflowStep,
-    _steps: &[WorkflowStep],
-    _edges: &[WorkflowStepEdge],
+    step: &WorkflowStep,
+    steps: &[WorkflowStep],
+    edges: &[WorkflowStepEdge],
     plan: Option<&WorkflowPlan>,
 ) -> Vec<String> {
     let mut contexts = Vec::new();
+    let predecessor_steps = transitive_predecessor_steps(step, steps, edges);
+
+    if !predecessor_steps.is_empty() {
+        contexts.push(format!(
+            "## Result Dependency: Formal Predecessor Results\n\n{}",
+            predecessor_steps
+                .iter()
+                .map(|source_step| {
+                    format_step_dependency_context("Formal Predecessor Result", source_step)
+                })
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        ));
+    }
 
     if let Some(plan) = plan {
         contexts.push(format!(
@@ -3690,6 +3712,127 @@ fn result_dependency_contexts(
     }
 
     contexts
+}
+
+pub fn predecessor_summaries_with_reviews(
+    step: &WorkflowStep,
+    steps: &[WorkflowStep],
+    edges: &[WorkflowStepEdge],
+    plan: Option<&WorkflowPlan>,
+    reviews: &[WorkflowStepReview],
+) -> Vec<String> {
+    let mut contexts = predecessor_summaries(step, steps, edges, plan);
+    if step.step_type == WorkflowStepType::Result {
+        let predecessor_steps = transitive_predecessor_steps(step, steps, edges);
+        let reviewer_context = format_result_reviewer_conclusions(&predecessor_steps, reviews);
+        if !reviewer_context.is_empty() {
+            contexts.insert(1.min(contexts.len()), reviewer_context);
+        }
+    }
+    contexts
+}
+
+fn transitive_predecessor_steps<'a>(
+    step: &WorkflowStep,
+    steps: &'a [WorkflowStep],
+    edges: &[WorkflowStepEdge],
+) -> Vec<&'a WorkflowStep> {
+    let step_by_id: HashMap<Uuid, &WorkflowStep> = steps
+        .iter()
+        .map(|candidate| (candidate.id, candidate))
+        .collect();
+    let mut predecessor_ids_by_target: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+    for edge in edges {
+        predecessor_ids_by_target
+            .entry(edge.to_step_id)
+            .or_default()
+            .push(edge.from_step_id);
+    }
+
+    let mut seen = HashSet::new();
+    let mut stack = predecessor_ids_by_target
+        .get(&step.id)
+        .cloned()
+        .unwrap_or_default();
+    while let Some(step_id) = stack.pop() {
+        if !seen.insert(step_id) {
+            continue;
+        }
+        if let Some(parents) = predecessor_ids_by_target.get(&step_id) {
+            stack.extend(parents.iter().copied());
+        }
+    }
+
+    let mut predecessor_steps = seen
+        .into_iter()
+        .filter_map(|step_id| step_by_id.get(&step_id).copied())
+        .filter(|candidate| candidate.id != step.id)
+        .collect::<Vec<_>>();
+    predecessor_steps.sort_by_key(|candidate| candidate.display_order);
+    predecessor_steps
+}
+
+fn format_result_reviewer_conclusions(
+    predecessor_steps: &[&WorkflowStep],
+    reviews: &[WorkflowStepReview],
+) -> String {
+    if predecessor_steps.is_empty() {
+        return String::new();
+    }
+
+    let predecessor_ids = predecessor_steps
+        .iter()
+        .map(|step| step.id)
+        .collect::<HashSet<_>>();
+    let step_title_by_id = predecessor_steps
+        .iter()
+        .map(|step| (step.id, step.title.as_str()))
+        .collect::<HashMap<_, _>>();
+    let mut matching_reviews = reviews
+        .iter()
+        .filter(|review| predecessor_ids.contains(&review.step_id))
+        .collect::<Vec<_>>();
+    matching_reviews.sort_by_key(|review| {
+        (
+            step_title_by_id.get(&review.step_id).copied().unwrap_or(""),
+            review.review_round,
+            review.created_at,
+        )
+    });
+
+    if matching_reviews.is_empty() {
+        return "## Result Dependency: Reviewer Conclusions\n\nNo explicit reviewer approval or rejection was recorded for predecessor nodes.".to_string();
+    }
+
+    let lines = matching_reviews
+        .into_iter()
+        .map(|review| {
+            let step_title = step_title_by_id
+                .get(&review.step_id)
+                .copied()
+                .unwrap_or("Unknown step");
+            let verdict = match review.verdict {
+                ReviewVerdict::Approved => "approved",
+                ReviewVerdict::Rejected => "rejected",
+            };
+            let reviewer = to_workflow_wire_value(&review.reviewer_type);
+            let feedback = review.feedback.trim();
+            if feedback.is_empty() {
+                format!(
+                    "- {step_title}: {reviewer} reviewer {verdict} in review round {}.",
+                    review.review_round
+                )
+            } else {
+                format!(
+                    "- {step_title}: {reviewer} reviewer {verdict} in review round {}. Feedback: {feedback}",
+                    review.review_round
+                )
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    format!("## Result Dependency: Reviewer Conclusions\n\n{lines}")
 }
 
 fn direct_predecessor_steps<'a>(
@@ -3723,10 +3866,33 @@ fn format_step_dependency_context(label: &str, step: &WorkflowStep) -> String {
         .map(|payload| payload.summary.trim())
         .filter(|summary| !summary.is_empty())
         .unwrap_or("None");
+    let content = payload
+        .as_ref()
+        .and_then(|payload| {
+            let content = payload.content.as_deref()?.trim();
+            (!content.is_empty()).then_some(content)
+        })
+        .unwrap_or("None");
+    let outputs = payload
+        .as_ref()
+        .map(|payload| {
+            if payload.outputs.is_empty() {
+                "None".to_string()
+            } else {
+                payload
+                    .outputs
+                    .iter()
+                    .map(|output| format!("- {output}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
+        })
+        .unwrap_or_else(|| "None".to_string());
 
     format!(
         r#"## {label}: {title}
 
+- Step key: {step_key}
 - Type: {step_type}
 <Instructions>
 {instructions}
@@ -3735,12 +3901,23 @@ fn format_step_dependency_context(label: &str, step: &WorkflowStep) -> String {
 <Summary>
 {summary}
 </Summary>
+
+<Content>
+{content}
+</Content>
+
+<Outputs>
+{outputs}
+</Outputs>
 "#,
         label = label,
         title = step.title,
+        step_key = step.step_key,
         step_type = to_workflow_wire_value(&step.step_type),
         instructions = step.instructions,
         summary = summary,
+        content = content,
+        outputs = outputs,
     )
 }
 
@@ -3929,7 +4106,7 @@ fn parse_summary_text_preview(summary_text: String) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
-fn resolve_workspace_path(
+pub(crate) fn resolve_workspace_path(
     session: &ChatSession,
     agent: &ChatAgent,
     session_agent: &ChatSessionAgent,
@@ -4548,10 +4725,11 @@ mod tests {
     }
 
     #[test]
-    fn predecessor_summaries_for_result_include_full_plan_json() {
+    fn predecessor_summaries_for_result_include_formal_results_and_plan_json() {
         let plan = sample_plan(Uuid::new_v4());
         let mut source = sample_step(WorkflowStepStatus::Completed);
         source.step_key = "step-1".to_string();
+        source.title = "Workflow Node Result".to_string();
         source.summary_text = Some(
             serde_json::json!({
                 "summary": "Step complete",
@@ -4564,19 +4742,69 @@ mod tests {
         result.step_key = "result".to_string();
         result.title = "Result".to_string();
         result.step_type = WorkflowStepType::Result;
+        let edge = sample_edge(source.id, result.id);
 
-        let contexts = predecessor_summaries(&result, &[source, result.clone()], &[], Some(&plan));
+        let contexts =
+            predecessor_summaries(&result, &[source, result.clone()], &[edge], Some(&plan));
 
-        assert!(
-            contexts
-                .first()
-                .is_some_and(|context| context.contains("Full Workflow Plan JSON"))
-        );
-        assert!(contexts[0].contains("\"title\": \"Projection Contract\""));
+        assert!(contexts[0].contains("Formal Predecessor Results"));
+        assert!(contexts[0].contains("## Formal Predecessor Result: Workflow Node Result"));
+        assert!(contexts[0].contains("Step complete"));
+        assert!(contexts[0].contains("Done."));
         assert!(
             contexts
                 .iter()
                 .any(|context| context.contains("Workflow Node Result"))
+        );
+        assert!(
+            contexts
+                .iter()
+                .any(|context| context.contains("Full Workflow Plan JSON"))
+        );
+        assert!(
+            contexts
+                .iter()
+                .any(|context| context.contains("\"title\": \"Projection Contract\""))
+        );
+    }
+
+    #[test]
+    fn predecessor_summaries_for_result_include_reviewer_conclusions() {
+        let mut source = sample_step(WorkflowStepStatus::Completed);
+        source.step_key = "step-1".to_string();
+        source.title = "Build Feature".to_string();
+        source.summary_text = Some(
+            serde_json::json!({
+                "summary": "Feature completed",
+                "content": "Implemented and tested.",
+                "outputs": []
+            })
+            .to_string(),
+        );
+        let mut result = sample_step(WorkflowStepStatus::Ready);
+        result.step_key = "result".to_string();
+        result.step_type = WorkflowStepType::Result;
+        let edge = sample_edge(source.id, result.id);
+        let review = sample_step_review(&source);
+
+        let contexts = predecessor_summaries_with_reviews(
+            &result,
+            &[source, result.clone()],
+            &[edge],
+            None,
+            &[review],
+        );
+
+        assert!(
+            contexts
+                .iter()
+                .any(|context| context.contains("Reviewer Conclusions"))
+        );
+        assert!(contexts.iter().any(|context| context.contains("approved")));
+        assert!(
+            contexts
+                .iter()
+                .any(|context| context.contains("Looks good"))
         );
     }
 
@@ -5189,10 +5417,11 @@ mod tests {
     }
 
     #[test]
-    fn is_terminal_true_for_completed_and_failed() {
+    fn is_terminal_true_for_completed_failed_and_cancelled() {
         for (status, expected_terminal) in [
             (WorkflowExecutionStatus::Completed, true),
             (WorkflowExecutionStatus::Failed, true),
+            (WorkflowExecutionStatus::Cancelled, true),
             (WorkflowExecutionStatus::Running, false),
             (WorkflowExecutionStatus::Pending, false),
             (WorkflowExecutionStatus::Paused, false),
@@ -5228,5 +5457,58 @@ mod tests {
                 execution.status
             );
         }
+    }
+
+    #[test]
+    fn cancelled_execution_maps_to_failed_card_state_in_projections() {
+        let execution = sample_execution(WorkflowExecutionStatus::Cancelled);
+        let plan_json = sample_plan_json();
+        let plan = sample_plan(execution.plan_id);
+        let revision = sample_revision(plan.id, plan_json);
+        let (session_agents, agents) = sample_agent_views();
+        let step = sample_step(WorkflowStepStatus::Cancelled);
+
+        let full = build_workflow_card_projection(
+            &execution,
+            &plan,
+            &revision,
+            std::slice::from_ref(&revision),
+            std::slice::from_ref(&step),
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &session_agents,
+            &agents,
+            None,
+        )
+        .expect("build full projection");
+        assert!(matches!(full.state, WorkflowCardState::Failed));
+        assert!(full.is_terminal);
+
+        let lightweight = build_workflow_card_projection_lightweight(
+            &execution,
+            &plan,
+            &revision,
+            std::slice::from_ref(&revision),
+            &[step],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &session_agents,
+            &agents,
+            None,
+            None,
+        )
+        .expect("build lightweight projection");
+        assert!(matches!(lightweight.state, WorkflowCardState::Failed));
+        assert!(lightweight.is_terminal);
     }
 }

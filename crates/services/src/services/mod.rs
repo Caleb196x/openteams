@@ -28,6 +28,7 @@ pub mod queued_message;
 pub mod remote_client;
 pub mod repo;
 pub mod skill_registry;
+pub mod workflow_analytics;
 pub mod workflow_compiler;
 pub mod workflow_iteration;
 pub mod workflow_loop_executor;

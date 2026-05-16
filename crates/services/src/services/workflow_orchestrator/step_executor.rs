@@ -1,5 +1,7 @@
 //! Step execution core: lead review feedback loop, protocol message handling.
 
+use std::path::{Path, PathBuf};
+
 use chrono::Utc;
 use db::{
     DBService,
@@ -24,13 +26,15 @@ use uuid::Uuid;
 use super::{
     super::{
         chat_runner::ChatRunner,
+        workflow_analytics,
         workflow_runtime::{
             self, SummaryPayload, WORKFLOW_PROTOCOL_PARSE_MAX_RETRIES,
             WorkflowReviewProtocolMessage, WorkflowRevisionFeedbackSource, WorkflowRuntimeError,
             WorkflowStepProtocolMessage, WorkflowStepRunResult,
             build_lead_review_prompt_with_schema, build_step_execution_prompt_with_schema,
             build_step_revision_prompt_with_schema, build_workflow_protocol_retry_prompt,
-            parse_review_protocol_output, predecessor_summaries, run_workflow_step_agent_follow_up,
+            parse_review_protocol_output, predecessor_summaries,
+            predecessor_summaries_with_reviews, run_workflow_step_agent_follow_up,
             run_workflow_step_agent_prompt, should_retry_workflow_protocol_parse_failure,
             workflow_review_protocol_json_schema, workflow_step_protocol_json_schema,
         },
@@ -62,6 +66,12 @@ pub(super) struct PendingRevisionFeedback {
     pub(super) previous_content: Option<String>,
     pub(super) previous_outputs: Vec<String>,
     pub(super) review_round: i32,
+}
+
+#[derive(Debug, Clone)]
+struct ResultDependencyContextFile {
+    absolute_path: PathBuf,
+    workspace_relative_path: String,
 }
 
 impl WorkflowOrchestrator {
@@ -263,6 +273,75 @@ impl WorkflowOrchestrator {
                 .map(|value| format!("{message}: {value}"))
                 .unwrap_or(message),
         ))
+    }
+
+    fn result_dependency_context_prompt(file: &ResultDependencyContextFile) -> String {
+        format!(
+            r#"## Result Dependency Context File
+
+All workflow node run results and reviewer conclusions are stored in this workspace-relative file:
+
+`{path}`
+
+Read this file before writing the final result. Do not rely on the workflow plan JSON alone; use the formal predecessor results and reviewer conclusions in that file as the source of truth."#,
+            path = file.workspace_relative_path
+        )
+    }
+
+    async fn write_result_dependency_context_file(
+        session: &ChatSession,
+        agent: &ChatAgent,
+        session_agent: &ChatSessionAgent,
+        execution: &WorkflowExecution,
+        step: &WorkflowStep,
+        contexts: &[String],
+    ) -> Result<ResultDependencyContextFile, OrchestratorError> {
+        let workspace_path =
+            workflow_runtime::resolve_workspace_path(session, agent, session_agent);
+        let tmp_dir = workspace_path.join(".openteams").join("tmp");
+        tokio::fs::create_dir_all(&tmp_dir)
+            .await
+            .map_err(WorkflowRuntimeError::from)?;
+
+        let filename = format!("workflow-result-context-{}-{}.md", execution.id, step.id);
+        let absolute_path = tmp_dir.join(filename);
+        let workspace_relative_path = absolute_path
+            .strip_prefix(&workspace_path)
+            .unwrap_or(absolute_path.as_path())
+            .to_string_lossy()
+            .replace('\\', "/");
+        let content = format!(
+            "# Workflow Result Dependency Context\n\nExecution: `{}`\nResult step: `{}` ({})\n\n{}",
+            execution.id,
+            step.step_key,
+            step.title,
+            contexts.join("\n\n---\n\n")
+        );
+
+        tokio::fs::write(&absolute_path, content)
+            .await
+            .map_err(WorkflowRuntimeError::from)?;
+
+        Ok(ResultDependencyContextFile {
+            absolute_path,
+            workspace_relative_path,
+        })
+    }
+
+    async fn cleanup_result_dependency_context_file(path: Option<&Path>) {
+        let Some(path) = path else {
+            return;
+        };
+
+        match tokio::fs::remove_file(path).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => tracing::warn!(
+                path = %path.display(),
+                %error,
+                "failed to remove workflow result dependency context file"
+            ),
+        }
     }
 
     fn acceptance_criteria_for_step(plan: &WorkflowPlan, step: &WorkflowStep) -> Vec<String> {
@@ -669,7 +748,7 @@ impl WorkflowOrchestrator {
                     }
                 }
 
-                Self::transition_step_and_sync(
+                let completed_step = Self::transition_step_and_sync(
                     pool,
                     chat_runner,
                     execution,
@@ -678,6 +757,12 @@ impl WorkflowOrchestrator {
                     "step_completed",
                 )
                 .await?;
+                workflow_analytics::track_handoff_completed(
+                    chat_runner.analytics_service(),
+                    execution.session_id,
+                    execution.id,
+                    completed_step.id,
+                );
                 return Ok(StepOutcome::Completed);
             }
 
@@ -979,7 +1064,7 @@ impl WorkflowOrchestrator {
                         }
                     }
 
-                    let _completed_step = Self::transition_step_and_sync(
+                    let completed_step = Self::transition_step_and_sync(
                         pool,
                         chat_runner,
                         execution,
@@ -988,6 +1073,12 @@ impl WorkflowOrchestrator {
                         "step_completed",
                     )
                     .await?;
+                    workflow_analytics::track_handoff_completed(
+                        chat_runner.analytics_service(),
+                        execution.session_id,
+                        execution.id,
+                        completed_step.id,
+                    );
                     return Ok(StepOutcome::Completed);
                 }
                 ReviewVerdict::Rejected => {
@@ -1328,7 +1419,7 @@ impl WorkflowOrchestrator {
                     ),
                 )
                 .await;
-                Self::transition_step_and_sync(
+                let completed_step = Self::transition_step_and_sync(
                     pool,
                     chat_runner,
                     execution,
@@ -1337,6 +1428,12 @@ impl WorkflowOrchestrator {
                     "step_completed",
                 )
                 .await?;
+                workflow_analytics::track_handoff_completed(
+                    chat_runner.analytics_service(),
+                    execution.session_id,
+                    execution.id,
+                    completed_step.id,
+                );
                 Ok(StepOutcome::Completed)
             }
         }
@@ -1392,8 +1489,35 @@ impl WorkflowOrchestrator {
             }
         };
 
-        let dependency_summaries =
-            predecessor_summaries(&running_step, current_steps, edges, Some(plan));
+        let (dependency_summaries, result_dependency_context_file) =
+            if running_step.step_type == WorkflowStepType::Result {
+                let reviews = WorkflowStepReview::find_by_execution(pool, execution.id).await?;
+                let result_contexts = predecessor_summaries_with_reviews(
+                    &running_step,
+                    current_steps,
+                    edges,
+                    Some(plan),
+                    &reviews,
+                );
+                let context_file = Self::write_result_dependency_context_file(
+                    session,
+                    agent,
+                    session_agent,
+                    execution,
+                    &running_step,
+                    &result_contexts,
+                )
+                .await?;
+                (
+                    vec![Self::result_dependency_context_prompt(&context_file)],
+                    Some(context_file),
+                )
+            } else {
+                (
+                    predecessor_summaries(&running_step, current_steps, edges, Some(plan)),
+                    None,
+                )
+            };
         let step_transcript_context = WorkflowTranscript::find_by_step(pool, running_step.id)
             .await?
             .into_iter()
@@ -1486,6 +1610,12 @@ impl WorkflowOrchestrator {
                 message
             }
             Err(OrchestratorError::Runtime(WorkflowRuntimeError::Interrupted(reason))) => {
+                Self::cleanup_result_dependency_context_file(
+                    result_dependency_context_file
+                        .as_ref()
+                        .map(|item| item.absolute_path.as_path()),
+                )
+                .await;
                 let _ = Self::write_transcript(
                     pool,
                     execution.id,
@@ -1502,6 +1632,12 @@ impl WorkflowOrchestrator {
             }
             Err(err) => {
                 let err_message = err.to_string();
+                Self::cleanup_result_dependency_context_file(
+                    result_dependency_context_file
+                        .as_ref()
+                        .map(|item| item.absolute_path.as_path()),
+                )
+                .await;
                 let failed_step = WorkflowStep::record_execution_result(
                     pool,
                     running_step.id,
@@ -1541,6 +1677,12 @@ impl WorkflowOrchestrator {
                 return Ok(StepOutcome::Failed(err_message));
             }
         };
+        Self::cleanup_result_dependency_context_file(
+            result_dependency_context_file
+                .as_ref()
+                .map(|item| item.absolute_path.as_path()),
+        )
+        .await;
 
         let latest_running_step = WorkflowStep::find_by_id(pool, running_step.id)
             .await?

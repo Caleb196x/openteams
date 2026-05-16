@@ -22,8 +22,8 @@ use db::models::{
 use deployment::Deployment;
 use serde::Deserialize;
 use services::services::{
-    analytics_events::{AnalyticsProjector, DomainEvent},
-    chat::{ChatAttachmentMeta, extract_attachments},
+    chat::{ChatAttachmentMeta, emit_user_message_workflow_analytics},
+    workflow_analytics::{self, hash_user_id},
     workflow_runtime::{
         WorkflowCardProjection, WorkflowCardState, WorkflowCardStep,
         build_workflow_card_projection, build_workflow_card_projection_lightweight,
@@ -184,24 +184,15 @@ pub async fn create_message(
     )
     .await?;
 
-    if message.sender_type == ChatSenderType::User {
-        let attachments = extract_attachments(&message.meta.0);
-        let analytics_projector = AnalyticsProjector::new(
-            &deployment.db().pool,
+    emit_user_message_workflow_analytics(
+        workflow_analytics::analytics_if_enabled(
             deployment.analytics().as_ref(),
             deployment.analytics_enabled(),
-        );
-        analytics_projector
-            .project_or_warn(DomainEvent::MessageSent {
-                session_id: session.id,
-                actor_user_id: deployment.user_id().to_string(),
-                message_length: message.content.len(),
-                mentions: message.mentions.0.clone(),
-                has_attachment: !attachments.is_empty(),
-                attachment_count: attachments.len(),
-            })
-            .await;
-    }
+        ),
+        session.id,
+        Some(deployment.user_id()),
+        &message,
+    );
 
     deployment
         .chat_runner()
@@ -336,22 +327,15 @@ pub async fn upload_message_attachments(
     )
     .await?;
 
-    let attachments = extract_attachments(&message.meta.0);
-    let analytics_projector = AnalyticsProjector::new(
-        &deployment.db().pool,
-        deployment.analytics().as_ref(),
-        deployment.analytics_enabled(),
+    emit_user_message_workflow_analytics(
+        workflow_analytics::analytics_if_enabled(
+            deployment.analytics().as_ref(),
+            deployment.analytics_enabled(),
+        ),
+        session.id,
+        Some(deployment.user_id()),
+        &message,
     );
-    analytics_projector
-        .project_or_warn(DomainEvent::MessageSent {
-            session_id: session.id,
-            actor_user_id: deployment.user_id().to_string(),
-            message_length: message.content.len(),
-            mentions: message.mentions.0.clone(),
-            has_attachment: !attachments.is_empty(),
-            attachment_count: attachments.len(),
-        })
-        .await;
 
     deployment
         .chat_runner()
@@ -468,6 +452,22 @@ pub async fn get_workflow_card(
             ));
         }
     };
+
+    let execution_id = projection
+        .execution_id
+        .as_deref()
+        .and_then(|value| Uuid::parse_str(value).ok());
+    let user_id_hash = hash_user_id(deployment.user_id());
+    workflow_analytics::track_workflow_card_opened(
+        workflow_analytics::analytics_if_enabled(
+            deployment.analytics().as_ref(),
+            deployment.analytics_enabled(),
+        ),
+        message.session_id,
+        execution_id,
+        Some(&user_id_hash),
+        if is_lightweight { "light" } else { "full" },
+    );
 
     Ok(ResponseJson(ApiResponse::success(projection)))
 }

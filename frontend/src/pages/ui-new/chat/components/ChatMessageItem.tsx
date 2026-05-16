@@ -141,7 +141,10 @@ export interface ChatMessageItemProps {
   // Workflow controls
   onExecutePlan?: (projection: WorkflowCardProjection) => void;
   onPauseAll?: (executionId: string) => void;
-  onResumeWorkflow?: (executionId: string) => void;
+  onResumeWorkflow?: (
+    executionId: string,
+    projection: WorkflowCardProjection
+  ) => void;
   onRetryWorkflowStep?: (
     stepId: string,
     retryTarget?: 'task' | 'review'

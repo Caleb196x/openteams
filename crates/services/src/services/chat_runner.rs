@@ -71,6 +71,7 @@ use crate::services::{
         NativeSkillError, auto_allow_builtin_skills, ensure_builtin_skills_installed,
         list_native_skills_for_runner,
     },
+    workflow_analytics,
     workflow_runtime::resolve_lead_agent,
 };
 
@@ -777,6 +778,13 @@ impl ChatRunner {
             workspace_live_log_bytes: Arc::new(DashMap::new()),
             workspace_janitor_locks: Arc::new(DashMap::new()),
         }
+    }
+
+    pub fn analytics_service(&self) -> Option<&AnalyticsService> {
+        workflow_analytics::analytics_if_enabled(
+            self.analytics.as_ref(),
+            self.analytics_enabled.load(Ordering::Relaxed),
+        )
     }
 
     fn analytics_projector(&self) -> AnalyticsProjector<'_> {
@@ -1601,6 +1609,13 @@ impl ChatRunner {
             },
         );
 
+        workflow_analytics::track_agent_state_changed(
+            self.analytics_service(),
+            session_id,
+            None,
+            "running",
+        );
+
         if track_source_message {
             // Emit MentionAcknowledged running event
             self.emit(
@@ -1881,9 +1896,17 @@ impl ChatRunner {
                         agent_id,
                         run_id,
                         error_type: "startup_failure".to_string(),
-                        error_message: err.to_string(),
+                        error_code: "agent_startup_failed".to_string(),
                     })
                     .await;
+                workflow_analytics::track_agent_error(
+                    self.analytics_service(),
+                    session_id,
+                    None,
+                    None,
+                    "agent_startup_failed",
+                    None,
+                );
                 if track_source_message {
                     self.report_mention_failure(
                         session_id,
@@ -1909,6 +1932,12 @@ impl ChatRunner {
                     state: ChatSessionAgentState::Dead,
                     started_at: None,
                 },
+            );
+            workflow_analytics::track_agent_state_changed(
+                self.analytics_service(),
+                session_id,
+                None,
+                "dead",
             );
         }
 

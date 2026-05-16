@@ -23,6 +23,7 @@ use uuid::Uuid;
 
 use super::{
     chat_runner::ChatRunner,
+    workflow_analytics,
     workflow_orchestrator::{
         OrchestratorError, WorkflowOrchestrator, resolve_step_workflow_session,
     },
@@ -55,6 +56,46 @@ pub(crate) struct LoopExecutor<'a> {
     pub session_agents: &'a [ChatSessionAgent],
     pub agents: &'a [ChatAgent],
     pub plan: &'a WorkflowPlan,
+}
+
+#[derive(Debug, PartialEq)]
+struct LoopLeadReviewRejectedEvent {
+    session_id: Uuid,
+    execution_id: Uuid,
+    plan_id: Uuid,
+    step_id: Uuid,
+    reviewer_type: &'static str,
+}
+
+fn loop_lead_review_rejected_event(
+    execution: &WorkflowExecution,
+    step_id: Uuid,
+) -> LoopLeadReviewRejectedEvent {
+    LoopLeadReviewRejectedEvent {
+        session_id: execution.session_id,
+        execution_id: execution.id,
+        plan_id: execution.plan_id,
+        step_id,
+        reviewer_type: "lead",
+    }
+}
+
+fn loop_lead_review_rejected_analytics_parts(
+    execution: &WorkflowExecution,
+    step_id: Uuid,
+) -> (
+    workflow_analytics::WorkflowAnalyticsEvent,
+    workflow_analytics::WorkflowEventContext,
+    serde_json::Map<String, serde_json::Value>,
+) {
+    let rejected_event = loop_lead_review_rejected_event(execution, step_id);
+    workflow_analytics::review_node_rejected_event_parts(
+        rejected_event.session_id,
+        rejected_event.execution_id,
+        rejected_event.plan_id,
+        rejected_event.step_id,
+        rejected_event.reviewer_type,
+    )
 }
 
 impl<'a> LoopExecutor<'a> {
@@ -387,6 +428,16 @@ impl<'a> LoopExecutor<'a> {
                 Ok(LoopReviewDecision::Passed)
             }
             ReviewVerdict::Rejected => {
+                let (event, ctx, meta) = loop_lead_review_rejected_analytics_parts(
+                    self.execution,
+                    recorded_review_step.id,
+                );
+                workflow_analytics::record_workflow_analytics_event(
+                    self.chat_runner.analytics_service(),
+                    event,
+                    &ctx,
+                    meta,
+                );
                 let _ = WorkflowOrchestrator::transition_step_and_sync(
                     self.pool,
                     self.chat_runner,
@@ -751,4 +802,74 @@ fn merge_loop_revision_context(
         }),
     );
     context.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+    use db::models::workflow_types::WorkflowExecutionStatus;
+
+    use super::*;
+
+    fn sample_execution() -> WorkflowExecution {
+        let now = Utc::now();
+        WorkflowExecution {
+            id: Uuid::new_v4(),
+            session_id: Uuid::new_v4(),
+            plan_id: Uuid::new_v4(),
+            active_revision_id: Some(Uuid::new_v4()),
+            active_round_id: Some(Uuid::new_v4()),
+            workflow_card_message_id: None,
+            lead_session_agent_id: None,
+            status: WorkflowExecutionStatus::Running,
+            current_round: 1,
+            title: "Loop execution".to_string(),
+            compiled_graph_hash: None,
+            started_at: Some(now),
+            completed_at: None,
+            cleaned_at: None,
+            cleaned_reason: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn loop_lead_review_rejected_business_event_uses_review_node_rejected_context() {
+        let execution = sample_execution();
+        let step_id = Uuid::new_v4();
+
+        let event = loop_lead_review_rejected_event(&execution, step_id);
+
+        assert_eq!(event.session_id, execution.session_id);
+        assert_eq!(event.execution_id, execution.id);
+        assert_eq!(event.plan_id, execution.plan_id);
+        assert_eq!(event.step_id, step_id);
+        assert_eq!(event.reviewer_type, "lead");
+    }
+
+    #[test]
+    fn loop_lead_review_rejected_runtime_path_sets_review_node_rejected_analytics() {
+        let execution = sample_execution();
+        let step_id = Uuid::new_v4();
+        let session_id = execution.session_id.to_string();
+        let execution_id = execution.id.to_string();
+        let plan_id = execution.plan_id.to_string();
+        let task_id = step_id.to_string();
+
+        let (event, ctx, meta) = loop_lead_review_rejected_analytics_parts(&execution, step_id);
+
+        assert_eq!(event.event_name(), "quality.review_decision_recorded");
+        assert_eq!(ctx.session_id.as_deref(), Some(session_id.as_str()));
+        assert_eq!(ctx.workflow_id.as_deref(), Some(execution_id.as_str()));
+        assert_eq!(ctx.plan_id.as_deref(), Some(plan_id.as_str()));
+        assert_eq!(ctx.task_id.as_deref(), Some(task_id.as_str()));
+        assert_eq!(ctx.status.as_deref(), Some("review_node_rejected"));
+        assert_eq!(meta["review_verdict"], serde_json::json!("rejected"));
+        assert_eq!(meta["reviewer_type"], serde_json::json!("lead"));
+        assert_eq!(
+            meta["resolution"],
+            serde_json::json!("review_node_rejected")
+        );
+    }
 }

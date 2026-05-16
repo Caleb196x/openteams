@@ -999,6 +999,10 @@
       "submitReject": "提交拒绝",
       "reject": "拒绝"
     },
+    "generatedText": {
+      "reviewLoop": "请审核循环“{{loopKey}}”。",
+      "userApprovedStepResult": "用户已批准步骤结果。"
+    },
     "finalReview": {
       "title": "最终审核",
       "defaultMessage": "任务已完成，是否接受结果？",

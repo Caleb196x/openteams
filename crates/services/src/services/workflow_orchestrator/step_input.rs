@@ -14,6 +14,7 @@ use uuid::Uuid;
 use super::{
     super::{
         chat_runner::ChatRunner,
+        workflow_analytics,
         workflow_runtime::{
             SummaryPayload, WorkflowRuntimeError, parse_summary_payload,
             workflow_step_protocol_json_schema,
@@ -534,6 +535,19 @@ impl WorkflowOrchestrator {
             Some(&meta_json),
         )
         .await?;
+
+        if matches!(
+            entry_type,
+            "approval_request" | "permission_request" | "continue_confirmation" | "input_request"
+        ) {
+            workflow_analytics::track_approval_requested(
+                chat_runner.analytics_service(),
+                execution.session_id,
+                waiting_execution.id,
+                waiting_step.id,
+                entry_type,
+            );
+        }
 
         Self::refresh_execution_projection(pool, chat_runner, waiting_execution.id, None).await?;
 

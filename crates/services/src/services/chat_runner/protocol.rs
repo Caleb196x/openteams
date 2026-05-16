@@ -998,6 +998,7 @@ impl ChatRunner {
         error_message: impl Into<String>,
         previous_plan_context: Option<&PlanGenerationPreviousPlanContext>,
     ) -> Result<(), ChatRunnerError> {
+        workflow_analytics::track_plan_generated(self.analytics_service(), session_id, None, false);
         let _ = self
             .upsert_plan_generation_placeholder_card(
                 session_id,

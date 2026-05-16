@@ -999,6 +999,10 @@
       "submitReject": "거부 제출",
       "reject": "거부"
     },
+    "generatedText": {
+      "reviewLoop": "루프 \"{{loopKey}}\"를 검토하세요.",
+      "userApprovedStepResult": "사용자가 단계 결과를 승인했습니다."
+    },
     "finalReview": {
       "title": "최종 리뷰",
       "defaultMessage": "작업이 완료되었습니다. 결과를 수락하시겠습니까?",

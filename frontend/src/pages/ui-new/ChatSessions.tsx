@@ -133,6 +133,7 @@ import { ChatSystemMessage } from '@/components/ui-new/primitives/conversation/C
 import { useToast } from '@/components/ui-new/containers/ToastContainer';
 import {
   recordWorkflowEvent as baseRecordWorkflowEvent,
+  buildReviewDecisionRecordedOptions,
   messageLengthBucket,
   fileSizeBucket,
 } from '@/lib/workflowAnalytics';
@@ -146,6 +147,35 @@ import type { ChatProtocolNotice } from './chat/hooks/useChatWebSocket';
 type ChatInputMode = 'free' | 'workflow';
 
 const WORKFLOW_CARD_ACTION_REFRESH_WINDOW_MS = 30_000;
+
+function getWorkflowProjectionCurrentRoundSteps(
+  projection: WorkflowCardProjection
+) {
+  return (
+    projection.round_graphs?.find(
+      (graph) => graph.round_index === projection.current_round
+    )?.steps ?? projection.steps
+  );
+}
+
+function shouldConfirmReviewSettingsBeforeRoundStart(
+  projection: WorkflowCardProjection
+): boolean {
+  if (
+    projection.current_round <= 1 ||
+    projection.execution_status !== 'paused'
+  ) {
+    return false;
+  }
+
+  const currentRoundSteps = getWorkflowProjectionCurrentRoundSteps(projection);
+  return (
+    currentRoundSteps.length > 0 &&
+    currentRoundSteps.every(
+      (step) => step.status === 'pending' || step.status === 'ready'
+    )
+  );
+}
 
 function getRequestErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
@@ -215,7 +245,9 @@ const isTextAttachment = (file: File) =>
     '.svg',
   ].some((ext) => file.name.toLowerCase().endsWith(ext));
 
-const attachmentTypeBucket = (files: File[]): 'text' | 'image' | 'mixed' | 'other' => {
+const attachmentTypeBucket = (
+  files: File[]
+): 'text' | 'image' | 'mixed' | 'other' => {
   let hasImage = false;
   let hasText = false;
 
@@ -778,6 +810,10 @@ export function ChatSessions() {
       ? sessionId
       : null
     : (sortedSessions[0]?.id ?? null);
+  const activeSession = useMemo(
+    () => sortedSessions.find((session) => session.id === activeSessionId),
+    [sortedSessions, activeSessionId]
+  );
   const [chatInputModeBySessionId, setChatInputModeBySessionId] = useState<
     Record<string, ChatInputMode>
   >({});
@@ -812,6 +848,12 @@ export function ChatSessions() {
     executePlanConfirmationProjection,
     setExecutePlanConfirmationProjection,
   ] = useState<WorkflowCardProjection | null>(null);
+  const [
+    roundStartReviewSettingsProjection,
+    setRoundStartReviewSettingsProjection,
+  ] = useState<WorkflowCardProjection | null>(null);
+  const [pendingRoundStartReviewSettings, setPendingRoundStartReviewSettings] =
+    useState<{ executionId: string; roundIndex: number } | null>(null);
   const upsertMessage = useCallback(
     (message: ChatMessage) => {
       setMessages((prev) => {
@@ -1018,11 +1060,15 @@ export function ChatSessions() {
     deleteMessages,
   } = useChatMutations(
     (session) => {
-      recordWorkflowEvent('workflow.session_created', {
-        session_id: session.id,
-      }, {
-        status: 'succeeded',
-      });
+      recordWorkflowEvent(
+        'workflow.session_created',
+        {
+          session_id: session.id,
+        },
+        {
+          status: 'succeeded',
+        }
+      );
       navigate(`/chat/${session.id}`);
     },
     (session) => navigate(`/chat/${session.id}`),
@@ -1102,12 +1148,16 @@ export function ChatSessions() {
     },
     onSuccess: (_data, executionId) => {
       if (!activeSessionId) return;
-      recordWorkflowEvent('workflow.execution_state_changed', {
-        session_id: activeSessionId,
-        workflow_id: executionId,
-      }, {
-        status: 'paused',
-      });
+      recordWorkflowEvent(
+        'workflow.execution_state_changed',
+        {
+          session_id: activeSessionId,
+          workflow_id: executionId,
+        },
+        {
+          status: 'paused',
+        }
+      );
       queryClient.invalidateQueries({
         queryKey: ['chatMessages', activeSessionId],
       });
@@ -1142,12 +1192,16 @@ export function ChatSessions() {
     async (overrides: WorkflowReviewSettingOverride[]) => {
       const planId = executePlanConfirmationProjection?.plan_id;
       if (!planId) return;
-      recordWorkflowEvent('workflow.plan_executed', {
-        session_id: activeSessionId,
-        plan_id: planId,
-      }, {
-        status: 'started',
-      });
+      recordWorkflowEvent(
+        'workflow.plan_executed',
+        {
+          session_id: activeSessionId,
+          plan_id: planId,
+        },
+        {
+          status: 'started',
+        }
+      );
       await executePlanAsync({
         planId,
         overrides,
@@ -1243,12 +1297,16 @@ export function ChatSessions() {
     },
     onSuccess: (_data, executionId) => {
       if (!activeSessionId) return;
-      recordWorkflowEvent('workflow.execution_state_changed', {
-        session_id: activeSessionId,
-        workflow_id: executionId,
-      }, {
-        status: 'running',
-      });
+      recordWorkflowEvent(
+        'workflow.execution_state_changed',
+        {
+          session_id: activeSessionId,
+          workflow_id: executionId,
+        },
+        {
+          status: 'running',
+        }
+      );
       queryClient.invalidateQueries({
         queryKey: ['chatMessages', activeSessionId],
       });
@@ -1264,21 +1322,64 @@ export function ChatSessions() {
   });
 
   const handleResumeWorkflowExecution = useCallback(
-    (executionId: string) => {
+    (executionId: string, projection?: WorkflowCardProjection) => {
+      if (
+        projection &&
+        shouldConfirmReviewSettingsBeforeRoundStart(projection)
+      ) {
+        setRoundStartReviewSettingsProjection(projection);
+        return;
+      }
       resumeWorkflowMutation.mutate(executionId);
     },
     [resumeWorkflowMutation]
+  );
+
+  const handleCloseRoundStartReviewSettings = useCallback(() => {
+    if (
+      updateWorkflowReviewSettingsMutation.isPending ||
+      resumeWorkflowMutation.isPending
+    ) {
+      return;
+    }
+    setRoundStartReviewSettingsProjection(null);
+  }, [
+    resumeWorkflowMutation.isPending,
+    updateWorkflowReviewSettingsMutation.isPending,
+  ]);
+
+  const handleConfirmRoundStartReviewSettings = useCallback(
+    async (overrides: WorkflowReviewSettingOverride[]) => {
+      const executionId = roundStartReviewSettingsProjection?.execution_id;
+      if (!executionId) return;
+
+      await updateWorkflowReviewSettingsMutation.mutateAsync({
+        executionId,
+        overrides,
+      });
+      await resumeWorkflowMutation.mutateAsync(executionId);
+      setRoundStartReviewSettingsProjection(null);
+    },
+    [
+      resumeWorkflowMutation,
+      roundStartReviewSettingsProjection?.execution_id,
+      updateWorkflowReviewSettingsMutation,
+    ]
   );
 
   const handleArchiveSession = useCallback(
     async (sessionIdToArchive: string) => {
       try {
         await archiveSession.mutateAsync(sessionIdToArchive);
-        recordWorkflowEvent('engagement.session_archived', {
-          session_id: sessionIdToArchive,
-        }, {
-          status: 'archived',
-        });
+        recordWorkflowEvent(
+          'engagement.session_archived',
+          {
+            session_id: sessionIdToArchive,
+          },
+          {
+            status: 'archived',
+          }
+        );
       } catch {
         // archive mutation already handles UI state
       }
@@ -1290,11 +1391,15 @@ export function ChatSessions() {
     async (sessionIdToRestore: string) => {
       try {
         await restoreSession.mutateAsync(sessionIdToRestore);
-        recordWorkflowEvent('engagement.session_archived', {
-          session_id: sessionIdToRestore,
-        }, {
-          status: 'restored',
-        });
+        recordWorkflowEvent(
+          'engagement.session_archived',
+          {
+            session_id: sessionIdToRestore,
+          },
+          {
+            status: 'restored',
+          }
+        );
       } catch {
         // restore mutation already handles UI state
       }
@@ -1305,11 +1410,15 @@ export function ChatSessions() {
   const retryWorkflowPlanGenerationMutation = useMutation({
     mutationFn: async (messageId: string) => {
       if (!activeSessionId) throw new Error('No active session');
-      recordWorkflowEvent('quality.retry_triggered', {
-        session_id: activeSessionId,
-      }, {
-        metadata: { retry_target: 'plan_generation' },
-      });
+      recordWorkflowEvent(
+        'quality.retry_triggered',
+        {
+          session_id: activeSessionId,
+        },
+        {
+          metadata: { retry_target: 'plan_generation' },
+        }
+      );
       return chatApi.retryWorkflowPlanGeneration(activeSessionId, messageId);
     },
     onSuccess: () => {
@@ -1319,8 +1428,7 @@ export function ChatSessions() {
       });
       setWorkflowCardRefreshNonce((prev) => prev + 1);
     },
-    onError: (error) =>
-      showRequestError(error, 'Retry plan generation failed'),
+    onError: (error) => showRequestError(error, 'Retry plan generation failed'),
   });
 
   const retryWorkflowStepMutation = useMutation({
@@ -1332,12 +1440,19 @@ export function ChatSessions() {
       retryTarget?: 'task' | 'review';
     }) => {
       if (!activeSessionId) throw new Error('No active session');
-      recordWorkflowEvent('quality.retry_triggered', {
-        session_id: activeSessionId,
-        task_id: stepId,
-      }, {
-        metadata: { retry_target: retryTarget ?? 'task' },
-      });
+      const context = resolveWorkflowContextForStep(stepId);
+      recordWorkflowEvent(
+        'quality.retry_triggered',
+        {
+          session_id: activeSessionId,
+          workflow_id: context.workflow_id,
+          plan_id: context.plan_id,
+          task_id: stepId,
+        },
+        {
+          metadata: { retry_target: retryTarget ?? 'task' },
+        }
+      );
       return chatApi.retryWorkflowStep(activeSessionId, stepId, retryTarget);
     },
     onMutate: () => {
@@ -1382,8 +1497,21 @@ export function ChatSessions() {
         inputText
       );
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       if (!activeSessionId) return;
+      const context = resolveWorkflowContextForStep(variables.stepId);
+      recordWorkflowEvent(
+        'collaboration.approval_resolved',
+        {
+          session_id: activeSessionId,
+          workflow_id: context.workflow_id,
+          plan_id: context.plan_id,
+          task_id: variables.stepId,
+        },
+        {
+          status: 'input_submitted',
+        }
+      );
       queryClient.invalidateQueries({
         queryKey: ['chatMessages', activeSessionId],
       });
@@ -1418,6 +1546,8 @@ export function ChatSessions() {
     setWorkflowCardProjectionByMessageId({});
     setWorkflowWindowFallbackProjection(null);
     setExecutePlanConfirmationProjection(null);
+    setRoundStartReviewSettingsProjection(null);
+    setPendingRoundStartReviewSettings(null);
     resetExecutePlanMutation();
     workflowCardRefreshNonceRef.current = 0;
     workflowCardForceRefreshUntilMsRef.current = 0;
@@ -1552,6 +1682,29 @@ export function ChatSessions() {
       workflowWindowFallbackProjection,
     ]);
 
+  useEffect(() => {
+    if (!pendingRoundStartReviewSettings) return;
+
+    const projection = Object.values(workflowCardProjectionByMessageId).find(
+      (item) =>
+        item.execution_id === pendingRoundStartReviewSettings.executionId &&
+        item.current_round === pendingRoundStartReviewSettings.roundIndex
+    );
+    if (!projection) return;
+    if (!shouldConfirmReviewSettingsBeforeRoundStart(projection)) {
+      if (
+        projection.execution_status !== 'pending' &&
+        projection.execution_status !== 'recompiling'
+      ) {
+        setPendingRoundStartReviewSettings(null);
+      }
+      return;
+    }
+
+    setRoundStartReviewSettingsProjection(projection);
+    setPendingRoundStartReviewSettings(null);
+  }, [pendingRoundStartReviewSettings, workflowCardProjectionByMessageId]);
+
   const workflowExecutionId = workflowWindowProjection?.execution_id ?? null;
   const shouldLoadWorkflowExecutionTranscripts =
     shouldFetchWorkflowExecutionTranscripts(workflowWindowProjection);
@@ -1560,10 +1713,6 @@ export function ChatSessions() {
     queryKey: ['workflowTranscripts', activeSessionId, workflowExecutionId],
     queryFn: () => {
       if (!activeSessionId || !workflowExecutionId) return [];
-      recordWorkflowEvent('engagement.transcript_opened', {
-        session_id: activeSessionId,
-        workflow_id: workflowExecutionId,
-      });
       return chatApi.getWorkflowTranscripts(
         activeSessionId,
         workflowExecutionId
@@ -1640,8 +1789,45 @@ export function ChatSessions() {
         variables.inputText
       );
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       if (!activeSessionId) return;
+      const context = resolveWorkflowContextForStep(variables.stepId);
+      const status =
+        variables.action === 'approve' ||
+        variables.action === 'reject' ||
+        variables.action === 'granted' ||
+        variables.action === 'denied'
+          ? variables.action
+          : 'submitted';
+      recordWorkflowEvent(
+        'collaboration.approval_resolved',
+        {
+          session_id: activeSessionId,
+          workflow_id: context.workflow_id,
+          plan_id: context.plan_id,
+          task_id: variables.stepId,
+        },
+        {
+          status,
+        }
+      );
+      if (variables.action === 'approve' || variables.action === 'reject') {
+        recordWorkflowEvent(
+          'quality.step_reviewed',
+          {
+            session_id: activeSessionId,
+            workflow_id: context.workflow_id,
+            plan_id: context.plan_id,
+            task_id: variables.stepId,
+          },
+          {
+            status: variables.action,
+            metadata: {
+              review_scope: 'step',
+            },
+          }
+        );
+      }
       queryClient.invalidateQueries({
         queryKey: ['chatMessages', activeSessionId],
       });
@@ -1667,8 +1853,33 @@ export function ChatSessions() {
         action: variables.action,
         feedback: variables.feedback ?? null,
       }),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       if (!activeSessionId) return;
+      recordWorkflowEvent(
+        'collaboration.approval_resolved',
+        {
+          session_id: activeSessionId,
+          workflow_id: workflowExecutionId ?? undefined,
+          task_id: variables.reviewId,
+        },
+        {
+          status: variables.action,
+        }
+      );
+      recordWorkflowEvent(
+        'quality.step_reviewed',
+        {
+          session_id: activeSessionId,
+          workflow_id: workflowExecutionId ?? undefined,
+          task_id: variables.reviewId,
+        },
+        {
+          status: variables.action,
+          metadata: {
+            review_scope: 'pending_review',
+          },
+        }
+      );
       queryClient.invalidateQueries({
         queryKey: ['chatMessages', activeSessionId],
       });
@@ -1707,8 +1918,56 @@ export function ChatSessions() {
             }
           : null,
       }),
-    onSuccess: () => {
+    onSuccess: (data, variables) => {
       if (!activeSessionId) return;
+      if (variables.action === 'reject') {
+        setPendingRoundStartReviewSettings({
+          executionId: data.execution_id,
+          roundIndex: data.current_round,
+        });
+        workflowCardForceRefreshUntilMsRef.current =
+          Date.now() + WORKFLOW_CARD_ACTION_REFRESH_WINDOW_MS;
+      }
+      recordWorkflowEvent(
+        'collaboration.approval_resolved',
+        {
+          session_id: activeSessionId,
+          workflow_id: variables.executionId,
+        },
+        {
+          status: variables.action,
+        }
+      );
+      recordWorkflowEvent(
+        'quality.step_reviewed',
+        {
+          session_id: activeSessionId,
+          workflow_id: variables.executionId,
+        },
+        {
+          status: variables.action,
+          metadata: {
+            review_scope: 'iteration',
+          },
+        }
+      );
+      recordWorkflowEvent(
+        'quality.review_decision_recorded',
+        {
+          session_id: activeSessionId,
+          workflow_id: variables.executionId,
+          plan_id:
+            workflowWindowProjection?.execution_id === variables.executionId
+              ? (workflowWindowProjection.plan_id ?? undefined)
+              : undefined,
+        },
+        buildReviewDecisionRecordedOptions(
+          variables.action === 'accept' ? 'user_accepted' : 'user_rejected',
+          {
+            review_scope: 'iteration',
+          }
+        )
+      );
       queryClient.invalidateQueries({
         queryKey: ['chatMessages', activeSessionId],
       });
@@ -1757,8 +2016,63 @@ export function ChatSessions() {
         workflow_id: projection.execution_id ?? undefined,
         plan_id: projection.plan_id ?? undefined,
       });
+      recordWorkflowEvent(
+        'engagement.transcript_opened',
+        {
+          session_id: activeSessionId,
+          workflow_id: projection.execution_id ?? undefined,
+          plan_id: projection.plan_id ?? undefined,
+        },
+        {
+          metadata: {
+            action_key:
+              cardMsgId ??
+              projection.execution_id ??
+              projection.plan_id ??
+              'window_open',
+          },
+        }
+      );
     },
-    [activeSessionId, messages, recordWorkflowEvent, workflowCardProjectionByMessageId]
+    [
+      activeSessionId,
+      messages,
+      recordWorkflowEvent,
+      workflowCardProjectionByMessageId,
+    ]
+  );
+
+  const resolveWorkflowContextForStep = useCallback(
+    (stepId: string): { workflow_id?: string; plan_id?: string } => {
+      if (
+        workflowWindowProjection?.steps.some(
+          (step) => step.id === stepId || step.step_key === stepId
+        )
+      ) {
+        return {
+          workflow_id: workflowWindowProjection.execution_id ?? undefined,
+          plan_id: workflowWindowProjection.plan_id ?? undefined,
+        };
+      }
+
+      for (const projection of Object.values(
+        workflowCardProjectionByMessageId
+      )) {
+        if (
+          projection.steps.some(
+            (step) => step.id === stepId || step.step_key === stepId
+          )
+        ) {
+          return {
+            workflow_id: projection.execution_id ?? undefined,
+            plan_id: projection.plan_id ?? undefined,
+          };
+        }
+      }
+
+      return {};
+    },
+    [workflowCardProjectionByMessageId, workflowWindowProjection]
   );
 
   const handleResolveWorkflowAction = useCallback(
@@ -2432,10 +2746,26 @@ export function ChatSessions() {
     }
     return runIds;
   }, [workItemGroups]);
+  const workflowLeadAgentId =
+    activeSession?.lead_agent_id ?? sessionMembers[0]?.agent.id ?? null;
   const visibleMessageList = useMemo(
     () =>
       messageList.filter((message) => {
-        if (!isWorkflowCardMessageMeta(message.meta)) {
+        const isWorkflowCardMessage = isWorkflowCardMessageMeta(message.meta);
+        if (!isWorkflowInputMode && isWorkflowCardMessage) {
+          return false;
+        }
+
+        if (
+          isWorkflowInputMode &&
+          workflowLeadAgentId &&
+          message.sender_type === ChatSenderType.agent &&
+          message.sender_id !== workflowLeadAgentId
+        ) {
+          return false;
+        }
+
+        if (!isWorkflowCardMessage) {
           return true;
         }
 
@@ -2454,7 +2784,9 @@ export function ChatSessions() {
       }),
     [
       completedWorkflowExecutionIdsWithWorkItems,
+      isWorkflowInputMode,
       messageList,
+      workflowLeadAgentId,
       workflowCardProjectionByMessageId,
     ]
   );
@@ -2465,10 +2797,6 @@ export function ChatSessions() {
 
   const runHistory = useRunHistory(messages);
 
-  const activeSession = useMemo(
-    () => sortedSessions.find((session) => session.id === activeSessionId),
-    [sortedSessions, activeSessionId]
-  );
   const sessionDefaultWorkspacePath = activeSession?.default_workspace_path;
   const defaultExecutorRunnerType = config?.executor_profile?.executor ?? null;
 
@@ -3426,9 +3754,13 @@ export function ChatSessions() {
       }
       if (artifact.kind === 'diff' && artifact.hasDiff) {
         void handleLoadDiff(artifact.runId);
-        recordWorkflowEvent('engagement.diff_viewed', { session_id: activeSessionId }, {
-          metadata: { diff_file_count: artifact.untrackedFiles.length },
-        });
+        recordWorkflowEvent(
+          'engagement.diff_viewed',
+          { session_id: activeSessionId },
+          {
+            metadata: { diff_file_count: artifact.untrackedFiles.length },
+          }
+        );
       }
     },
     [activeSessionId, handleLoadDiff, queryClient]
@@ -3866,10 +4198,14 @@ export function ChatSessions() {
         return;
       }
       console.warn('Failed to send chat message', error);
-      recordWorkflowEvent('risk.api_failure', { session_id: activeSessionId }, {
-        error_code: 'MESSAGE_SEND_FAILED',
-        metadata: { api_route_key: 'chat_message_create' },
-      });
+      recordWorkflowEvent(
+        'risk.api_failure',
+        { session_id: activeSessionId },
+        {
+          error_code: 'MESSAGE_SEND_FAILED',
+          metadata: { api_route_key: 'chat_message_create' },
+        }
+      );
     }
   };
 
@@ -3909,20 +4245,30 @@ export function ChatSessions() {
       upsertMessage(message);
       queryClient.invalidateQueries({ queryKey: ['chatSessions'] });
       setAttachedFiles([]);
-      recordWorkflowEvent('engagement.attachment_added', { session_id: activeSessionId }, {
-        metadata: {
-          attachment_count: allowedFiles.length,
-          size_bucket: fileSizeBucket(allowedFiles.reduce((s, f) => s + f.size, 0)),
-          attachment_type: attachmentTypeBucket(allowedFiles),
-        },
-      });
+      recordWorkflowEvent(
+        'engagement.attachment_added',
+        { session_id: activeSessionId },
+        {
+          metadata: {
+            attachment_count: allowedFiles.length,
+            size_bucket: fileSizeBucket(
+              allowedFiles.reduce((s, f) => s + f.size, 0)
+            ),
+            attachment_type: attachmentTypeBucket(allowedFiles),
+          },
+        }
+      );
     } catch (error) {
       console.warn('Failed to upload attachments', error);
       setAttachmentError('Unable to upload attachments.');
-      recordWorkflowEvent('risk.api_failure', { session_id: activeSessionId }, {
-        error_code: 'ATTACHMENT_UPLOAD_FAILED',
-        metadata: { api_route_key: 'chat_attachment_upload' },
-      });
+      recordWorkflowEvent(
+        'risk.api_failure',
+        { session_id: activeSessionId },
+        {
+          error_code: 'ATTACHMENT_UPLOAD_FAILED',
+          metadata: { api_route_key: 'chat_attachment_upload' },
+        }
+      );
       throw new Error('ATTACHMENT_UPLOAD_FAILED');
     } finally {
       setIsUploadingAttachments(false);
@@ -4713,9 +5059,13 @@ export function ChatSessions() {
           workspace_path: workspacePathVal,
           allowed_skill_ids: normalizedSelectedSkillIds,
         });
-        recordWorkflowEvent('workflow.agent_added', { session_id: activeSessionId }, {
-          metadata: { runner_type: runnerType },
-        });
+        recordWorkflowEvent(
+          'workflow.agent_added',
+          { session_id: activeSessionId },
+          {
+            metadata: { runner_type: runnerType },
+          }
+        );
       }
 
       await Promise.all([
@@ -4901,7 +5251,9 @@ export function ChatSessions() {
     async (sessionAgentId: string, agentId: string) => {
       if (!activeSessionId) return;
       setStoppingAgents((prev) => new Set(prev).add(agentId));
-      recordWorkflowEvent('risk.runner_interrupted', { session_id: activeSessionId });
+      recordWorkflowEvent('risk.runner_interrupted', {
+        session_id: activeSessionId,
+      });
       try {
         await chatApi.stopSessionAgent(activeSessionId, sessionAgentId);
       } catch (error) {
@@ -5841,6 +6193,32 @@ export function ChatSessions() {
                 ? t('workflow.executePlan.error', {
                     defaultValue: 'Unable to execute plan.',
                   })
+                : null
+          }
+        />
+      )}
+
+      {roundStartReviewSettingsProjection && (
+        <WorkflowReviewSettingsDialog
+          projection={roundStartReviewSettingsProjection}
+          isOpen
+          onClose={handleCloseRoundStartReviewSettings}
+          onSubmit={handleConfirmRoundStartReviewSettings}
+          submitLabel={t('workflow.card.buttons.resume', {
+            defaultValue: 'Resume',
+          })}
+          submittingLabel={t('workflow.controls.resuming', {
+            defaultValue: 'Resuming...',
+          })}
+          isSubmitting={
+            updateWorkflowReviewSettingsMutation.isPending ||
+            resumeWorkflowMutation.isPending
+          }
+          error={
+            updateWorkflowReviewSettingsMutation.error instanceof Error
+              ? updateWorkflowReviewSettingsMutation.error.message
+              : resumeWorkflowMutation.error instanceof Error
+                ? resumeWorkflowMutation.error.message
                 : null
           }
         />

@@ -69,7 +69,9 @@ export function WorkflowPendingInputCard({
       <div className="mt-2 flex justify-end">
         <button
           type="button"
-          onClick={() => onSubmit?.(pendingInput.step_id, trimmedValue)}
+          onClick={() => {
+            onSubmit?.(pendingInput.step_id, trimmedValue);
+          }}
           disabled={disabled || !onSubmit || trimmedValue.length === 0}
           className="rounded bg-indigo-600 px-3 py-1.5 text-[10px] font-bold text-white shadow-sm transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
         >

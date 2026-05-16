@@ -999,6 +999,10 @@
       "submitReject": "提交拒絕",
       "reject": "拒絕"
     },
+    "generatedText": {
+      "reviewLoop": "請審核迴圈「{{loopKey}}」。",
+      "userApprovedStepResult": "使用者已批准步驟結果。"
+    },
     "finalReview": {
       "title": "最終審核",
       "defaultMessage": "任務已完成，是否接受結果？",

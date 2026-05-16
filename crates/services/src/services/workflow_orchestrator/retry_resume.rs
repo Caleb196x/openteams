@@ -17,6 +17,7 @@ use uuid::Uuid;
 use super::{
     super::{
         chat_runner::ChatRunner,
+        workflow_analytics,
         workflow_loop_executor::LoopExecutor,
         workflow_runtime::{WorkflowStepRunResult, parse_summary_payload},
     },
@@ -35,6 +36,14 @@ impl WorkflowOrchestrator {
     ) -> Result<(WorkflowExecution, WorkflowStep), OrchestratorError> {
         let pool = &db.pool;
         let (execution, ready_step) = Self::prepare_step_retry(pool, chat_runner, step_id).await?;
+
+        workflow_analytics::track_retry_triggered(
+            chat_runner.analytics_service(),
+            execution.session_id,
+            execution.id,
+            step_id,
+            ready_step.retry_count + 1,
+        );
 
         let execution =
             Self::activate_execution_for_step_retry(pool, chat_runner, &execution).await?;

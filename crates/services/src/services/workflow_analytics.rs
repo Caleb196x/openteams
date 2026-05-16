@@ -464,6 +464,20 @@ pub fn record_workflow_analytics_event(
 // Orchestrator integration helpers
 // ---------------------------------------------------------------------------
 
+fn execution_events_for_to_status(
+    to_status: &str,
+) -> (WorkflowAnalyticsEvent, Option<WorkflowAnalyticsEvent>) {
+    let terminal_quality_event = match to_status {
+        "completed" => Some(WorkflowAnalyticsEvent::WorkflowCompleted),
+        "failed" | "cancelled" => Some(WorkflowAnalyticsEvent::WorkflowFailed),
+        _ => None,
+    };
+    (
+        WorkflowAnalyticsEvent::ExecutionStateChanged,
+        terminal_quality_event,
+    )
+}
+
 /// Emit a workflow execution state change analytics event.
 pub fn track_execution_state_changed(
     analytics: Option<&AnalyticsService>,
@@ -474,12 +488,7 @@ pub fn track_execution_state_changed(
     to_status: &str,
     duration_ms: Option<i64>,
 ) {
-    let event = match to_status {
-        "completed" => WorkflowAnalyticsEvent::WorkflowCompleted,
-        "failed" => WorkflowAnalyticsEvent::WorkflowFailed,
-        _ => WorkflowAnalyticsEvent::ExecutionStateChanged,
-    };
-
+    let (funnel_event, terminal_quality_event) = execution_events_for_to_status(to_status);
     let mut ctx = WorkflowEventContext::new("workflow_runner")
         .with_session(session_id)
         .with_workflow(execution_id)
@@ -493,7 +502,11 @@ pub fn track_execution_state_changed(
     let mut meta = serde_json::Map::new();
     meta.insert("from_status".to_string(), json!(from_status));
 
-    record_workflow_analytics_event(analytics, event, &ctx, meta);
+    record_workflow_analytics_event(analytics, funnel_event, &ctx, meta.clone());
+
+    if let Some(quality_event) = terminal_quality_event {
+        record_workflow_analytics_event(analytics, quality_event, &ctx, meta);
+    }
 }
 
 /// Emit a workflow step state change analytics event.
@@ -879,6 +892,129 @@ pub fn track_review_decision_recorded(
     );
 }
 
+fn review_decision_event_parts(
+    session_id: Uuid,
+    execution_id: Option<Uuid>,
+    plan_id: Option<Uuid>,
+    step_id: Option<Uuid>,
+    status: &str,
+    verdict: &str,
+    reviewer_type: &str,
+    resolution: &str,
+) -> (
+    WorkflowAnalyticsEvent,
+    WorkflowEventContext,
+    serde_json::Map<String, Value>,
+) {
+    let mut ctx = WorkflowEventContext::new("workflow_runner")
+        .with_session(session_id)
+        .with_status(status);
+
+    if let Some(execution_id) = execution_id {
+        ctx = ctx.with_workflow(execution_id);
+    }
+    if let Some(plan_id) = plan_id {
+        ctx = ctx.with_plan(plan_id);
+    }
+    if let Some(step_id) = step_id {
+        ctx = ctx.with_task(step_id);
+    }
+
+    let mut meta = serde_json::Map::new();
+    meta.insert("review_verdict".to_string(), json!(verdict));
+    meta.insert("reviewer_type".to_string(), json!(reviewer_type));
+    meta.insert("resolution".to_string(), json!(resolution));
+
+    (WorkflowAnalyticsEvent::ReviewDecisionRecorded, ctx, meta)
+}
+
+/// Emit a final review user decision event with explicit user_accepted/user_rejected semantics.
+pub fn track_final_review_decision(
+    analytics: Option<&AnalyticsService>,
+    session_id: Uuid,
+    execution_id: Uuid,
+    plan_id: Uuid,
+    accepted: bool,
+) {
+    let status = if accepted {
+        "user_accepted"
+    } else {
+        "user_rejected"
+    };
+    let verdict = if accepted { "accepted" } else { "rejected" };
+    let (event, ctx, meta) = review_decision_event_parts(
+        session_id,
+        Some(execution_id),
+        Some(plan_id),
+        None,
+        status,
+        verdict,
+        "user",
+        status,
+    );
+
+    record_workflow_analytics_event(analytics, event, &ctx, meta);
+}
+
+/// Emit a pre-execution plan replacement/revision event that is distinct from plan_generated.
+pub fn track_plan_revision_created(
+    analytics: Option<&AnalyticsService>,
+    session_id: Uuid,
+    plan_id: Uuid,
+) {
+    let (event, ctx, meta) = review_decision_event_parts(
+        session_id,
+        None,
+        Some(plan_id),
+        None,
+        "plan_revision_created",
+        "plan_revision_created",
+        "system",
+        "plan_revision_created",
+    );
+
+    record_workflow_analytics_event(analytics, event, &ctx, meta);
+}
+
+/// Emit an explicit review-node rejection event for loop-review rejection paths.
+pub(crate) fn review_node_rejected_event_parts(
+    session_id: Uuid,
+    execution_id: Uuid,
+    plan_id: Uuid,
+    step_id: Uuid,
+    reviewer_type: &str,
+) -> (
+    WorkflowAnalyticsEvent,
+    WorkflowEventContext,
+    serde_json::Map<String, Value>,
+) {
+    review_decision_event_parts(
+        session_id,
+        Some(execution_id),
+        Some(plan_id),
+        Some(step_id),
+        "review_node_rejected",
+        "rejected",
+        reviewer_type,
+        "review_node_rejected",
+    )
+}
+
+/// Emit an explicit review-node rejection event for loop-review rejection paths.
+pub fn track_review_node_rejected(
+    analytics: Option<&AnalyticsService>,
+    session_id: Uuid,
+    execution_id: Uuid,
+    plan_id: Uuid,
+    step_id: Uuid,
+    reviewer_type: &str,
+) {
+    let (event, ctx, meta) =
+        review_node_rejected_event_parts(session_id, execution_id, plan_id, step_id, reviewer_type);
+
+    record_workflow_analytics_event(analytics, event, &ctx, meta);
+}
+
 /// Emit a retry triggered analytics event.
 pub fn track_retry_triggered(
     analytics: Option<&AnalyticsService>,
@@ -1171,6 +1307,13 @@ pub fn hash_user_id(user_id: &str) -> String {
     let mut hasher = DefaultHasher::new();
     user_id.hash(&mut hasher);
     format!("wf_user_{:016x}", hasher.finish())
+}
+
+pub fn analytics_if_enabled<'a>(
+    analytics: Option<&'a AnalyticsService>,
+    capture_enabled: bool,
+) -> Option<&'a AnalyticsService> {
+    if capture_enabled { analytics } else { None }
 }
 
 /// Classify message length into a privacy-safe bucket.
@@ -1570,26 +1713,65 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn track_execution_completed_maps_to_quality_workflow_completed() {
-        let event = match "completed" {
-            "completed" => WorkflowAnalyticsEvent::WorkflowCompleted,
-            "failed" => WorkflowAnalyticsEvent::WorkflowFailed,
-            _ => WorkflowAnalyticsEvent::ExecutionStateChanged,
-        };
-        assert_eq!(event, WorkflowAnalyticsEvent::WorkflowCompleted);
-        assert_eq!(event.category(), "quality");
-        assert_eq!(event.event_name(), "quality.workflow_completed");
+    fn execution_state_changed_event_name_matches_plan_funnel() {
+        assert_eq!(
+            WorkflowAnalyticsEvent::ExecutionStateChanged.event_name(),
+            "workflow.execution_state_changed"
+        );
+        assert_eq!(
+            WorkflowAnalyticsEvent::ExecutionStateChanged.category(),
+            "process_funnel"
+        );
     }
 
     #[test]
-    fn track_execution_failed_maps_to_quality_workflow_failed() {
-        let event = match "failed" {
-            "completed" => WorkflowAnalyticsEvent::WorkflowCompleted,
-            "failed" => WorkflowAnalyticsEvent::WorkflowFailed,
-            _ => WorkflowAnalyticsEvent::ExecutionStateChanged,
-        };
-        assert_eq!(event, WorkflowAnalyticsEvent::WorkflowFailed);
-        assert_eq!(event.category(), "quality");
+    fn execution_completed_keeps_funnel_event_and_adds_quality_event() {
+        let (funnel, terminal) = execution_events_for_to_status("completed");
+        assert_eq!(funnel, WorkflowAnalyticsEvent::ExecutionStateChanged);
+        assert_eq!(
+            terminal,
+            Some(WorkflowAnalyticsEvent::WorkflowCompleted),
+            "completed should emit both execution_state_changed and quality.workflow_completed"
+        );
+    }
+
+    #[test]
+    fn execution_failed_keeps_funnel_event_and_adds_quality_event() {
+        let (funnel, terminal) = execution_events_for_to_status("failed");
+        assert_eq!(funnel, WorkflowAnalyticsEvent::ExecutionStateChanged);
+        assert_eq!(
+            terminal,
+            Some(WorkflowAnalyticsEvent::WorkflowFailed),
+            "failed should emit both execution_state_changed and quality.workflow_failed"
+        );
+    }
+
+    #[test]
+    fn execution_cancelled_keeps_funnel_event_and_adds_quality_failed_event() {
+        let (funnel, terminal) = execution_events_for_to_status("cancelled");
+        assert_eq!(funnel, WorkflowAnalyticsEvent::ExecutionStateChanged);
+        assert_eq!(
+            terminal,
+            Some(WorkflowAnalyticsEvent::WorkflowFailed),
+            "cancelled should emit both execution_state_changed and quality.workflow_failed"
+        );
+    }
+
+    #[test]
+    fn terminal_quality_events_remain_defined_for_completed_and_failed() {
+        assert_eq!(
+            WorkflowAnalyticsEvent::WorkflowCompleted.event_name(),
+            "quality.workflow_completed"
+        );
+        assert_eq!(
+            WorkflowAnalyticsEvent::WorkflowCompleted.category(),
+            "quality"
+        );
+        assert_eq!(
+            WorkflowAnalyticsEvent::WorkflowFailed.event_name(),
+            "quality.workflow_failed"
+        );
+        assert_eq!(WorkflowAnalyticsEvent::WorkflowFailed.category(), "quality");
     }
 
     #[test]
@@ -1694,6 +1876,99 @@ mod tests {
         assert!(!meta.contains_key("error_message"));
     }
 
+    #[test]
+    fn final_review_accept_event_has_explicit_user_accepted_semantics() {
+        let nil = Uuid::nil();
+        let nil_str = nil.to_string();
+        let (event, ctx, mut meta) = review_decision_event_parts(
+            nil,
+            Some(nil),
+            Some(nil),
+            None,
+            "user_accepted",
+            "accepted",
+            "user",
+            "user_accepted",
+        );
+
+        assert_eq!(event.event_name(), "quality.review_decision_recorded");
+        assert_eq!(ctx.workflow_id.as_deref(), Some(nil_str.as_str()));
+        assert_eq!(ctx.plan_id.as_deref(), Some(nil_str.as_str()));
+        assert_eq!(ctx.status.as_deref(), Some("user_accepted"));
+        assert_eq!(meta["review_verdict"], json!("accepted"));
+        assert_eq!(meta["reviewer_type"], json!("user"));
+        assert_eq!(meta["resolution"], json!("user_accepted"));
+        assert!(sanitize_metadata(&mut meta).is_empty());
+    }
+
+    #[test]
+    fn final_review_reject_event_has_explicit_user_rejected_semantics() {
+        let nil = Uuid::nil();
+        let (event, ctx, mut meta) = review_decision_event_parts(
+            nil,
+            Some(nil),
+            Some(nil),
+            None,
+            "user_rejected",
+            "rejected",
+            "user",
+            "user_rejected",
+        );
+
+        assert_eq!(event, WorkflowAnalyticsEvent::ReviewDecisionRecorded);
+        assert_eq!(ctx.status.as_deref(), Some("user_rejected"));
+        assert_eq!(meta["review_verdict"], json!("rejected"));
+        assert_eq!(meta["resolution"], json!("user_rejected"));
+        assert!(sanitize_metadata(&mut meta).is_empty());
+    }
+
+    #[test]
+    fn plan_revision_created_event_is_not_plan_generated() {
+        let nil = Uuid::nil();
+        let nil_str = nil.to_string();
+        let (event, ctx, mut meta) = review_decision_event_parts(
+            nil,
+            None,
+            Some(nil),
+            None,
+            "plan_revision_created",
+            "plan_revision_created",
+            "system",
+            "plan_revision_created",
+        );
+
+        assert_eq!(event.event_name(), "quality.review_decision_recorded");
+        assert_ne!(event.event_name(), "workflow.plan_generated");
+        assert_eq!(ctx.workflow_id, None);
+        assert_eq!(ctx.plan_id.as_deref(), Some(nil_str.as_str()));
+        assert_eq!(ctx.status.as_deref(), Some("plan_revision_created"));
+        assert_eq!(meta["resolution"], json!("plan_revision_created"));
+        assert!(sanitize_metadata(&mut meta).is_empty());
+    }
+
+    #[test]
+    fn review_node_rejected_event_is_step_scoped_and_consumable() {
+        let nil = Uuid::nil();
+        let nil_str = nil.to_string();
+        let (event, ctx, mut meta) = review_decision_event_parts(
+            nil,
+            Some(nil),
+            Some(nil),
+            Some(nil),
+            "review_node_rejected",
+            "rejected",
+            "lead",
+            "review_node_rejected",
+        );
+
+        assert_eq!(event, WorkflowAnalyticsEvent::ReviewDecisionRecorded);
+        assert_eq!(ctx.task_id.as_deref(), Some(nil_str.as_str()));
+        assert_eq!(ctx.status.as_deref(), Some("review_node_rejected"));
+        assert_eq!(meta["reviewer_type"], json!("lead"));
+        assert_eq!(meta["resolution"], json!("review_node_rejected"));
+        assert!(sanitize_metadata(&mut meta).is_empty());
+    }
+
     // -----------------------------------------------------------------------
     // Fire-and-forget safety tests (None analytics)
     // -----------------------------------------------------------------------
@@ -1708,6 +1983,10 @@ mod tests {
         track_plan_generated(None, nil, None, true);
         track_plan_generated(None, nil, Some(nil), false);
         track_plan_executed(None, nil, nil, nil);
+        track_final_review_decision(None, nil, nil, nil, true);
+        track_final_review_decision(None, nil, nil, nil, false);
+        track_plan_revision_created(None, nil, nil);
+        track_review_node_rejected(None, nil, nil, nil, nil, "lead");
         track_approval_requested(None, nil, nil, nil, "approval_request");
         track_approval_resolved(None, nil, nil, nil, "accepted");
         track_step_reviewed(None, nil, nil, nil, "approved", "lead");
@@ -1739,5 +2018,18 @@ mod tests {
         );
         track_websocket_disconnected(None, nil, "socket_closed");
         track_approval_timeout(None, nil, nil, nil, "approval_request");
+    }
+
+    #[test]
+    fn analytics_if_enabled_blocks_capture_when_disabled() {
+        assert!(analytics_if_enabled(None, false).is_none());
+        assert!(analytics_if_enabled(None, true).is_none());
+
+        let analytics = AnalyticsService::new(crate::services::analytics::AnalyticsConfig {
+            posthog_api_key: "test-key".to_string(),
+            posthog_api_endpoint: "https://example.com".to_string(),
+        });
+        assert!(analytics_if_enabled(Some(&analytics), false).is_none());
+        assert!(analytics_if_enabled(Some(&analytics), true).is_some());
     }
 }

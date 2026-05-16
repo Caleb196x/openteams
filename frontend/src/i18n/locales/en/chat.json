@@ -999,6 +999,10 @@
       "submitReject": "SUBMIT REJECT",
       "reject": "REJECT"
     },
+    "generatedText": {
+      "reviewLoop": "Please review loop \"{{loopKey}}\".",
+      "userApprovedStepResult": "User approved the step result."
+    },
     "finalReview": {
       "title": "Final Review",
       "defaultMessage": "Task completed. Accept the result?",

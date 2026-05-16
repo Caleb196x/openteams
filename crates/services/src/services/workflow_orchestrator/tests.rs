@@ -260,6 +260,40 @@ fn clear_pending_revision_feedback_removes_resume_payload() {
 }
 
 #[test]
+fn step_transition_duration_reports_terminal_elapsed_time() {
+    let mut step = sample_step(WorkflowStepStatus::Running, None);
+    step.started_at = Some(Utc::now());
+    step.updated_at =
+        step.started_at.expect("started_at set") + chrono::Duration::milliseconds(2500);
+    step.completed_at =
+        Some(step.started_at.expect("started_at set") + chrono::Duration::milliseconds(3200));
+
+    let duration_ms = step_transition_duration_ms(&step, "completed");
+    assert_eq!(duration_ms, Some(3200));
+}
+
+#[test]
+fn step_transition_duration_uses_updated_at_fallback_for_cancelled() {
+    let mut step = sample_step(WorkflowStepStatus::Running, None);
+    step.started_at = Some(Utc::now());
+    step.updated_at =
+        step.started_at.expect("started_at set") + chrono::Duration::milliseconds(1800);
+    step.completed_at = None;
+
+    let duration_ms = step_transition_duration_ms(&step, "cancelled");
+    assert_eq!(duration_ms, Some(1800));
+}
+
+#[test]
+fn step_transition_duration_is_none_for_non_terminal_states() {
+    let mut step = sample_step(WorkflowStepStatus::Running, None);
+    step.started_at = Some(Utc::now());
+
+    assert_eq!(step_transition_duration_ms(&step, "running"), None);
+    assert_eq!(step_transition_duration_ms(&step, "waiting_review"), None);
+}
+
+#[test]
 fn execute_step_with_feedback_trace_direct_passes() {
     let trace = simulate_step_feedback_trace(1, &[SimulatedLeadVerdict::Approved], None);
 

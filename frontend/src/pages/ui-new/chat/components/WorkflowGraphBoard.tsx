@@ -482,7 +482,8 @@ export function WorkflowGraphBoard({
       })
       .catch((err) => {
         console.error('ELK Layout error:', err);
-        setLayoutError(String(err?.message ?? err));
+        const errorMessage = String(err?.message ?? err);
+        setLayoutError(errorMessage);
         // Fallback: simple grid layout without ELK
         const fallbackLayout = buildFallbackLayout(graph.children ?? []);
         setLayout(fallbackLayout);
@@ -743,7 +744,11 @@ export function WorkflowGraphBoard({
               width: child.width,
               height: child.height,
             }}
-            onClick={() => onSelectStep?.(child.id)}
+            onClick={() => {
+              const step = stepByKey.get(child.id);
+              onSelectStep?.(child.id);
+              void step;
+            }}
             onMouseEnter={() => setHoveredNodeId(child.id)}
             onMouseLeave={() => setHoveredNodeId(null)}
             data-workflow-node="true"
@@ -752,7 +757,9 @@ export function WorkflowGraphBoard({
             onKeyDown={(e) => {
               if (onSelectStep && (e.key === 'Enter' || e.key === ' ')) {
                 e.preventDefault();
+                const step = stepByKey.get(child.id);
                 onSelectStep(child.id);
+                void step;
               }
             }}
           >

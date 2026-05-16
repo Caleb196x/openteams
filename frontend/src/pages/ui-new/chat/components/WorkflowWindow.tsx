@@ -53,6 +53,7 @@ import {
   WorkflowReviewSettingsDialog,
   type WorkflowReviewSettingOverride,
 } from './WorkflowReviewSettingsDialog';
+import { localizeWorkflowGeneratedText } from './workflowGeneratedText';
 
 type WorkflowCardStep = WorkflowCardData['steps'][number];
 
@@ -259,6 +260,14 @@ function getTranscriptMarkdown(entry: WorkflowTranscriptEntry): string | null {
   return null;
 }
 
+function getLocalizedTranscriptMarkdown(
+  entry: WorkflowTranscriptEntry,
+  t: (key: string, opts?: Record<string, unknown>) => string
+): string | null {
+  const markdown = getTranscriptMarkdown(entry);
+  return markdown ? localizeWorkflowGeneratedText(markdown, t) : null;
+}
+
 function getTranscriptMetaSource(
   entry: WorkflowTranscriptEntry
 ): string | null {
@@ -300,6 +309,23 @@ function isWorkflowRuntimeThinkingEntry(
     entry.entry_type === 'thinking' &&
     getTranscriptMetaSource(entry) === 'workflow_runtime_stream'
   );
+}
+
+function isWorkflowRuntimeErrorEntry(entry: WorkflowTranscriptEntry): boolean {
+  return (
+    entry.entry_type === 'error' &&
+    getTranscriptMetaSource(entry) === 'workflow_runtime_stream'
+  );
+}
+
+function shouldShowWorkflowStepTranscriptEntry(
+  entry: WorkflowTranscriptEntry,
+  step: WorkflowCardStep
+): boolean {
+  if (!isWorkflowRuntimeErrorEntry(entry)) {
+    return true;
+  }
+  return step.status === 'failed';
 }
 
 function isWorkflowStepLifecycleStartEntry(
@@ -459,7 +485,10 @@ export type WorkflowWindowProps = {
   onClose: () => void;
   onExecute?: (projection: WorkflowWindowProjection) => void;
   onPauseAll?: (executionId: string) => void;
-  onResume?: (executionId: string) => void;
+  onResume?: (
+    executionId: string,
+    projection: WorkflowWindowProjection
+  ) => void;
   onInterruptStep?: (stepId: string) => void;
   onStopStep?: (stepId: string) => void;
   onRetryStep?: (stepId: string, retryTarget?: 'task' | 'review') => void;
@@ -701,6 +730,12 @@ function InspectorCard({
     t('workflow.inspector.noSummary', {
       defaultValue: 'No summary has been generated for this step yet.',
     });
+  const localizedLatestReviewFeedback = latestReviewFeedback
+    ? localizeWorkflowGeneratedText(latestReviewFeedback, t)
+    : latestReviewFeedback;
+  const localizedLatestReviewLabel = latestReviewLabel
+    ? localizeWorkflowGeneratedText(latestReviewLabel, t)
+    : latestReviewLabel;
   const loopName = loop?.loop_key?.trim() ?? '';
   const isFailed = WORKFLOW_FAILURE_STEP_STATUSES.has(step.status);
   const isCompleted = step.status === 'completed';
@@ -733,7 +768,8 @@ function InspectorCard({
             const groupKey = `${step.id}::${groupAgentName}`;
             const existing = groups.get(groupKey);
             const content = (
-              getTranscriptMarkdown(entry) ?? entry.content
+              getLocalizedTranscriptMarkdown(entry, t) ??
+              localizeWorkflowGeneratedText(entry.content, t)
             ).trim();
             if (!content) return groups;
             const lines = content
@@ -932,7 +968,11 @@ function InspectorCard({
                 </h3>
                 <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl p-4">
                   <ChatMarkdown
-                    content={latestReviewFeedback || latestReviewLabel}
+                    content={
+                      localizedLatestReviewFeedback ||
+                      localizedLatestReviewLabel ||
+                      ''
+                    }
                     maxWidth="100%"
                     textClassName={workflowDetailMarkdownTextClassName}
                     className="w-full select-text"
@@ -958,7 +998,10 @@ function InspectorCard({
                 ) : outputEntries.length > 0 ? (
                   <div className="space-y-4">
                     {outputEntries.map((entry) => {
-                      const markdownContent = getTranscriptMarkdown(entry);
+                      const markdownContent = getLocalizedTranscriptMarkdown(
+                        entry,
+                        t
+                      );
                       const OutputIcon = getWorkflowOutputEntryIcon(entry);
                       const outputAgentName =
                         entry.entry_type === 'message' ||
@@ -986,7 +1029,10 @@ function InspectorCard({
                             {outputLabel}
                           </div>
                           <ChatMarkdown
-                            content={markdownContent || entry.content}
+                            content={
+                              markdownContent ||
+                              localizeWorkflowGeneratedText(entry.content, t)
+                            }
                             maxWidth="100%"
                             textClassName={workflowDetailMarkdownTextClassName}
                             className="w-full select-text"
@@ -1326,7 +1372,7 @@ function ChatPanel({
         {outputEntries.map((entry) => {
           const isReviewEntry = isWorkflowReviewEntry(entry);
           const isUser = entry.message_type === 'user' && !isReviewEntry;
-          const markdownContent = getTranscriptMarkdown(entry);
+          const markdownContent = getLocalizedTranscriptMarkdown(entry, t);
           const entryAgentName =
             !isUser && isReviewEntry
               ? getWorkflowReviewAgentName(entry, agentName)
@@ -1361,7 +1407,7 @@ function ChatPanel({
                         })}
                 </div>
                 <p className="text-[11px] text-slate-600 mb-3 leading-relaxed font-medium">
-                  {entry.content}
+                  {localizeWorkflowGeneratedText(entry.content, t)}
                 </p>
                 {!resolved && entry.step_id && onApproval && (
                   <div className="flex gap-2">
@@ -1446,7 +1492,7 @@ function ChatPanel({
                 )}
               >
                 {isUser ? (
-                  entry.content
+                  localizeWorkflowGeneratedText(entry.content, t)
                 ) : markdownContent ? (
                   <ChatMarkdown
                     content={markdownContent}
@@ -1455,7 +1501,9 @@ function ChatPanel({
                     className="w-full select-text"
                   />
                 ) : (
-                  <span className="text-[13px]">{entry.content}</span>
+                  <span className="text-[13px]">
+                    {localizeWorkflowGeneratedText(entry.content, t)}
+                  </span>
                 )}
               </div>
             </div>
@@ -1986,13 +2034,18 @@ export function WorkflowWindow({
       );
   }, [activeStep, runtimeMessages]);
 
-  const visibleActiveTranscript =
+  const rawVisibleActiveTranscript =
     activeStepScopedTranscript.length > 0 || activeRuntimeTranscript.length > 0
       ? mergeAndSortTranscriptEntries(
           activeStepScopedTranscript,
           activeRuntimeTranscript
         )
       : activeStepFallbackTranscript;
+  const visibleActiveTranscript = activeStep
+    ? rawVisibleActiveTranscript.filter((entry) =>
+        shouldShowWorkflowStepTranscriptEntry(entry, activeStep)
+      )
+    : rawVisibleActiveTranscript;
 
   // Final review & iteration
   const workflowFinalReviewAction = useMemo(
@@ -2048,7 +2101,12 @@ export function WorkflowWindow({
         type: projection.pending_review.review_type,
         title: projection.pending_review.target_title,
         message:
-          projection.pending_review.prompt_template.message ||
+          (projection.pending_review.prompt_template.message
+            ? localizeWorkflowGeneratedText(
+                projection.pending_review.prompt_template.message,
+                t
+              )
+            : null) ||
           t('workflow.notifications.reviewRequired', {
             defaultValue: 'Review required',
           }),
@@ -2251,7 +2309,7 @@ export function WorkflowWindow({
             {canResumeExecution && projection.execution_id && onResume && (
               <button
                 type="button"
-                onClick={() => onResume(projection.execution_id!)}
+                onClick={() => onResume(projection.execution_id!, projection)}
                 className="p-1.5 bg-white shadow-sm rounded-md transition-all text-indigo-600 hover:bg-indigo-50"
                 title={t('workflow.controls.resume', {
                   defaultValue: 'Resume',

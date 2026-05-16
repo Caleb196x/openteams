@@ -99,10 +99,7 @@ export function WorkflowIterationFeedbackCard({
     totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0;
   const effectiveExecutionStatus =
     executionStatus ?? (isRegeneratingPlan ? 'recompiling' : 'pending');
-  const statusLabel = workflowExecutionStatusLabel(
-    effectiveExecutionStatus,
-    t
-  );
+  const statusLabel = workflowExecutionStatusLabel(effectiveExecutionStatus, t);
   const statusDotClass = workflowExecutionStatusDotClass(
     effectiveExecutionStatus
   );
@@ -219,7 +216,9 @@ export function WorkflowIterationFeedbackCard({
                 <button
                   key={round.roundIndex}
                   type="button"
-                  onClick={() => onSelectRound?.(round.roundIndex)}
+                  onClick={() => {
+                    onSelectRound?.(round.roundIndex);
+                  }}
                   className={cn(
                     'min-w-10 rounded-lg px-2.5 py-1.5 text-[10px] font-bold transition-colors',
                     isSelected

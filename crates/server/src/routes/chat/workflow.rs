@@ -29,6 +29,7 @@ use deployment::Deployment;
 use serde::{Deserialize, Serialize};
 use services::services::{
     config,
+    workflow_analytics::{self, hash_user_id},
     workflow_compiler::WorkflowCompiler,
     workflow_orchestrator::WorkflowOrchestrator,
     workflow_runtime::{
@@ -145,6 +146,18 @@ pub async fn generate_plan_and_run(
 
     tracing::debug!("Plan generation prompt for lead agent:\n{}", prompt);
 
+    let track_plan_generation_failure = || {
+        workflow_analytics::track_plan_generated(
+            workflow_analytics::analytics_if_enabled(
+                deployment.analytics().as_ref(),
+                deployment.analytics_enabled(),
+            ),
+            session.id,
+            None,
+            false,
+        );
+    };
+
     let raw_plan_output = run_workflow_agent_prompt(
         deployment.db(),
         &session,
@@ -155,16 +168,21 @@ pub async fn generate_plan_and_run(
         uuid::Uuid::nil(),
     )
     .await
-    .map_err(|err| ApiError::BadRequest(err.to_string()))?;
+    .map_err(|err| {
+        track_plan_generation_failure();
+        ApiError::BadRequest(err.to_string())
+    })?;
 
     tracing::debug!("Raw plan output from lead agent: {}", raw_plan_output);
 
     let plan_json = extract_json_payload(&raw_plan_output).ok_or_else(|| {
+        track_plan_generation_failure();
         ApiError::BadRequest("Lead agent did not return a workflow JSON object.".to_string())
     })?;
 
     let parsed_plan: db::models::workflow_types::WorkflowPlanJson =
         serde_json::from_str(&plan_json).map_err(|err| {
+            track_plan_generation_failure();
             ApiError::BadRequest(format!("Lead agent returned invalid workflow JSON: {err}"))
         })?;
     let valid_agent_ids = agents
@@ -173,6 +191,7 @@ pub async fn generate_plan_and_run(
         .collect::<Vec<_>>();
     let validation = workflow_validator::validate_plan(&parsed_plan, &valid_agent_ids);
     if !validation.is_valid {
+        track_plan_generation_failure();
         persist_invalid_plan(
             pool,
             session.id,
@@ -210,7 +229,10 @@ pub async fn generate_plan_and_run(
             &plan_json,
         )
         .await
-        .map_err(|err| ApiError::BadRequest(err.to_string()))?;
+        .map_err(|err| {
+            track_plan_generation_failure();
+            ApiError::BadRequest(err.to_string())
+        })?;
 
     let agent_id_map = session_agents
         .iter()
@@ -233,6 +255,16 @@ pub async fn generate_plan_and_run(
         workflow_card_message.id,
     )
     .await?;
+
+    workflow_analytics::track_plan_executed(
+        workflow_analytics::analytics_if_enabled(
+            deployment.analytics().as_ref(),
+            deployment.analytics_enabled(),
+        ),
+        session.id,
+        plan.id,
+        execution.id,
+    );
 
     WorkflowOrchestrator::refresh_workflow_card(
         pool,
@@ -496,7 +528,9 @@ pub async fn update_review_settings(
         ));
     }
     match execution.status {
-        WorkflowExecutionStatus::Completed | WorkflowExecutionStatus::Failed => {
+        WorkflowExecutionStatus::Completed
+        | WorkflowExecutionStatus::Failed
+        | WorkflowExecutionStatus::Cancelled => {
             return Err(ApiError::BadRequest(
                 "Review settings cannot be changed after execution has finished.".to_string(),
             ));
@@ -744,7 +778,18 @@ pub async fn get_step_transcripts(
     let (_step, execution) = load_step_for_session(pool, &session, step_id).await?;
     let mut scoped_query = query;
     scoped_query.step_id = Some(step_id);
-    list_transcript_response(pool, &session, execution.id, scoped_query).await
+    list_transcript_response(
+        pool,
+        workflow_analytics::analytics_if_enabled(
+            deployment.analytics().as_ref(),
+            deployment.analytics_enabled(),
+        ),
+        deployment.user_id(),
+        &session,
+        execution.id,
+        scoped_query,
+    )
+    .await
 }
 
 pub async fn submit_step_input(
@@ -1184,6 +1229,8 @@ fn workflow_transcript_review_key(entry: &WorkflowTranscriptEntry) -> Option<(Uu
 
 async fn list_transcript_response(
     pool: &sqlx::SqlitePool,
+    analytics: Option<&services::services::analytics::AnalyticsService>,
+    user_id: &str,
     session: &ChatSession,
     execution_id: Uuid,
     query: WorkflowTranscriptQuery,
@@ -1344,6 +1391,22 @@ async fn list_transcript_response(
             .then_with(|| left.id.cmp(&right.id))
     });
 
+    let transcript_scope = if query.step_id.is_some() || query.step_key.is_some() {
+        "step"
+    } else {
+        "execution"
+    };
+    let user_id_hash = hash_user_id(user_id);
+    workflow_analytics::track_transcript_opened(
+        analytics,
+        session.id,
+        execution_id,
+        Some(&user_id_hash),
+        query.step_id,
+        entries.len(),
+        transcript_scope,
+    );
+
     Ok((
         StatusCode::OK,
         ResponseJson(ApiResponse::<Vec<WorkflowTranscriptEntry>>::success(
@@ -1360,7 +1423,18 @@ pub async fn get_transcripts(
     Query(query): Query<WorkflowTranscriptQuery>,
 ) -> Result<Response, ApiError> {
     let pool = &deployment.db().pool;
-    list_transcript_response(pool, &session, execution_id, query).await
+    list_transcript_response(
+        pool,
+        workflow_analytics::analytics_if_enabled(
+            deployment.analytics().as_ref(),
+            deployment.analytics_enabled(),
+        ),
+        deployment.user_id(),
+        &session,
+        execution_id,
+        query,
+    )
+    .await
 }
 
 // -----------------------------------------------------------------------
@@ -1402,6 +1476,21 @@ pub async fn resolve_approval(
         return Err(ApiError::BadRequest(
             "Transcript does not belong to the provided execution.".to_string(),
         ));
+    }
+
+    if payload.action.trim().eq_ignore_ascii_case("timeout")
+        && let Some(step_id) = transcript.step_id
+    {
+        workflow_analytics::track_approval_timeout(
+            workflow_analytics::analytics_if_enabled(
+                deployment.analytics().as_ref(),
+                deployment.analytics_enabled(),
+            ),
+            session.id,
+            payload.execution_id,
+            step_id,
+            "approval_request",
+        );
     }
 
     let resolved = WorkflowOrchestrator::resolve_transcript_action(

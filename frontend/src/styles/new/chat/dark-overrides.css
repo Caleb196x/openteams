@@ -425,9 +425,7 @@
   .dark .new-design .chat-session-empty-state-template-card {
     border-color: #2a3445;
     background: rgba(25, 34, 51, 0.92);
-    box-shadow:
-      0 10px 24px rgba(0, 0, 0, 0.15),
-      inset 0 1px 0 rgba(148, 163, 184, 0.04);
+    box-shadow: none;
   }
 
   .new-design.dark .chat-session-empty-state-template-card:hover,
@@ -435,9 +433,26 @@
   .new-design.dark .chat-session-empty-state-template-card:focus-visible,
   .dark .new-design .chat-session-empty-state-template-card:focus-visible {
     border-color: rgba(94, 162, 255, 0.24);
-    box-shadow:
-      0 14px 28px rgba(94, 162, 255, 0.06),
-      0 6px 14px rgba(0, 0, 0, 0.15);
+    background: rgba(34, 44, 61, 0.94);
+  }
+
+  .new-design.dark .chat-session-empty-state-template-card.is-selected,
+  .dark .new-design .chat-session-empty-state-template-card.is-selected {
+    border-color: rgba(94, 162, 255, 0.72);
+    background: rgba(30, 60, 94, 0.5);
+    box-shadow: 0 0 0 1px rgba(94, 162, 255, 0.72);
+  }
+
+  .new-design.dark .chat-session-empty-state-template-icon.is-workflow,
+  .dark .new-design .chat-session-empty-state-template-icon.is-workflow {
+    background: rgba(79, 70, 229, 0.18);
+    color: #a5b4fc;
+  }
+
+  .new-design.dark .chat-session-empty-state-template-icon.is-free,
+  .dark .new-design .chat-session-empty-state-template-icon.is-free {
+    background: rgba(22, 163, 74, 0.16);
+    color: #86efac;
   }
 
   .new-design.dark .chat-session-empty-state-template-title,
@@ -448,6 +463,22 @@
   .new-design.dark .chat-session-empty-state-template-description,
   .dark .new-design .chat-session-empty-state-template-description {
     color: var(--chat-session-text-tertiary);
+  }
+
+  .new-design.dark .chat-session-empty-state-mode-detail,
+  .dark .new-design .chat-session-empty-state-mode-detail {
+    border-color: #2a3445;
+    background: rgba(25, 34, 51, 0.58);
+  }
+
+  .new-design.dark .chat-session-empty-state-mode-detail p,
+  .dark .new-design .chat-session-empty-state-mode-detail p {
+    color: var(--chat-session-text-secondary);
+  }
+
+  .new-design.dark .chat-session-empty-state-mode-detail span,
+  .dark .new-design .chat-session-empty-state-mode-detail span {
+    color: #7db6ff;
   }
 
   /* Members panel */

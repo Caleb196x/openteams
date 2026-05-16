@@ -48,6 +48,7 @@ use uuid::Uuid;
 
 use super::{
     chat_runner::{ChatRunner, ChatRunnerError},
+    workflow_analytics,
     workflow_compiler::WorkflowCompiler,
     workflow_loop_executor::{LoopExecutor, LoopOutcome},
     workflow_runtime::WorkflowRuntimeError,
@@ -1236,6 +1237,8 @@ impl WorkflowOrchestrator {
         projection_reason: &str,
         projection_error_message: Option<String>,
     ) -> Result<WorkflowExecution, OrchestratorError> {
+        let from_status = to_workflow_wire_value(&execution.status);
+        let to_status = to_workflow_wire_value(&to);
         let mut transitioned = reducer::transition_execution(pool, execution, to.clone())
             .await?
             .entity;
@@ -1244,11 +1247,29 @@ impl WorkflowOrchestrator {
         }
         if matches!(
             to,
-            WorkflowExecutionStatus::Completed | WorkflowExecutionStatus::Failed
+            WorkflowExecutionStatus::Completed
+                | WorkflowExecutionStatus::Failed
+                | WorkflowExecutionStatus::Cancelled
         ) && transitioned.completed_at.is_none()
         {
             transitioned = WorkflowExecution::set_completed(pool, transitioned.id).await?;
         }
+
+        let duration_ms = transitioned.started_at.and_then(|started| {
+            transitioned
+                .completed_at
+                .map(|completed| (completed - started).num_milliseconds())
+        });
+        workflow_analytics::track_execution_state_changed(
+            chat_runner.analytics_service(),
+            execution.session_id,
+            execution.id,
+            execution.plan_id,
+            &from_status,
+            &to_status,
+            duration_ms,
+        );
+
         Self::refresh_execution_projection_with_reason(
             pool,
             chat_runner,
@@ -1268,10 +1289,45 @@ impl WorkflowOrchestrator {
         to: WorkflowStepStatus,
         projection_reason: &str,
     ) -> Result<WorkflowStep, OrchestratorError> {
+        let from_status = to_workflow_wire_value(&step.status);
+        let to_status = to_workflow_wire_value(&to);
+
         let transitioned = reducer::transition_step(pool, execution, step, to)
             .await?
             .entity;
-        let _ = Self::synchronize_runtime_state(pool, execution.id, false).await?;
+        let synced_execution = Self::synchronize_runtime_state(pool, execution.id, false).await?;
+        let step_duration_ms = step_transition_duration_ms(&transitioned, &to_status);
+
+        workflow_analytics::track_step_state_changed(
+            chat_runner.analytics_service(),
+            execution.session_id,
+            execution.id,
+            execution.plan_id,
+            step.id,
+            &step.step_key,
+            &from_status,
+            &to_status,
+            None,
+            step_duration_ms,
+        );
+
+        if synced_execution.status != execution.status {
+            let duration_ms = synced_execution.started_at.and_then(|started| {
+                synced_execution
+                    .completed_at
+                    .map(|completed| (completed - started).num_milliseconds())
+            });
+            workflow_analytics::track_execution_state_changed(
+                chat_runner.analytics_service(),
+                execution.session_id,
+                execution.id,
+                execution.plan_id,
+                &to_workflow_wire_value(&execution.status),
+                &to_workflow_wire_value(&synced_execution.status),
+                duration_ms,
+            );
+        }
+
         Self::refresh_execution_projection_with_reason(
             pool,
             chat_runner,
@@ -1295,10 +1351,42 @@ impl WorkflowOrchestrator {
         to: WorkflowStepStatus,
         projection_reason: &str,
     ) -> Result<Option<WorkflowStep>, OrchestratorError> {
+        let from_status = to_workflow_wire_value(&step.status);
+        let to_status = to_workflow_wire_value(&to);
         match reducer::guarded_transition_step(pool, execution, step, to).await {
             Ok(result) => {
                 let transitioned = result.entity;
-                let _ = Self::synchronize_runtime_state(pool, execution.id, false).await?;
+                let synced_execution =
+                    Self::synchronize_runtime_state(pool, execution.id, false).await?;
+                let step_duration_ms = step_transition_duration_ms(&transitioned, &to_status);
+                workflow_analytics::track_step_state_changed(
+                    chat_runner.analytics_service(),
+                    execution.session_id,
+                    execution.id,
+                    execution.plan_id,
+                    step.id,
+                    &step.step_key,
+                    &from_status,
+                    &to_status,
+                    None,
+                    step_duration_ms,
+                );
+                if synced_execution.status != execution.status {
+                    let duration_ms = synced_execution.started_at.and_then(|started| {
+                        synced_execution
+                            .completed_at
+                            .map(|completed| (completed - started).num_milliseconds())
+                    });
+                    workflow_analytics::track_execution_state_changed(
+                        chat_runner.analytics_service(),
+                        execution.session_id,
+                        execution.id,
+                        execution.plan_id,
+                        &to_workflow_wire_value(&execution.status),
+                        &to_workflow_wire_value(&synced_execution.status),
+                        duration_ms,
+                    );
+                }
                 Self::refresh_execution_projection_with_reason(
                     pool,
                     chat_runner,
@@ -1586,6 +1674,20 @@ impl WorkflowOrchestrator {
 // -----------------------------------------------------------------------
 // Free helper functions used across submodules
 // -----------------------------------------------------------------------
+
+fn step_transition_duration_ms(step: &WorkflowStep, to_status: &str) -> Option<i64> {
+    if !matches!(to_status, "completed" | "failed" | "cancelled" | "skipped") {
+        return None;
+    }
+
+    step.started_at.map(|started| {
+        step.completed_at
+            .unwrap_or(step.updated_at)
+            .signed_duration_since(started)
+            .num_milliseconds()
+            .max(0)
+    })
+}
 
 pub(crate) fn resolve_step_workflow_session<'a>(
     execution: &WorkflowExecution,

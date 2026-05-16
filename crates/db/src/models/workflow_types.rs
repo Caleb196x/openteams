@@ -100,6 +100,7 @@ pub enum WorkflowExecutionStatus {
     Pending,
     Running,
     Failed,
+    Cancelled,
     Paused,
     Recompiling,
     Completed,

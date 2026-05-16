@@ -164,7 +164,7 @@ export enum WorkflowValidationStatus { pending = "pending", valid = "valid", inv
 
 export enum WorkflowRevisionEditor { lead = "lead", system = "system" }
 
-export enum WorkflowExecutionStatus { pending = "pending", running = "running", failed = "failed", paused = "paused", recompiling = "recompiling", completed = "completed", waiting = "waiting" }
+export enum WorkflowExecutionStatus { pending = "pending", running = "running", failed = "failed", cancelled = "cancelled", paused = "paused", recompiling = "recompiling", completed = "completed", waiting = "waiting" }
 
 export enum WorkflowRoundStatus { running = "running", waiting_user_acceptance = "waiting_user_acceptance", accepted = "accepted", rejected = "rejected", archived = "archived" }
 

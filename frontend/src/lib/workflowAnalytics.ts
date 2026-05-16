@@ -2,10 +2,12 @@ import { chatApi } from '@/lib/api';
 import {
   FORBIDDEN_METADATA_KEYS,
   buildWorkflowEventPayload,
+  buildReviewDecisionRecordedOptions,
   fileSizeBucket,
   messageLengthBucket,
   type WorkflowEventContext,
   type WorkflowEventName,
+  type WorkflowReviewDecisionResolution,
 } from '@/lib/workflowEventCore';
 
 const dedupCache = new Map<string, number>();
@@ -42,7 +44,12 @@ export function recordWorkflowEvent(
       typeof options?.metadata?.action_key === 'string'
         ? options.metadata.action_key
         : null;
-    const dedupKey = getDedupKey(eventName, context, options?.status, actionKey);
+    const dedupKey = getDedupKey(
+      eventName,
+      context,
+      options?.status,
+      actionKey
+    );
     const now = Date.now();
     const lastSent = dedupCache.get(dedupKey);
     if (lastSent !== undefined && now - lastSent < DEDUP_INTERVAL_MS) {
@@ -65,8 +72,10 @@ export function resetWorkflowEventDedupCache(): void {
 
 export {
   FORBIDDEN_METADATA_KEYS,
+  buildReviewDecisionRecordedOptions,
   fileSizeBucket,
   messageLengthBucket,
   type WorkflowEventContext,
   type WorkflowEventName,
+  type WorkflowReviewDecisionResolution,
 };

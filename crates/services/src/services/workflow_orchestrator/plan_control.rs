@@ -23,6 +23,7 @@ use super::{
     super::{
         chat,
         chat_runner::ChatRunner,
+        workflow_analytics,
         workflow_compiler::WorkflowCompiler,
         workflow_runtime::{
             WorkflowCardAgent, WorkflowCardProjection, WorkflowCardState, WorkflowCardStep,
@@ -80,6 +81,14 @@ impl WorkflowOrchestrator {
             Uuid::new_v4(),
         )
         .await?;
+
+        workflow_analytics::track_plan_generated(
+            chat_runner.analytics_service(),
+            session.id,
+            Some(plan.id),
+            true,
+        );
+
         let message = chat::create_message(
             pool,
             session.id,
@@ -145,6 +154,13 @@ impl WorkflowOrchestrator {
             Uuid::new_v4(),
         )
         .await?;
+
+        workflow_analytics::track_plan_generated(
+            chat_runner.analytics_service(),
+            session.id,
+            Some(plan.id),
+            true,
+        );
 
         // Build preview projection
         let session_agents = ChatSessionAgent::find_all_for_session(pool, session.id).await?;
@@ -270,6 +286,9 @@ impl WorkflowOrchestrator {
         } else {
             Self::find_session_workflow_card_message_id(pool, session.id).await
         };
+        let replaces_existing_plan =
+            Self::should_track_plan_revision_created_for_card(pool, session.id, existing_card_id)
+                .await?;
         let message = if let Some(existing_id) = existing_card_id {
             let updated = ChatMessage::update_content_and_meta(
                 pool,
@@ -296,8 +315,49 @@ impl WorkflowOrchestrator {
 
         // Update plan with the card message id for later reference (e.g. execute_plan)
         let plan = WorkflowPlan::update_workflow_card_message_id(pool, plan.id, message.id).await?;
+        if replaces_existing_plan {
+            workflow_analytics::track_plan_revision_created(
+                chat_runner.analytics_service(),
+                session.id,
+                plan.id,
+            );
+        }
 
         Ok((plan, revision, message))
+    }
+
+    fn workflow_card_meta_has_existing_plan_reference(meta: &serde_json::Value) -> bool {
+        fn value_has_uuid(value: Option<&serde_json::Value>) -> bool {
+            value
+                .and_then(serde_json::Value::as_str)
+                .and_then(|value| Uuid::parse_str(value).ok())
+                .is_some()
+        }
+
+        let generation_meta = meta.get("workflow_plan_generation");
+        let workflow_card = meta.get("workflow_card");
+
+        value_has_uuid(generation_meta.and_then(|value| value.get("previous_plan_id")))
+            || value_has_uuid(generation_meta.and_then(|value| value.get("previous_revision_id")))
+            || value_has_uuid(meta.get("workflow_plan_id"))
+            || value_has_uuid(meta.get("active_revision_id"))
+            || value_has_uuid(workflow_card.and_then(|value| value.get("plan_id")))
+            || value_has_uuid(workflow_card.and_then(|value| value.get("revision_id")))
+    }
+
+    async fn should_track_plan_revision_created_for_card(
+        pool: &SqlitePool,
+        session_id: Uuid,
+        existing_card_id: Option<Uuid>,
+    ) -> Result<bool, OrchestratorError> {
+        let Some(existing_id) = existing_card_id else {
+            return Ok(false);
+        };
+        let existing_message = ChatMessage::find_by_id(pool, existing_id).await?;
+        Ok(existing_message.is_some_and(|message| {
+            message.session_id == session_id
+                && Self::workflow_card_meta_has_existing_plan_reference(&message.meta.0)
+        }))
     }
 
     /// Find the reusable workflow card message in this session by looking at
@@ -321,7 +381,9 @@ impl WorkflowOrchestrator {
             .filter(|execution| {
                 matches!(
                     execution.status,
-                    WorkflowExecutionStatus::Completed | WorkflowExecutionStatus::Failed
+                    WorkflowExecutionStatus::Completed
+                        | WorkflowExecutionStatus::Failed
+                        | WorkflowExecutionStatus::Cancelled
                 )
             })
             .filter_map(|execution| execution.workflow_card_message_id)
@@ -484,6 +546,13 @@ impl WorkflowOrchestrator {
         )
         .await?;
 
+        workflow_analytics::track_plan_executed(
+            chat_runner.analytics_service(),
+            plan.session_id,
+            plan.id,
+            bootstrap.execution.id,
+        );
+
         if let Some(card_msg_id) = plan.workflow_card_message_id {
             let execution = WorkflowExecution::update_workflow_card_message_id(
                 pool,
@@ -638,7 +707,31 @@ impl WorkflowOrchestrator {
         )
         .await?;
 
-        let _ = Self::synchronize_runtime_state(pool, execution_id, false).await?;
+        workflow_analytics::track_runner_interrupted(
+            chat_runner.analytics_service(),
+            execution.session_id,
+            execution.id,
+            step_id,
+            "user",
+        );
+
+        let synced_execution = Self::synchronize_runtime_state(pool, execution_id, false).await?;
+        if !matches!(
+            synced_execution.status,
+            WorkflowExecutionStatus::Completed
+                | WorkflowExecutionStatus::Failed
+                | WorkflowExecutionStatus::Cancelled
+        ) {
+            let _ = Self::transition_execution_and_sync(
+                pool,
+                chat_runner,
+                &synced_execution,
+                WorkflowExecutionStatus::Cancelled,
+                "execution_cancelled",
+                None,
+            )
+            .await?;
+        }
 
         Ok(interrupted_step)
     }
@@ -705,6 +798,23 @@ mod tests {
         .execute(&pool)
         .await
         .expect("create executions table");
+        sqlx::query(
+            r#"
+            CREATE TABLE chat_messages (
+                id BLOB PRIMARY KEY,
+                session_id BLOB NOT NULL,
+                sender_type TEXT NOT NULL CHECK (sender_type IN ('user','agent','system')),
+                sender_id BLOB,
+                content TEXT NOT NULL,
+                mentions TEXT NOT NULL DEFAULT '[]',
+                meta TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'subsec'))
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .expect("create chat messages table");
         pool
     }
 
@@ -779,6 +889,27 @@ mod tests {
         }
     }
 
+    async fn create_workflow_card_message(
+        pool: &SqlitePool,
+        session_id: Uuid,
+        meta: serde_json::Value,
+    ) -> ChatMessage {
+        ChatMessage::create(
+            pool,
+            &db::models::chat_message::CreateChatMessage {
+                session_id,
+                sender_type: ChatSenderType::System,
+                sender_id: None,
+                content: "Workflow Plan".to_string(),
+                mentions: Vec::new(),
+                meta,
+            },
+            Uuid::new_v4(),
+        )
+        .await
+        .expect("create workflow card message")
+    }
+
     #[tokio::test]
     async fn reusable_workflow_card_returns_preview_card() {
         let pool = setup_pool().await;
@@ -837,5 +968,136 @@ mod tests {
             WorkflowOrchestrator::find_session_workflow_card_message_id(&pool, session_id).await;
 
         assert_eq!(found, Some(card_message_id));
+    }
+
+    #[test]
+    fn first_plan_generation_placeholder_does_not_trigger_plan_revision_created() {
+        let meta = serde_json::json!({
+            "card_type": "workflow_plan_generation",
+            "display_state": "pending",
+            "workflow_card": {
+                "plan_id": "",
+                "revision_id": "",
+                "execution_id": null
+            },
+            "workflow_plan_generation": {
+                "status": "pending",
+                "plan_goal": "first plan"
+            }
+        });
+
+        assert!(!WorkflowOrchestrator::workflow_card_meta_has_existing_plan_reference(&meta));
+    }
+
+    #[test]
+    fn replacement_plan_generation_placeholder_triggers_plan_revision_created() {
+        let previous_plan_id = Uuid::new_v4();
+        let previous_revision_id = Uuid::new_v4();
+        let meta = serde_json::json!({
+            "card_type": "workflow_plan_generation",
+            "display_state": "pending",
+            "workflow_card": {
+                "plan_id": "",
+                "revision_id": "",
+                "execution_id": null
+            },
+            "workflow_plan_generation": {
+                "status": "pending",
+                "plan_goal": "replace plan",
+                "previous_plan_id": previous_plan_id,
+                "previous_revision_id": previous_revision_id
+            }
+        });
+
+        assert!(WorkflowOrchestrator::workflow_card_meta_has_existing_plan_reference(&meta));
+    }
+
+    #[test]
+    fn existing_plan_card_triggers_plan_revision_created() {
+        let plan_id = Uuid::new_v4();
+        let revision_id = Uuid::new_v4();
+        let meta = serde_json::json!({
+            "card_type": "workflow_plan",
+            "workflow_plan_id": plan_id,
+            "active_revision_id": revision_id,
+            "workflow_card": {
+                "plan_id": plan_id.to_string(),
+                "revision_id": revision_id.to_string()
+            }
+        });
+
+        assert!(WorkflowOrchestrator::workflow_card_meta_has_existing_plan_reference(&meta));
+    }
+
+    #[tokio::test]
+    async fn real_first_generation_card_path_does_not_track_plan_revision_created() {
+        let pool = setup_pool().await;
+        let session_id = Uuid::new_v4();
+        let message = create_workflow_card_message(
+            &pool,
+            session_id,
+            serde_json::json!({
+                "card_type": "workflow_plan_generation",
+                "display_state": "pending",
+                "workflow_card": {
+                    "plan_id": "",
+                    "revision_id": "",
+                    "execution_id": null
+                },
+                "workflow_plan_generation": {
+                    "status": "pending",
+                    "plan_goal": "first plan"
+                }
+            }),
+        )
+        .await;
+
+        let should_track = WorkflowOrchestrator::should_track_plan_revision_created_for_card(
+            &pool,
+            session_id,
+            Some(message.id),
+        )
+        .await
+        .expect("evaluate first generation trigger");
+
+        assert!(!should_track);
+    }
+
+    #[tokio::test]
+    async fn real_replacement_card_path_tracks_plan_revision_created() {
+        let pool = setup_pool().await;
+        let session_id = Uuid::new_v4();
+        let previous_plan_id = Uuid::new_v4();
+        let previous_revision_id = Uuid::new_v4();
+        let message = create_workflow_card_message(
+            &pool,
+            session_id,
+            serde_json::json!({
+                "card_type": "workflow_plan_generation",
+                "display_state": "pending",
+                "workflow_card": {
+                    "plan_id": "",
+                    "revision_id": "",
+                    "execution_id": null
+                },
+                "workflow_plan_generation": {
+                    "status": "pending",
+                    "plan_goal": "replace plan",
+                    "previous_plan_id": previous_plan_id,
+                    "previous_revision_id": previous_revision_id
+                }
+            }),
+        )
+        .await;
+
+        let should_track = WorkflowOrchestrator::should_track_plan_revision_created_for_card(
+            &pool,
+            session_id,
+            Some(message.id),
+        )
+        .await
+        .expect("evaluate replacement trigger");
+
+        assert!(should_track);
     }
 }

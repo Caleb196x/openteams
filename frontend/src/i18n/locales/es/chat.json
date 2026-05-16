@@ -999,6 +999,10 @@
       "submitReject": "ENVIAR RECHAZO",
       "reject": "RECHAZAR"
     },
+    "generatedText": {
+      "reviewLoop": "Revisa el bucle \"{{loopKey}}\".",
+      "userApprovedStepResult": "El usuario aprobó el resultado del paso."
+    },
     "finalReview": {
       "title": "Revisión final",
       "defaultMessage": "Tarea completada. ¿Aceptar el resultado?",

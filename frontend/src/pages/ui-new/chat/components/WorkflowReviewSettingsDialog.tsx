@@ -112,9 +112,8 @@ function ReviewSettingTooltipText({
     <div
       className="relative min-w-0"
       onMouseEnter={(event) => {
-        const element = event.currentTarget.firstElementChild as
-          | HTMLDivElement
-          | null;
+        const element = event.currentTarget
+          .firstElementChild as HTMLDivElement | null;
         if (!element) return;
         setShowTooltip(
           element.scrollWidth > element.clientWidth ||
@@ -152,9 +151,8 @@ export function WorkflowReviewSettingsDialog({
   className,
 }: WorkflowReviewSettingsDialogProps) {
   const { t } = useTranslation('chat');
-  const [reviewSettingsDraft, setReviewSettingsDraft] = useState<ReviewSettingDraft>(
-    {}
-  );
+  const [reviewSettingsDraft, setReviewSettingsDraft] =
+    useState<ReviewSettingDraft>({});
 
   const stepByKey = useMemo(
     () => new Map(projection.steps.map((step) => [step.step_key, step])),
@@ -247,13 +245,16 @@ export function WorkflowReviewSettingsDialog({
     return onSubmit([
       ...taskReviewSettingsRows.map((row) => ({
         stepId: row.stepId,
-        leadReview: reviewSettingsDraft[row.stepId]?.leadReview ?? row.leadReview,
-        userReview: reviewSettingsDraft[row.stepId]?.userReview ?? row.userReview,
+        leadReview:
+          reviewSettingsDraft[row.stepId]?.leadReview ?? row.leadReview,
+        userReview:
+          reviewSettingsDraft[row.stepId]?.userReview ?? row.userReview,
       })),
       ...loopReviewSettingsRows.map((row) => ({
         stepId: row.stepId,
         leadReview: null,
-        userReview: reviewSettingsDraft[row.stepId]?.userReview ?? row.userReview,
+        userReview:
+          reviewSettingsDraft[row.stepId]?.userReview ?? row.userReview,
       })),
     ]);
   }, [
@@ -271,7 +272,9 @@ export function WorkflowReviewSettingsDialog({
     <div
       className={cn(
         'overflow-hidden rounded-xl border border-slate-100/70 bg-white shadow-xl',
-        variant === 'panel' ? 'flex w-[400px] flex-col' : 'w-full max-w-[440px]',
+        variant === 'panel'
+          ? 'flex w-[400px] flex-col'
+          : 'w-full max-w-[440px]',
         className
       )}
     >

@@ -58,6 +58,49 @@ export interface WorkflowAnalyticsEventPayload {
   metadata?: Record<string, unknown>;
 }
 
+export type WorkflowReviewDecisionResolution =
+  | 'user_accepted'
+  | 'user_rejected'
+  | 'plan_revision_created'
+  | 'review_node_rejected';
+
+type WorkflowReviewDecisionContract = {
+  status: WorkflowReviewDecisionResolution;
+  review_verdict: 'accepted' | 'rejected' | 'plan_revision_created';
+  reviewer_type: 'user' | 'system' | 'lead';
+  resolution: WorkflowReviewDecisionResolution;
+};
+
+export const WORKFLOW_REVIEW_DECISION_CONTRACTS: Record<
+  WorkflowReviewDecisionResolution,
+  WorkflowReviewDecisionContract
+> = {
+  user_accepted: {
+    status: 'user_accepted',
+    review_verdict: 'accepted',
+    reviewer_type: 'user',
+    resolution: 'user_accepted',
+  },
+  user_rejected: {
+    status: 'user_rejected',
+    review_verdict: 'rejected',
+    reviewer_type: 'user',
+    resolution: 'user_rejected',
+  },
+  plan_revision_created: {
+    status: 'plan_revision_created',
+    review_verdict: 'plan_revision_created',
+    reviewer_type: 'system',
+    resolution: 'plan_revision_created',
+  },
+  review_node_rejected: {
+    status: 'review_node_rejected',
+    review_verdict: 'rejected',
+    reviewer_type: 'lead',
+    resolution: 'review_node_rejected',
+  },
+};
+
 export const FORBIDDEN_METADATA_KEYS: ReadonlySet<string> = new Set([
   'message_content',
   'file_content',
@@ -124,6 +167,25 @@ export function buildWorkflowEventPayload(
     error_code: options?.error_code ?? null,
     metadata_version: 1,
     ...(cleanMetadata ? { metadata: cleanMetadata } : {}),
+  };
+}
+
+export function buildReviewDecisionRecordedOptions(
+  resolution: WorkflowReviewDecisionResolution,
+  metadata?: Record<string, unknown>
+): {
+  status: WorkflowReviewDecisionResolution;
+  metadata: Record<string, unknown>;
+} {
+  const contract = WORKFLOW_REVIEW_DECISION_CONTRACTS[resolution];
+  return {
+    status: contract.status,
+    metadata: {
+      ...metadata,
+      review_verdict: contract.review_verdict,
+      reviewer_type: contract.reviewer_type,
+      resolution: contract.resolution,
+    },
   };
 }
 

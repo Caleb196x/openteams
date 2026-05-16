@@ -192,13 +192,26 @@ pub fn validate_execution_transition(
     let allowed = match from {
         Pending => matches!(
             to,
-            Running | Failed | Paused | Recompiling | Completed | Waiting
+            Running | Failed | Cancelled | Paused | Recompiling | Completed | Waiting
         ),
-        Running => matches!(to, Failed | Paused | Recompiling | Completed | Waiting),
+        Running => matches!(
+            to,
+            Failed | Cancelled | Paused | Recompiling | Completed | Waiting
+        ),
         Failed => matches!(to, Running | Paused | Recompiling | Waiting),
-        Paused => matches!(to, Running | Failed | Recompiling | Completed | Waiting),
-        Recompiling => matches!(to, Running | Failed | Paused | Completed | Waiting),
-        Waiting => matches!(to, Running | Failed | Paused | Recompiling | Completed),
+        Cancelled => false,
+        Paused => matches!(
+            to,
+            Running | Failed | Cancelled | Recompiling | Completed | Waiting
+        ),
+        Recompiling => matches!(
+            to,
+            Running | Failed | Cancelled | Paused | Completed | Waiting
+        ),
+        Waiting => matches!(
+            to,
+            Running | Failed | Cancelled | Paused | Recompiling | Completed
+        ),
         Completed => false,
     };
 
@@ -298,6 +311,7 @@ pub fn validate_step_in_execution(
         E::Pending => matches!(step_status, S::Pending | S::Ready | S::Blocked),
         E::Running => true,
         E::Failed => !matches!(step_status, S::Running),
+        E::Cancelled => !matches!(step_status, S::Running),
         E::Paused => matches!(
             step_status,
             S::Pending | S::Ready | S::Blocked | S::Completed
@@ -337,6 +351,10 @@ pub fn validate_agent_session_in_execution(
             session_state,
             A::Idle | A::Paused | A::Completed | A::Failed
         ),
+        E::Cancelled => matches!(
+            session_state,
+            A::Idle | A::Paused | A::Completed | A::Failed
+        ),
         E::Paused => matches!(session_state, A::Idle | A::Completed | A::Paused),
         E::Recompiling => matches!(
             session_state,
@@ -354,6 +372,7 @@ fn execution_event_type(to: &WorkflowExecutionStatus) -> WorkflowEventType {
         Pending => WorkflowEventType::ExecutionCreated,
         Running => WorkflowEventType::ExecutionRunning,
         Failed => WorkflowEventType::ExecutionFailed,
+        Cancelled => WorkflowEventType::ExecutionFailed,
         Paused => WorkflowEventType::ExecutionPaused,
         Recompiling => WorkflowEventType::PlanRecompiled,
         Completed => WorkflowEventType::ExecutionCompleted,

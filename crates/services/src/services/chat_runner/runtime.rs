@@ -3,7 +3,7 @@ use tokio::{
     task::JoinHandle,
 };
 
-use super::*;
+use super::{super::workflow_analytics, *};
 
 pub(super) struct ExitWatcherArgs {
     pub(super) child: command_group::AsyncGroupChild,
@@ -1313,6 +1313,18 @@ impl ChatRunner {
                                 &untracked_files,
                             )
                             .await;
+                        let diff_file_count = diff_info
+                            .as_ref()
+                            .map(|info| info.observed_paths.len())
+                            .unwrap_or(0)
+                            + untracked_files.len();
+                        if diff_file_count > 0 {
+                            workflow_analytics::track_diff_generated(
+                                runner.analytics_service(),
+                                session_id,
+                                diff_file_count,
+                            );
+                        }
                         let completion_status =
                             RunCompletionStatus::from_atomic(&completion_status);
                         let should_clear_agent_session = matches!(
@@ -1771,11 +1783,6 @@ impl ChatRunner {
                             .await;
 
                         if matches!(completion_status, RunCompletionStatus::Failed) {
-                            let error_message = if error_content.trim().is_empty() {
-                                "Agent run failed".to_string()
-                            } else {
-                                error_content.clone()
-                            };
                             runner
                                 .analytics_projector()
                                 .project_or_warn(DomainEvent::AgentRunErrored {
@@ -1785,9 +1792,19 @@ impl ChatRunner {
                                     error_type: Self::normalized_entry_error_name(
                                         error_type.as_ref(),
                                     ),
-                                    error_message,
+                                    error_code: Self::normalized_entry_error_name(
+                                        error_type.as_ref(),
+                                    ),
                                 })
                                 .await;
+                            workflow_analytics::track_agent_error(
+                                runner.analytics_service(),
+                                session_id,
+                                None,
+                                None,
+                                &Self::normalized_entry_error_name(error_type.as_ref()),
+                                None,
+                            );
                         }
 
                         if !(latest_assistant.is_empty() && visible_error_content.is_some()) {
@@ -1846,6 +1863,19 @@ impl ChatRunner {
                             state: final_state.clone(),
                             started_at: None,
                         });
+
+                        workflow_analytics::track_agent_state_changed(
+                            runner.analytics_service(),
+                            session_id,
+                            None,
+                            match final_state {
+                                ChatSessionAgentState::Idle => "idle",
+                                ChatSessionAgentState::Running => "running",
+                                ChatSessionAgentState::WaitingApproval => "waiting_approval",
+                                ChatSessionAgentState::Dead => "dead",
+                                ChatSessionAgentState::Stopping => "stopping",
+                            },
+                        );
 
                         if track_source_message && protocol_retry_request.is_none() {
                             // Emit MentionAcknowledged completed/failed event

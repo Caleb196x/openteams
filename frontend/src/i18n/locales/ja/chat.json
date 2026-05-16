@@ -999,6 +999,10 @@
       "submitReject": "却下を送信",
       "reject": "却下"
     },
+    "generatedText": {
+      "reviewLoop": "ループ「{{loopKey}}」をレビューしてください。",
+      "userApprovedStepResult": "ユーザーがステップ結果を承認しました。"
+    },
     "finalReview": {
       "title": "最終レビュー",
       "defaultMessage": "タスクが完了しました。結果を承認しますか？",

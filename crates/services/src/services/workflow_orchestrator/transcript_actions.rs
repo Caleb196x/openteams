@@ -17,6 +17,7 @@ use uuid::Uuid;
 use super::{
     super::{
         chat_runner::ChatRunner,
+        workflow_analytics,
         workflow_runtime::{SummaryPayload, WorkflowRuntimeError, parse_summary_payload},
     },
     OrchestratorError, ResolvedTranscriptAction, WorkflowOrchestrator,
@@ -26,6 +27,36 @@ use super::{
 pub(super) enum TranscriptResolution {
     Resume,
     Fail(String),
+}
+
+fn resolve_interactive_transcript_action(
+    entry_type: &str,
+    resolved_action: &str,
+) -> Result<TranscriptResolution, OrchestratorError> {
+    match (entry_type, resolved_action) {
+        ("approval_request", "approved")
+        | ("permission_request", "granted")
+        | ("continue_confirmation", "continued")
+        | ("input_request", "submitted") => Ok(TranscriptResolution::Resume),
+        ("approval_request", "rejected") => Ok(TranscriptResolution::Fail(
+            "Approval rejected by user.".to_string(),
+        )),
+        ("permission_request", "denied") => Ok(TranscriptResolution::Fail(
+            "Permission denied by user.".to_string(),
+        )),
+        ("input_request", action) => Err(OrchestratorError::IllegalTransition(format!(
+            "unsupported action '{}' for input request",
+            action
+        ))),
+        ("continue_confirmation", action) => Err(OrchestratorError::IllegalTransition(format!(
+            "unsupported action '{}' for continue confirmation",
+            action
+        ))),
+        (entry_type, action) => Err(OrchestratorError::IllegalTransition(format!(
+            "unsupported action '{}' for transcript type '{}'",
+            action, entry_type
+        ))),
+    }
 }
 
 fn can_resolve_interactive_transcript(execution_status: &WorkflowExecutionStatus) -> bool {
@@ -153,36 +184,8 @@ impl WorkflowOrchestrator {
             )));
         }
 
-        let resolution_kind = match (transcript.entry_type.as_str(), resolved_action) {
-            ("approval_request", "approved")
-            | ("permission_request", "granted")
-            | ("continue_confirmation", "continued")
-            | ("input_request", "submitted") => TranscriptResolution::Resume,
-            ("approval_request", "rejected") => {
-                TranscriptResolution::Fail("Approval rejected by user.".to_string())
-            }
-            ("permission_request", "denied") => {
-                TranscriptResolution::Fail("Permission denied by user.".to_string())
-            }
-            ("input_request", action) => {
-                return Err(OrchestratorError::IllegalTransition(format!(
-                    "unsupported action '{}' for input request",
-                    action
-                )));
-            }
-            ("continue_confirmation", action) => {
-                return Err(OrchestratorError::IllegalTransition(format!(
-                    "unsupported action '{}' for continue confirmation",
-                    action
-                )));
-            }
-            (entry_type, action) => {
-                return Err(OrchestratorError::IllegalTransition(format!(
-                    "unsupported action '{}' for transcript type '{}'",
-                    action, entry_type
-                )));
-            }
-        };
+        let resolution_kind =
+            resolve_interactive_transcript_action(&transcript.entry_type, resolved_action)?;
 
         let input_text = input_text
             .map(str::trim)
@@ -205,6 +208,14 @@ impl WorkflowOrchestrator {
         );
         let updated_transcript =
             WorkflowTranscript::update_meta_json(pool, transcript.id, &updated_meta_json).await?;
+
+        workflow_analytics::track_approval_resolved(
+            chat_runner.analytics_service(),
+            execution.session_id,
+            execution.id,
+            step.id,
+            resolved_action,
+        );
 
         let decision_notice = if let Some(input_text) = input_text.as_deref() {
             input_text.to_string()
@@ -489,6 +500,50 @@ mod tests {
         ));
         assert!(!can_resolve_interactive_transcript(
             &WorkflowExecutionStatus::Failed
+        ));
+    }
+
+    #[test]
+    fn resolve_interactive_transcript_action_handles_all_supported_requests() {
+        assert!(matches!(
+            resolve_interactive_transcript_action("approval_request", "approved"),
+            Ok(TranscriptResolution::Resume)
+        ));
+        assert!(matches!(
+            resolve_interactive_transcript_action("approval_request", "rejected"),
+            Ok(TranscriptResolution::Fail(_))
+        ));
+        assert!(matches!(
+            resolve_interactive_transcript_action("permission_request", "granted"),
+            Ok(TranscriptResolution::Resume)
+        ));
+        assert!(matches!(
+            resolve_interactive_transcript_action("permission_request", "denied"),
+            Ok(TranscriptResolution::Fail(_))
+        ));
+        assert!(matches!(
+            resolve_interactive_transcript_action("continue_confirmation", "continued"),
+            Ok(TranscriptResolution::Resume)
+        ));
+        assert!(matches!(
+            resolve_interactive_transcript_action("input_request", "submitted"),
+            Ok(TranscriptResolution::Resume)
+        ));
+    }
+
+    #[test]
+    fn resolve_interactive_transcript_action_rejects_unsupported_combinations() {
+        assert!(matches!(
+            resolve_interactive_transcript_action("input_request", "approved"),
+            Err(OrchestratorError::IllegalTransition(_))
+        ));
+        assert!(matches!(
+            resolve_interactive_transcript_action("continue_confirmation", "denied"),
+            Err(OrchestratorError::IllegalTransition(_))
+        ));
+        assert!(matches!(
+            resolve_interactive_transcript_action("unknown_entry", "approved"),
+            Err(OrchestratorError::IllegalTransition(_))
         ));
     }
 }

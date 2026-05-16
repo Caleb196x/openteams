@@ -4,11 +4,18 @@ use chrono::Utc;
 use db::{
     DBService,
     models::{
-        chat_session::ChatSession, chat_session_agent::ChatSessionAgent,
-        workflow_agent_session::WorkflowAgentSession, workflow_execution::WorkflowExecution,
-        workflow_loop::WorkflowLoop, workflow_plan::WorkflowPlan,
-        workflow_plan_revision::WorkflowPlanRevision, workflow_round::WorkflowRound,
-        workflow_step::WorkflowStep, workflow_transcript::WorkflowTranscript, workflow_types::*,
+        chat_session::ChatSession,
+        chat_session_agent::ChatSessionAgent,
+        workflow_agent_session::WorkflowAgentSession,
+        workflow_event::{CreateWorkflowEvent, WorkflowEvent},
+        workflow_execution::WorkflowExecution,
+        workflow_loop::WorkflowLoop,
+        workflow_plan::WorkflowPlan,
+        workflow_plan_revision::WorkflowPlanRevision,
+        workflow_round::WorkflowRound,
+        workflow_step::WorkflowStep,
+        workflow_transcript::WorkflowTranscript,
+        workflow_types::*,
     },
 };
 use sqlx::SqlitePool;
@@ -19,6 +26,7 @@ use super::{
     super::{
         chat_runner::ChatRunner,
         config::{self, UiLanguage},
+        workflow_analytics,
         workflow_iteration::IterationManager,
         workflow_loop_executor::LoopExecutor,
         workflow_runtime::{SummaryPayload, WorkflowRevisionFeedbackSource, parse_summary_payload},
@@ -118,6 +126,20 @@ impl WorkflowOrchestrator {
         if let Some(round_id) = execution.active_round_id {
             WorkflowRound::update_status(pool, round_id, WorkflowRoundStatus::Accepted).await?;
         }
+        Self::emit_final_review_decision_event(
+            pool,
+            execution,
+            WorkflowEventType::UserAccepted,
+            "user_accepted",
+        )
+        .await?;
+        workflow_analytics::track_final_review_decision(
+            chat_runner.analytics_service(),
+            execution.session_id,
+            execution.id,
+            execution.plan_id,
+            true,
+        );
         let completed_execution = Self::transition_execution_and_sync(
             pool,
             chat_runner,
@@ -177,6 +199,21 @@ impl WorkflowOrchestrator {
             );
             WorkflowTranscript::update_meta_json(pool, transcript.id, &updated_meta_json).await?;
         }
+
+        Self::emit_final_review_decision_event(
+            pool,
+            execution,
+            WorkflowEventType::UserRejected,
+            "user_rejected",
+        )
+        .await?;
+        workflow_analytics::track_final_review_decision(
+            chat_runner.analytics_service(),
+            execution.session_id,
+            execution.id,
+            execution.plan_id,
+            false,
+        );
 
         let recompiling_execution = Self::transition_execution_and_sync(
             pool,
@@ -302,6 +339,35 @@ impl WorkflowOrchestrator {
         }
     }
 
+    async fn emit_final_review_decision_event(
+        pool: &SqlitePool,
+        execution: &WorkflowExecution,
+        event_type: WorkflowEventType,
+        resolution: &str,
+    ) -> Result<WorkflowEvent, OrchestratorError> {
+        WorkflowEvent::create(
+            pool,
+            &CreateWorkflowEvent {
+                execution_id: execution.id,
+                round_id: execution.active_round_id,
+                step_id: None,
+                agent_session_id: None,
+                event_type,
+                status_before: Some(to_workflow_wire_value(&execution.status)),
+                status_after: Some(resolution.to_string()),
+                detail_json: Some(
+                    serde_json::json!({
+                        "resolution": resolution,
+                    })
+                    .to_string(),
+                ),
+            },
+            Uuid::new_v4(),
+        )
+        .await
+        .map_err(OrchestratorError::Database)
+    }
+
     pub(super) async fn resolve_step_review_action(
         pool: &SqlitePool,
         chat_runner: &ChatRunner,
@@ -344,6 +410,14 @@ impl WorkflowOrchestrator {
         let updated_transcript =
             WorkflowTranscript::update_meta_json(pool, transcript.id, &updated_meta_json).await?;
 
+        workflow_analytics::track_approval_resolved(
+            chat_runner.analytics_service(),
+            execution.session_id,
+            execution.id,
+            step.id,
+            resolved_action,
+        );
+
         match resolved_action {
             "approved" | "approve" => {
                 let approved_feedback =
@@ -357,6 +431,22 @@ impl WorkflowOrchestrator {
                     &approved_feedback,
                 )
                 .await?;
+                workflow_analytics::track_step_reviewed(
+                    chat_runner.analytics_service(),
+                    execution.session_id,
+                    execution.id,
+                    step.id,
+                    "approved",
+                    "user",
+                );
+                workflow_analytics::track_review_decision_recorded(
+                    chat_runner.analytics_service(),
+                    execution.session_id,
+                    execution.id,
+                    step.id,
+                    "approved",
+                    "user",
+                );
                 Self::emit_step_domain_event(
                     pool,
                     execution,
@@ -429,6 +519,22 @@ impl WorkflowOrchestrator {
                     &rejected_feedback,
                 )
                 .await?;
+                workflow_analytics::track_step_reviewed(
+                    chat_runner.analytics_service(),
+                    execution.session_id,
+                    execution.id,
+                    step.id,
+                    "rejected",
+                    "user",
+                );
+                workflow_analytics::track_review_decision_recorded(
+                    chat_runner.analytics_service(),
+                    execution.session_id,
+                    execution.id,
+                    step.id,
+                    "rejected",
+                    "user",
+                );
                 Self::emit_step_domain_event(
                     pool,
                     execution,
@@ -572,6 +678,14 @@ impl WorkflowOrchestrator {
         let updated_transcript =
             WorkflowTranscript::update_meta_json(pool, transcript.id, &updated_meta_json).await?;
 
+        workflow_analytics::track_approval_resolved(
+            chat_runner.analytics_service(),
+            execution.session_id,
+            execution.id,
+            step.id,
+            resolved_action,
+        );
+
         match resolved_action {
             "approved" | "approve" => {
                 let default_approved_feedback =
@@ -586,6 +700,22 @@ impl WorkflowOrchestrator {
                     &approved_feedback,
                 )
                 .await?;
+                workflow_analytics::track_step_reviewed(
+                    chat_runner.analytics_service(),
+                    execution.session_id,
+                    execution.id,
+                    step.id,
+                    "approved",
+                    "user",
+                );
+                workflow_analytics::track_review_decision_recorded(
+                    chat_runner.analytics_service(),
+                    execution.session_id,
+                    execution.id,
+                    step.id,
+                    "approved",
+                    "user",
+                );
 
                 let precompleted_step = Self::transition_step_and_sync(
                     pool,
@@ -665,6 +795,22 @@ impl WorkflowOrchestrator {
                     &rejected_feedback,
                 )
                 .await?;
+                workflow_analytics::track_step_reviewed(
+                    chat_runner.analytics_service(),
+                    execution.session_id,
+                    execution.id,
+                    step.id,
+                    "rejected",
+                    "user",
+                );
+                workflow_analytics::track_review_decision_recorded(
+                    chat_runner.analytics_service(),
+                    execution.session_id,
+                    execution.id,
+                    step.id,
+                    "rejected",
+                    "user",
+                );
 
                 LoopExecutor::inject_user_feedback_to_steps(
                     pool,
@@ -769,7 +915,98 @@ impl WorkflowOrchestrator {
 
 #[cfg(test)]
 mod tests {
+    use chrono::Utc;
+    use sqlx::SqlitePool;
+
     use super::*;
+
+    async fn setup_workflow_events_pool() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:")
+            .await
+            .expect("create sqlite memory pool");
+        sqlx::query(
+            r#"
+            CREATE TABLE chat_workflow_events (
+                id TEXT PRIMARY KEY,
+                execution_id TEXT NOT NULL,
+                round_id TEXT,
+                step_id TEXT,
+                agent_session_id TEXT,
+                event_type TEXT NOT NULL,
+                status_before TEXT,
+                status_after TEXT,
+                detail_json TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'subsec'))
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .expect("create workflow events table");
+        pool
+    }
+
+    fn sample_waiting_execution(round_id: Uuid) -> WorkflowExecution {
+        let now = Utc::now();
+        WorkflowExecution {
+            id: Uuid::new_v4(),
+            session_id: Uuid::new_v4(),
+            plan_id: Uuid::new_v4(),
+            active_revision_id: Some(Uuid::new_v4()),
+            active_round_id: Some(round_id),
+            workflow_card_message_id: None,
+            lead_session_agent_id: None,
+            status: WorkflowExecutionStatus::Waiting,
+            current_round: 1,
+            title: "Review execution".to_string(),
+            compiled_graph_hash: None,
+            started_at: Some(now),
+            completed_at: None,
+            cleaned_at: None,
+            cleaned_reason: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[tokio::test]
+    async fn final_review_decision_domain_events_are_persisted_with_consumable_status() {
+        let pool = setup_workflow_events_pool().await;
+        let round_id = Uuid::new_v4();
+        let execution = sample_waiting_execution(round_id);
+
+        let accepted = WorkflowOrchestrator::emit_final_review_decision_event(
+            &pool,
+            &execution,
+            WorkflowEventType::UserAccepted,
+            "user_accepted",
+        )
+        .await
+        .expect("persist accepted event");
+        let rejected = WorkflowOrchestrator::emit_final_review_decision_event(
+            &pool,
+            &execution,
+            WorkflowEventType::UserRejected,
+            "user_rejected",
+        )
+        .await
+        .expect("persist rejected event");
+
+        assert_eq!(accepted.event_type, WorkflowEventType::UserAccepted);
+        assert_eq!(accepted.round_id, Some(round_id));
+        assert_eq!(accepted.status_before.as_deref(), Some("waiting"));
+        assert_eq!(accepted.status_after.as_deref(), Some("user_accepted"));
+        assert_eq!(rejected.event_type, WorkflowEventType::UserRejected);
+        assert_eq!(rejected.status_after.as_deref(), Some("user_rejected"));
+        assert_eq!(
+            accepted.detail_json.as_deref(),
+            Some(r#"{"resolution":"user_accepted"}"#)
+        );
+        assert_eq!(
+            rejected.detail_json.as_deref(),
+            Some(r#"{"resolution":"user_rejected"}"#)
+        );
+    }
 
     #[test]
     fn user_approved_loop_result_message_is_localized_by_language() {
