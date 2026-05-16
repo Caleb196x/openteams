@@ -1537,8 +1537,7 @@
     --workflow-board-bg: #0b1017;
     --workflow-loop-bg: rgba(18, 24, 35, 0.88);
     --workflow-loop-shadow:
-      0 14px 36px rgba(0, 0, 0, 0.26),
-      inset 0 1px 0 rgba(148, 163, 184, 0.08);
+      0 14px 36px rgba(0, 0, 0, 0.26), inset 0 1px 0 rgba(148, 163, 184, 0.08);
     --workflow-edge-color: #475569;
     --workflow-edge-hover-color: #7db6ff;
     color: #f3f6fb;

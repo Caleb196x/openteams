@@ -829,7 +829,7 @@ export function ChatSessions() {
   >({});
   const activeChatInputMode: ChatInputMode = activeSessionId
     ? (chatInputModeBySessionId[activeSessionId] ??
-        resolveChatInputMode(activeSession?.chat_input_mode))
+      resolveChatInputMode(activeSession?.chat_input_mode))
     : DEFAULT_CHAT_INPUT_MODE;
   const isWorkflowInputMode = activeChatInputMode === 'workflow';
   const visibleMessagesData = useMemo(() => messagesData, [messagesData]);
