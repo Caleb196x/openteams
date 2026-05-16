@@ -182,7 +182,7 @@ impl WorkflowOrchestrator {
                         .rev()
                         .find(|entry| {
                             entry.entry_type == "input_request"
-                                && entry.meta_json.as_deref().map_or(true, |meta_json| {
+                                && entry.meta_json.as_deref().is_none_or(|meta_json| {
                                     serde_json::from_str::<serde_json::Value>(meta_json)
                                         .ok()
                                         .and_then(|value| {

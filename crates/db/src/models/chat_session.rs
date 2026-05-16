@@ -189,7 +189,7 @@ impl ChatSession {
         let title = data.title.clone().or(existing.title);
         let status = data.status.clone().unwrap_or(existing.status);
         let lead_agent_id = match &data.lead_agent_id {
-            Some(value) => value.clone(), // Some(Some(uuid)) = set, Some(None) = clear
+            Some(value) => *value,          // Some(Some(uuid)) = set, Some(None) = clear
             None => existing.lead_agent_id, // Not provided, keep existing
         };
         let summary_text = data.summary_text.clone().or(existing.summary_text);

@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
@@ -920,12 +922,11 @@ pub fn resolve_lead_agent<'a>(
     agents: &'a [ChatAgent],
 ) -> Result<(&'a ChatAgent, &'a ChatSessionAgent), WorkflowRuntimeError> {
     // 1. Try explicit lead_agent_id
-    if let Some(lead_id) = session.lead_agent_id {
-        if let Some(sa) = session_agents.iter().find(|sa| sa.agent_id == lead_id) {
-            if let Some(agent) = agents.iter().find(|a| a.id == lead_id) {
-                return Ok((agent, sa));
-            }
-        }
+    if let Some(lead_id) = session.lead_agent_id
+        && let Some(sa) = session_agents.iter().find(|sa| sa.agent_id == lead_id)
+        && let Some(agent) = agents.iter().find(|a| a.id == lead_id)
+    {
+        return Ok((agent, sa));
     }
     // 2. Fallback to first session agent
     let first_sa = session_agents
@@ -2175,7 +2176,7 @@ fn build_iteration_history(
                         .iter()
                         .filter(|step| step.round_id == round.id)
                         .filter_map(|step| parse_summary_payload(step.summary_text.as_deref()))
-                        .last()
+                        .next_back()
                         .map(|payload| payload.summary)
                 });
 
@@ -3131,14 +3132,14 @@ async fn run_workflow_agent_prompt_inner(
         .await?;
     }
     extract_latest_assistant_from_history(&history).ok_or_else(|| {
-        WorkflowRuntimeError::Validation(format!(
-            "{}",
+        WorkflowRuntimeError::Validation(
             workflow_executor_failure_message(
                 &agent.name,
                 "workflow agent 没有返回 assistant 输出",
                 &history,
             )
-        ))
+            .to_string(),
+        )
     })
 }
 
@@ -3298,7 +3299,7 @@ fn extract_workflow_prompt_step_key(prompt: &str) -> Option<String> {
 fn extract_after_marker(prompt: &str, marker: &str) -> Option<String> {
     let remainder = prompt.split_once(marker)?.1;
     let value = remainder
-        .split(|ch: char| ch == '`' || ch == '"' || ch == '\n' || ch == '\r')
+        .split(['`', '"', '\n', '\r'])
         .next()
         .map(str::trim)
         .filter(|value| !value.is_empty())?;

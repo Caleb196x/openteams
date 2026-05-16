@@ -329,15 +329,14 @@ pub fn parse_loop_review_output(
                     "loop review 的 feedback 不能为空".to_string(),
                 ));
             }
-            if matches!(verdict, ReviewVerdict::Rejected) {
-                if step_feedbacks
+            if matches!(verdict, ReviewVerdict::Rejected)
+                && step_feedbacks
                     .iter()
                     .any(|item| item.feedback.trim().is_empty())
-                {
-                    return Err(WorkflowRuntimeError::Validation(
-                        "loop review rejected 时 step_feedbacks.feedback 不能为空".to_string(),
-                    ));
-                }
+            {
+                return Err(WorkflowRuntimeError::Validation(
+                    "loop review rejected 时 step_feedbacks.feedback 不能为空".to_string(),
+                ));
             }
         }
     }

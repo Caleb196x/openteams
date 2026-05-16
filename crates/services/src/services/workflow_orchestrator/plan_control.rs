@@ -456,35 +456,34 @@ impl WorkflowOrchestrator {
                 );
 
                 let mut existing_execution = existing.clone();
-                if existing_execution.workflow_card_message_id.is_none() {
-                    if let Some(card_msg_id) = plan.workflow_card_message_id {
-                        existing_execution = WorkflowExecution::update_workflow_card_message_id(
+                if existing_execution.workflow_card_message_id.is_none()
+                    && let Some(card_msg_id) = plan.workflow_card_message_id
+                {
+                    existing_execution = WorkflowExecution::update_workflow_card_message_id(
+                        pool,
+                        existing_execution.id,
+                        card_msg_id,
+                    )
+                    .await?;
+
+                    if let Some(revision_id) = existing_execution.active_revision_id
+                        && let Some(revision) =
+                            WorkflowPlanRevision::find_by_id(pool, revision_id).await?
+                    {
+                        let session_agents =
+                            ChatSessionAgent::find_all_for_session(pool, plan.session_id).await?;
+                        let agents = load_agents_for_session(pool, &session_agents).await?;
+                        Self::refresh_workflow_card(
                             pool,
-                            existing_execution.id,
-                            card_msg_id,
+                            chat_runner,
+                            &existing_execution,
+                            &plan,
+                            &revision,
+                            &session_agents,
+                            &agents,
+                            None,
                         )
                         .await?;
-
-                        if let Some(revision_id) = existing_execution.active_revision_id
-                            && let Some(revision) =
-                                WorkflowPlanRevision::find_by_id(pool, revision_id).await?
-                        {
-                            let session_agents =
-                                ChatSessionAgent::find_all_for_session(pool, plan.session_id)
-                                    .await?;
-                            let agents = load_agents_for_session(pool, &session_agents).await?;
-                            Self::refresh_workflow_card(
-                                pool,
-                                chat_runner,
-                                &existing_execution,
-                                &plan,
-                                &revision,
-                                &session_agents,
-                                &agents,
-                                None,
-                            )
-                            .await?;
-                        }
                     }
                 }
 
@@ -492,7 +491,7 @@ impl WorkflowOrchestrator {
                 let edges = WorkflowStepEdge::find_by_execution(pool, existing.id).await?;
                 let agent_sessions =
                     WorkflowAgentSession::find_by_execution(pool, existing.id).await?;
-                let round = existing.active_round_id.and_then(|_| None::<WorkflowRound>);
+                let round = existing.active_round_id.and(None::<WorkflowRound>);
                 let events = WorkflowEvent::find_by_execution(pool, existing.id).await?;
                 return Ok(BootstrapResult {
                     execution: existing_execution,

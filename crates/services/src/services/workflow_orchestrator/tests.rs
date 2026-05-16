@@ -1,5 +1,3 @@
-#![cfg(test)]
-
 use chrono::Utc;
 use db::models::{
     workflow_step::WorkflowStep, workflow_transcript::WorkflowTranscript, workflow_types::*,

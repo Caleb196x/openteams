@@ -311,16 +311,17 @@ pub fn validate_semantics(plan: &WorkflowPlanJson, valid_agent_ids: &[String]) -
 
     // edge data.kind 校验
     for edge in &plan.edges {
-        if let Some(ref data) = edge.data {
-            if data.kind != "hard" && data.kind != "soft" {
-                errors.push(ValidationError {
-                    field: format!("edges[id={}].data.kind", edge.id),
-                    message: format!(
-                        "边的依赖类型必须为 'hard' 或 'soft'，当前值为 '{}'",
-                        data.kind
-                    ),
-                });
-            }
+        if let Some(ref data) = edge.data
+            && data.kind != "hard"
+            && data.kind != "soft"
+        {
+            errors.push(ValidationError {
+                field: format!("edges[id={}].data.kind", edge.id),
+                message: format!(
+                    "边的依赖类型必须为 'hard' 或 'soft'，当前值为 '{}'",
+                    data.kind
+                ),
+            });
         }
     }
 

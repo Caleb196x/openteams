@@ -199,7 +199,7 @@ impl WorkflowOrchestrator {
             chat_runner,
             execution,
             &running_step,
-            &workflow_session,
+            workflow_session,
             &session,
             session_agent,
             agent,

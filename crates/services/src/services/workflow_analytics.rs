@@ -9,6 +9,7 @@
 //!
 //! All events carry a unified context (`WorkflowEventContext`) and pass through
 //! privacy filtering (forbidden blacklist + allowed whitelist) before being recorded.
+#![allow(clippy::too_many_arguments)]
 
 use std::collections::HashSet;
 
@@ -258,10 +259,10 @@ pub fn validate_context(ctx: &WorkflowEventContext) -> Vec<String> {
         errors.push("metadata_version must be >= 1".to_string());
     }
 
-    if let Some(ref role) = ctx.agent_role {
-        if !validate_agent_role(role) {
-            errors.push(format!("invalid agent_role: {}", role));
-        }
+    if let Some(ref role) = ctx.agent_role
+        && !validate_agent_role(role)
+    {
+        errors.push(format!("invalid agent_role: {}", role));
     }
 
     errors
@@ -1309,10 +1310,10 @@ pub fn hash_user_id(user_id: &str) -> String {
     format!("wf_user_{:016x}", hasher.finish())
 }
 
-pub fn analytics_if_enabled<'a>(
-    analytics: Option<&'a AnalyticsService>,
+pub fn analytics_if_enabled(
+    analytics: Option<&AnalyticsService>,
     capture_enabled: bool,
-) -> Option<&'a AnalyticsService> {
+) -> Option<&AnalyticsService> {
     if capture_enabled { analytics } else { None }
 }
 

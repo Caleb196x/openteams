@@ -313,8 +313,8 @@ pub async fn auto_allow_builtin_skills(
         .allowed_skill_ids
         .0
         .iter()
-        .cloned()
         .filter(|id| !id.trim().is_empty())
+        .cloned()
         .collect();
 
     let mut merged: Vec<String> = existing.into_iter().collect();

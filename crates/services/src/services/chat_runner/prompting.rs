@@ -186,6 +186,7 @@ impl ChatRunner {
     /// Unified entry point before running any agent prompt.
     /// 1. Installs and allows builtin skills required by the given context.
     /// 2. Resolves all authorized skills for the session agent.
+    ///
     /// Returns the list of resolved skills for prompt injection.
     pub(crate) async fn prepare_and_resolve_agent_skills(
         &self,
@@ -197,10 +198,7 @@ impl ChatRunner {
             .resolve_session_agent_skills(session_agent, agent)
             .await?;
         let mut required_installed_skills =
-            crate::services::agent_skill_policy::required_builtin_skills(context)
-                .iter()
-                .copied()
-                .collect::<Vec<_>>();
+            crate::services::agent_skill_policy::required_builtin_skills(context).to_vec();
         for skill in &skills {
             let name = skill.name.trim();
             if !name.is_empty()

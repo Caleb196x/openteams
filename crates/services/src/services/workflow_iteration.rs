@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use std::collections::{HashMap, HashSet};
 
 use db::{
@@ -798,10 +800,10 @@ fn format_iteration_feedback(user_feedback_json: &str) -> String {
 
     let mut lines = Vec::new();
     for key in ["what_wrong", "expected", "priority", "additional_notes"] {
-        if let Some(text) = feedback.get(key).and_then(|item| item.as_str()) {
-            if !text.trim().is_empty() {
-                lines.push(format!("- {key}: {}", text.trim()));
-            }
+        if let Some(text) = feedback.get(key).and_then(|item| item.as_str())
+            && !text.trim().is_empty()
+        {
+            lines.push(format!("- {key}: {}", text.trim()));
         }
     }
 

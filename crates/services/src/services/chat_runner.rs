@@ -892,6 +892,7 @@ impl ChatRunner {
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn emit_workflow_graph_updated(
         &self,
         session_id: Uuid,

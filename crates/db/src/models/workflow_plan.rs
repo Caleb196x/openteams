@@ -48,6 +48,17 @@ pub struct CreateWorkflowPlan {
     pub validation_errors_json: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct UpdateWorkflowPlanJson<'a> {
+    pub title: &'a str,
+    pub summary_text: Option<String>,
+    pub plan_json: &'a str,
+    pub plan_schema_version: i32,
+    pub plan_hash: &'a str,
+    pub validation_status: WorkflowValidationStatus,
+    pub validation_errors_json: Option<String>,
+}
+
 impl WorkflowPlan {
     pub async fn find_by_id(pool: &SqlitePool, id: Uuid) -> Result<Option<Self>, sqlx::Error> {
         sqlx::query_as::<_, Self>(&format!("{WORKFLOW_PLAN_SELECT}\nWHERE id = ?1"))
@@ -153,13 +164,7 @@ impl WorkflowPlan {
     pub async fn update_plan_json(
         pool: &SqlitePool,
         id: Uuid,
-        title: &str,
-        summary_text: Option<String>,
-        plan_json: &str,
-        plan_schema_version: i32,
-        plan_hash: &str,
-        validation_status: WorkflowValidationStatus,
-        validation_errors_json: Option<String>,
+        data: &UpdateWorkflowPlanJson<'_>,
     ) -> Result<Self, sqlx::Error> {
         sqlx::query_as::<_, Self>(
             r#"
@@ -180,13 +185,13 @@ impl WorkflowPlan {
             "#,
         )
         .bind(id)
-        .bind(title)
-        .bind(summary_text)
-        .bind(plan_json)
-        .bind(plan_schema_version)
-        .bind(plan_hash)
-        .bind(validation_status)
-        .bind(validation_errors_json)
+        .bind(data.title)
+        .bind(&data.summary_text)
+        .bind(data.plan_json)
+        .bind(data.plan_schema_version)
+        .bind(data.plan_hash)
+        .bind(&data.validation_status)
+        .bind(&data.validation_errors_json)
         .fetch_one(pool)
         .await
     }

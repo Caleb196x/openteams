@@ -9,6 +9,12 @@
 //! 其余功能（projection 刷新、retry/resume、step 输入处理、review 流程、
 //! 计划/卡片创建、step executor 等）位于本目录下的同级子模块中。
 
+#![allow(
+    clippy::large_enum_variant,
+    clippy::too_many_arguments,
+    clippy::type_complexity
+)]
+
 pub mod reducer;
 
 mod plan_control;
@@ -1034,24 +1040,24 @@ impl WorkflowOrchestrator {
                         step,
                         outcome: StepOutcome::Failed(reason),
                     } => {
-                        if let Some(loop_id) = step.loop_id {
-                            if let Some(workflow_loop) = workflow_loop_by_id.get(&loop_id) {
-                                let failed_loop = WorkflowLoop::update_status(
-                                    pool,
-                                    workflow_loop.id,
-                                    WorkflowLoopStatus::Failed,
-                                    Some(reason.clone()),
-                                )
-                                .await?;
-                                LoopExecutor::emit_loop_event(
-                                    pool,
-                                    &execution,
-                                    &failed_loop,
-                                    WorkflowEventType::LoopFailed,
-                                    Some(serde_json::json!({ "reason": reason.clone() })),
-                                )
-                                .await?;
-                            }
+                        if let Some(loop_id) = step.loop_id
+                            && let Some(workflow_loop) = workflow_loop_by_id.get(&loop_id)
+                        {
+                            let failed_loop = WorkflowLoop::update_status(
+                                pool,
+                                workflow_loop.id,
+                                WorkflowLoopStatus::Failed,
+                                Some(reason.clone()),
+                            )
+                            .await?;
+                            LoopExecutor::emit_loop_event(
+                                pool,
+                                &execution,
+                                &failed_loop,
+                                WorkflowEventType::LoopFailed,
+                                Some(serde_json::json!({ "reason": reason.clone() })),
+                            )
+                            .await?;
                         }
                         if first_failure.is_none() {
                             first_failure = Some(reason);
@@ -1480,7 +1486,7 @@ impl WorkflowOrchestrator {
                             && (same_loop
                                 || candidate
                                     .loop_id
-                                    .map_or(true, |loop_id| completed_loop_ids.contains(&loop_id)))
+                                    .is_none_or(|loop_id| completed_loop_ids.contains(&loop_id)))
                     })
                     .unwrap_or(false)
             })
