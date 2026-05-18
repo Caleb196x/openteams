@@ -14,9 +14,7 @@ export function isRetryableWorkflowStepStatus(status?: string | null) {
   return status === 'failed' || status === 'interrupted';
 }
 
-export function canRetryWorkflowStepReview(
-  step?: WorkflowStepLike | null
-) {
+export function canRetryWorkflowStepReview(step?: WorkflowStepLike | null) {
   if (
     !step?.lead_review_required ||
     !isRetryableWorkflowStepStatus(step.status)
@@ -25,9 +23,7 @@ export function canRetryWorkflowStepReview(
   }
 
   return Boolean(
-    step.latest_review ||
-      step.summary_text?.trim() ||
-      step.content?.trim()
+    step.latest_review || step.summary_text?.trim() || step.content?.trim()
   );
 }
 

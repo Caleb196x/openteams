@@ -95,10 +95,7 @@ type WorkflowTranscriptSummaryPayload = {
   outputs?: string[];
 };
 
-const WORKFLOW_FAILURE_STEP_STATUSES = new Set([
-  'failed',
-  'interrupted',
-]);
+const WORKFLOW_FAILURE_STEP_STATUSES = new Set(['failed', 'interrupted']);
 const REVIEW_READY_STEP_STATUSES = new Set(['completed', 'skipped']);
 const WORKFLOW_REVIEW_ENTRY_TYPES = new Set([
   'lead_review',

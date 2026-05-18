@@ -39,8 +39,7 @@ use executors::{
     env::{ExecutionEnv, RepoContext},
     executors::{
         BaseCodingAgent, CancellationToken, ExecutorError, ExecutorExitResult, ExecutorExitSignal,
-        SpawnedChild,
-        StandardCodingAgentExecutor,
+        SpawnedChild, StandardCodingAgentExecutor,
     },
     logs::{
         ActionType, FileChange, NormalizedEntry, NormalizedEntryType, ToolResult, ToolStatus,

@@ -223,11 +223,7 @@ function patchWorkflowProjectionExecutionStatus(
     state: status,
     execution_status: status,
     error_message: isRunning ? null : projection.error_message,
-    is_terminal: isRunning
-      ? false
-      : isTerminal
-        ? true
-        : projection.is_terminal,
+    is_terminal: isRunning ? false : isTerminal ? true : projection.is_terminal,
     pending_review: shouldClearPending ? null : projection.pending_review,
     pending_input: shouldClearPending ? null : projection.pending_input,
   };
@@ -312,7 +308,11 @@ function patchWorkflowProjectionStepStatus(
     : projection.plan;
 
   const roundGraphs = projection.round_graphs?.map((graph) => {
-    const graphPatch = patchWorkflowStepsStatus(graph.steps, stepId, stepStatus);
+    const graphPatch = patchWorkflowStepsStatus(
+      graph.steps,
+      stepId,
+      stepStatus
+    );
     if (!graphPatch.changed) {
       return graph;
     }
@@ -989,7 +989,7 @@ export function ChatSessions() {
   >({});
   const activeChatInputMode: ChatInputMode = activeSessionId
     ? (chatInputModeBySessionId[activeSessionId] ??
-        resolveChatInputMode(activeSession?.chat_input_mode))
+      resolveChatInputMode(activeSession?.chat_input_mode))
     : DEFAULT_CHAT_INPUT_MODE;
   const isWorkflowInputMode = activeChatInputMode === 'workflow';
   const visibleMessagesData = useMemo(() => messagesData, [messagesData]);
@@ -4147,7 +4147,7 @@ export function ChatSessions() {
         );
       }
     },
-    [activeSessionId, handleLoadDiff, queryClient]
+    [activeSessionId, handleLoadDiff, queryClient, recordWorkflowEvent]
   );
 
   // Determine if there are new unseen changes
