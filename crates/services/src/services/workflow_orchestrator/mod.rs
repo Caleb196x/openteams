@@ -46,6 +46,7 @@ use db::{
         workflow_round::{CreateWorkflowRound, WorkflowRound},
         workflow_step::{CreateWorkflowStep, WorkflowStep},
         workflow_step_edge::{CreateWorkflowStepEdge, WorkflowStepEdge},
+        workflow_transcript::WorkflowTranscript,
         workflow_types::*,
     },
 };
@@ -569,6 +570,21 @@ impl WorkflowOrchestrator {
                 .map(|loop_def| (loop_def.loop_key.clone(), loop_def))
                 .collect::<HashMap<_, _>>();
             execution = Self::synchronize_runtime_state(pool, execution.id, false).await?;
+
+            if Self::has_unresolved_step_or_loop_reviews(pool, execution.id, None).await? {
+                Self::refresh_workflow_card(
+                    pool,
+                    chat_runner,
+                    &execution,
+                    &plan,
+                    &revision,
+                    &session_agents,
+                    &agents,
+                    None,
+                )
+                .await?;
+                return Ok(());
+            }
 
             let recovered_loops =
                 Self::restore_recovered_failed_loops(pool, &execution, &steps, &mut workflow_loops)
@@ -1597,6 +1613,22 @@ impl WorkflowOrchestrator {
 
     pub(crate) fn is_workflow_session_available(workflow_session: &WorkflowAgentSession) -> bool {
         workflow_session.state == WorkflowAgentSessionState::Idle
+    }
+
+    pub(crate) async fn has_unresolved_step_or_loop_reviews(
+        pool: &SqlitePool,
+        execution_id: Uuid,
+        exclude_transcript_id: Option<Uuid>,
+    ) -> Result<bool, OrchestratorError> {
+        let unresolved =
+            WorkflowTranscript::find_unresolved_reviews_by_execution(pool, execution_id).await?;
+        Ok(unresolved.iter().any(|transcript| {
+            Some(transcript.id) != exclude_transcript_id
+                && matches!(
+                    transcript.entry_type.as_str(),
+                    "step_review" | "loop_review"
+                )
+        }))
     }
 
     fn insert_scheduler_candidate(

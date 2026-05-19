@@ -892,15 +892,8 @@ impl WorkflowOrchestrator {
         execution_id: Uuid,
         resolved_transcript_id: Uuid,
     ) -> Result<bool, OrchestratorError> {
-        let unresolved =
-            WorkflowTranscript::find_unresolved_reviews_by_execution(pool, execution_id).await?;
-        Ok(unresolved.iter().any(|transcript| {
-            transcript.id != resolved_transcript_id
-                && matches!(
-                    transcript.entry_type.as_str(),
-                    "step_review" | "loop_review"
-                )
-        }))
+        Self::has_unresolved_step_or_loop_reviews(pool, execution_id, Some(resolved_transcript_id))
+            .await
     }
 
     fn localized_user_approved_loop_result_message_for_language(
