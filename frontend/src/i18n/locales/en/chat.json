@@ -1074,7 +1074,7 @@
     "workflow": "Workflow",
     "chat": "Chat"
   },
-  "workflow_plan_generation_unavailable": "Workflow plan generation is unavailable for this session.",
+  "workflow_plan_generation_unavailable": "Unable to generate a workflow plan. Please confirm the implementation plan first.",
   "workflow_retry": "Retry",
   "workflow_retry_task": "Retry Task",
   "workflow_retry_review": "Retry Review",

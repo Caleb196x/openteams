@@ -210,6 +210,7 @@ impl WorkflowOrchestrator {
             &current_steps,
             &edges,
             result,
+            false,
         )
         .await?;
 

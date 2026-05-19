@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Bell, Crown, Hand, X, type LucideIcon } from 'lucide-react';
 import type { WorkflowCardData } from '@/lib/api';
@@ -33,6 +33,35 @@ type ReviewSettingDraft = Record<
     userReview: boolean;
   }
 >;
+
+function buildReviewSettingsDraft(
+  taskRows: Array<{
+    stepId: string;
+    leadReview: boolean;
+    userReview: boolean;
+  }>,
+  loopRows: Array<{
+    stepId: string;
+    userReview: boolean;
+  }>
+): ReviewSettingDraft {
+  return Object.fromEntries([
+    ...taskRows.map((row) => [
+      row.stepId,
+      {
+        leadReview: row.leadReview,
+        userReview: row.userReview,
+      },
+    ]),
+    ...loopRows.map((row) => [
+      row.stepId,
+      {
+        leadReview: false,
+        userReview: row.userReview,
+      },
+    ]),
+  ] as Array<[string, { leadReview: boolean; userReview: boolean }]>);
+}
 
 function ReviewSwitch({
   icon: Icon,
@@ -204,27 +233,38 @@ export function WorkflowReviewSettingsDialog({
     [planNodeById, stepById, workflowLoops]
   );
 
+  const reviewSettingsShapeKey = useMemo(
+    () =>
+      [
+        projection.execution_id ?? '',
+        projection.plan_id ?? '',
+        taskReviewSettingsRows.map((row) => row.stepId).join(','),
+        loopReviewSettingsRows.map((row) => row.stepId).join(','),
+      ].join('::'),
+    [
+      loopReviewSettingsRows,
+      projection.execution_id,
+      projection.plan_id,
+      taskReviewSettingsRows,
+    ]
+  );
+  const taskReviewSettingsRowsRef = useRef(taskReviewSettingsRows);
+  const loopReviewSettingsRowsRef = useRef(loopReviewSettingsRows);
+
+  useEffect(() => {
+    taskReviewSettingsRowsRef.current = taskReviewSettingsRows;
+    loopReviewSettingsRowsRef.current = loopReviewSettingsRows;
+  }, [loopReviewSettingsRows, taskReviewSettingsRows]);
+
   useEffect(() => {
     if (!isOpen) return;
     setReviewSettingsDraft(
-      Object.fromEntries([
-        ...taskReviewSettingsRows.map((row) => [
-          row.stepId,
-          {
-            leadReview: row.leadReview,
-            userReview: row.userReview,
-          },
-        ]),
-        ...loopReviewSettingsRows.map((row) => [
-          row.stepId,
-          {
-            leadReview: false,
-            userReview: row.userReview,
-          },
-        ]),
-      ] as Array<[string, { leadReview: boolean; userReview: boolean }]>)
+      buildReviewSettingsDraft(
+        taskReviewSettingsRowsRef.current,
+        loopReviewSettingsRowsRef.current
+      )
     );
-  }, [isOpen, loopReviewSettingsRows, taskReviewSettingsRows]);
+  }, [isOpen, reviewSettingsShapeKey]);
 
   const updateReviewSettingDraft = useCallback(
     (stepId: string, key: 'leadReview' | 'userReview', value: boolean) => {

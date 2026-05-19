@@ -1074,7 +1074,7 @@
     "workflow": "ワークフロー",
     "chat": "チャット"
   },
-  "workflow_plan_generation_unavailable": "このセッションではワークフロープラン生成を利用できません。",
+  "workflow_plan_generation_unavailable": "ワークフロープランを生成できません。先に実装方針を確定してください。",
   "workflow_retry": "再試行",
   "workflow_retry_task": "タスクを再試行",
   "workflow_retry_review": "レビューを再試行",

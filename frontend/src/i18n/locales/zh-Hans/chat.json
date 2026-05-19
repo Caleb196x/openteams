@@ -1074,7 +1074,7 @@
     "workflow": "工作流",
     "chat": "聊天"
   },
-  "workflow_plan_generation_unavailable": "当前会话未开启工作流计划生成。",
+  "workflow_plan_generation_unavailable": "无法生成工作流计划，请先确定实施方案",
   "workflow_retry": "重试",
   "workflow_retry_task": "重试任务",
   "workflow_retry_review": "重试审核",

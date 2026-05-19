@@ -1,5 +1,5 @@
 import { SquaresFourIcon } from '@phosphor-icons/react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Eye, EyeOff, Loader2, Plus, Trash2, X } from 'lucide-react';
 
@@ -321,6 +321,8 @@ export function CustomProviderForm({
   );
   const [showApiKey, setShowApiKey] = useState(false);
   const [validationStatus, setValidationStatus] = useState<StatusState>(null);
+  const pendingScrollModelKeyRef = useRef<string | null>(null);
+  const modelCardRefs = useRef(new Map<string, HTMLDivElement>());
 
   useEffect(() => {
     if (!open) {
@@ -330,10 +332,25 @@ export function CustomProviderForm({
     setError(null);
     setShowApiKey(false);
     setValidationStatus(null);
+    pendingScrollModelKeyRef.current = null;
     const nextFormState = createFormState(initialProvider);
     setFormState(nextFormState);
     setNpmSelection(getNpmSelectionValue(nextFormState.npm));
   }, [initialProvider, open]);
+
+  useEffect(() => {
+    const modelKey = pendingScrollModelKeyRef.current;
+    if (!modelKey) return;
+
+    const cardElement = modelCardRefs.current.get(modelKey);
+    if (!cardElement) return;
+
+    pendingScrollModelKeyRef.current = null;
+    cardElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    window.requestAnimationFrame(() => {
+      cardElement.querySelector('input')?.focus();
+    });
+  }, [formState.models]);
 
   const isEditing = initialProvider != null;
   const apiKeyMasked = formState.apiKey.includes('***');
@@ -787,12 +804,14 @@ export function CustomProviderForm({
                   <button
                     type="button"
                     className={settingsSecondaryButtonClassName}
-                    onClick={() =>
+                    onClick={() => {
+                      const nextModel = createEmptyModelDraft();
+                      pendingScrollModelKeyRef.current = nextModel.key;
                       updateFormState((current) => ({
                         ...current,
-                        models: [...current.models, createEmptyModelDraft()],
-                      }))
-                    }
+                        models: [...current.models, nextModel],
+                      }));
+                    }}
                   >
                     <Plus className="h-4 w-4" />
                     {t('settings.cli.customProviders.form.addModel')}
@@ -814,6 +833,13 @@ export function CustomProviderForm({
                   {formState.models.map((model) => (
                     <div
                       key={model.key}
+                      ref={(element) => {
+                        if (element) {
+                          modelCardRefs.current.set(model.key, element);
+                        } else {
+                          modelCardRefs.current.delete(model.key);
+                        }
+                      }}
                       className={cn(settingsMutedPanelClassName, 'p-4')}
                     >
                       <div className="flex items-center justify-between gap-4">

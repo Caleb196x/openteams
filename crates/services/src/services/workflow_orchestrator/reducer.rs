@@ -865,6 +865,13 @@ mod tests {
         );
         assert_eq!(
             derive_agent_session_state(
+                &WorkflowAgentSessionState::Completed,
+                &[WorkflowStepStatus::Ready],
+            ),
+            WorkflowAgentSessionState::Idle
+        );
+        assert_eq!(
+            derive_agent_session_state(
                 &WorkflowAgentSessionState::Expired,
                 &[WorkflowStepStatus::Running],
             ),
