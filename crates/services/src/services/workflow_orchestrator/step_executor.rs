@@ -629,6 +629,15 @@ Read this file before writing the final result. Do not rely on the workflow plan
         })
     }
 
+    pub(super) fn pending_revision_feedback_is_loop(revision_context: Option<&str>) -> bool {
+        revision_context
+            .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+            .and_then(|value| value.get("pending_feedback").cloned())
+            .is_some_and(|pending| {
+                pending.get("scope").and_then(|value| value.as_str()) == Some("loop")
+            })
+    }
+
     pub(super) fn clear_pending_revision_feedback(
         existing_revision_context: Option<&str>,
     ) -> Option<String> {
@@ -1756,9 +1765,12 @@ Before modifying files, you MUST use the `using-git-workspace` skill to create a
             .unwrap_or_else(|| plan.title.clone());
         let pending_revision_feedback =
             Self::parse_pending_revision_feedback(running_step.revision_context.as_deref());
-        let skip_initial_lead_review = pending_revision_feedback
-            .as_ref()
-            .is_some_and(|feedback| feedback.source == WorkflowRevisionFeedbackSource::User);
+        let pending_loop_revision_feedback =
+            Self::pending_revision_feedback_is_loop(running_step.revision_context.as_deref());
+        let skip_initial_lead_review = pending_loop_revision_feedback
+            || pending_revision_feedback
+                .as_ref()
+                .is_some_and(|feedback| feedback.source == WorkflowRevisionFeedbackSource::User);
         let prompt_context = if pending_revision_feedback.is_some() {
             AgentPromptContext::StepRevision
         } else {

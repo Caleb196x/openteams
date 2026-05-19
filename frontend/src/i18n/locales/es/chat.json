@@ -1074,7 +1074,7 @@
     "workflow": "Flujo de trabajo",
     "chat": "Chat"
   },
-  "workflow_plan_generation_unavailable": "La generación de planes de flujo de trabajo no está disponible para esta sesión.",
+  "workflow_plan_generation_unavailable": "No se puede generar el plan de flujo de trabajo. Confirma primero el plan de implementación.",
   "workflow_retry": "Reintentar",
   "workflow_retry_task": "Reintentar tarea",
   "workflow_retry_review": "Reintentar revisión",

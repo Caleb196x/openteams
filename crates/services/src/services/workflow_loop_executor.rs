@@ -201,13 +201,24 @@ impl<'a> LoopExecutor<'a> {
     ) -> Result<Vec<WorkflowStep>, OrchestratorError> {
         let member_ids = parse_member_step_ids(&workflow_loop.member_step_ids_json)?;
         let mut reset_steps = Vec::new();
+        let mut has_pending_loop_feedback = false;
         for step_id in member_ids {
             let step = WorkflowStep::find_by_id(self.pool, step_id)
                 .await?
                 .ok_or_else(|| {
                     OrchestratorError::NotFound(format!("step {} not found", step_id))
                 })?;
-            let prepared_for_retry = workflow_loop.retry_count > step.retry_count;
+            let pending_loop_feedback = has_pending_feedback_for_loop(&step, workflow_loop);
+            has_pending_loop_feedback |= pending_loop_feedback;
+            let prepared_for_retry = pending_loop_feedback
+                && matches!(
+                    step.status,
+                    WorkflowStepStatus::Completed
+                        | WorkflowStepStatus::Failed
+                        | WorkflowStepStatus::Interrupted
+                        | WorkflowStepStatus::Blocked
+                        | WorkflowStepStatus::Revising
+                );
             let mut step = if prepared_for_retry {
                 WorkflowStep::prepare_retry(self.pool, step.id).await?
             } else {
@@ -221,6 +232,34 @@ impl<'a> LoopExecutor<'a> {
 
             reset_steps.push(step);
         }
+
+        let review_step = WorkflowStep::find_by_id(self.pool, workflow_loop.review_step_id)
+            .await?
+            .ok_or_else(|| {
+                OrchestratorError::NotFound(format!(
+                    "loop review step {} not found",
+                    workflow_loop.review_step_id
+                ))
+            })?;
+        if has_pending_loop_feedback && review_step.status != WorkflowStepStatus::Ready {
+            let mut review_step = if matches!(
+                review_step.status,
+                WorkflowStepStatus::Completed
+                    | WorkflowStepStatus::Failed
+                    | WorkflowStepStatus::Interrupted
+                    | WorkflowStepStatus::Blocked
+                    | WorkflowStepStatus::Revising
+            ) {
+                WorkflowStep::prepare_retry(self.pool, review_step.id).await?
+            } else {
+                review_step
+            };
+            review_step =
+                WorkflowStep::update_status(self.pool, review_step.id, WorkflowStepStatus::Ready)
+                    .await?;
+            reset_steps.push(review_step);
+        }
+
         Ok(reset_steps)
     }
 
@@ -692,6 +731,18 @@ pub(crate) fn parse_member_step_ids(raw: &str) -> Result<Vec<Uuid>, Orchestrator
     serde_json::from_str::<Vec<Uuid>>(raw).map_err(OrchestratorError::Json)
 }
 
+fn has_pending_feedback_for_loop(step: &WorkflowStep, workflow_loop: &WorkflowLoop) -> bool {
+    step.revision_context
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+        .and_then(|context| context.get("pending_feedback").cloned())
+        .is_some_and(|pending| {
+            pending.get("scope").and_then(|value| value.as_str()) == Some("loop")
+                && pending.get("loop_key").and_then(|value| value.as_str())
+                    == Some(workflow_loop.loop_key.as_str())
+        })
+}
+
 async fn inject_feedback_to_steps(
     pool: &SqlitePool,
     workflow_loop: &WorkflowLoop,
@@ -702,21 +753,13 @@ async fn inject_feedback_to_steps(
     let member_ids = parse_member_step_ids(&workflow_loop.member_step_ids_json)?;
     let member_id_set = member_ids.iter().copied().collect::<HashSet<_>>();
     let all_steps = WorkflowStep::find_by_execution(pool, workflow_loop.execution_id).await?;
-    let feedback_by_key = all_steps
-        .iter()
-        .filter(|step| member_id_set.contains(&step.id))
-        .map(|step| {
-            let step_feedback = step_feedbacks
-                .get(&step.step_key)
-                .map(String::as_str)
-                .unwrap_or(loop_feedback);
-            (step.id, step_feedback.to_string())
-        })
-        .collect::<HashMap<_, _>>();
+    let feedback_by_step_id =
+        loop_feedback_by_step_id(&all_steps, &member_id_set, step_feedbacks, loop_feedback);
 
     for step in all_steps
         .iter()
         .filter(|step| member_id_set.contains(&step.id))
+        .filter(|step| feedback_by_step_id.contains_key(&step.id))
     {
         let previous_payload =
             parse_summary_payload(step.summary_text.as_deref()).unwrap_or(SummaryPayload {
@@ -724,7 +767,7 @@ async fn inject_feedback_to_steps(
                 content: None,
                 outputs: Vec::new(),
             });
-        let feedback = feedback_by_key
+        let feedback = feedback_by_step_id
             .get(&step.id)
             .cloned()
             .unwrap_or_else(|| loop_feedback.to_string());
@@ -741,6 +784,27 @@ async fn inject_feedback_to_steps(
     }
 
     Ok(())
+}
+
+fn loop_feedback_by_step_id(
+    all_steps: &[WorkflowStep],
+    member_id_set: &HashSet<Uuid>,
+    step_feedbacks: &HashMap<String, String>,
+    loop_feedback: &str,
+) -> HashMap<Uuid, String> {
+    all_steps
+        .iter()
+        .filter(|step| member_id_set.contains(&step.id))
+        .filter_map(|step| {
+            if step_feedbacks.is_empty() {
+                return Some((step.id, loop_feedback.to_string()));
+            }
+
+            step_feedbacks
+                .get(&step.step_key)
+                .map(|feedback| (step.id, feedback.clone()))
+        })
+        .collect()
 }
 
 fn merge_loop_revision_context(
@@ -834,6 +898,56 @@ mod tests {
         }
     }
 
+    fn sample_loop(loop_key: &str) -> WorkflowLoop {
+        let now = Utc::now();
+        WorkflowLoop {
+            id: Uuid::new_v4(),
+            execution_id: Uuid::new_v4(),
+            round_id: Uuid::new_v4(),
+            loop_key: loop_key.to_string(),
+            review_step_id: Uuid::new_v4(),
+            member_step_ids_json: "[]".to_string(),
+            status: WorkflowLoopStatus::Running,
+            retry_count: 1,
+            max_retry: 1,
+            user_review_required: false,
+            rejection_reason: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn sample_loop_step(workflow_loop: &WorkflowLoop, step_key: &str) -> WorkflowStep {
+        let now = Utc::now();
+        WorkflowStep {
+            id: Uuid::new_v4(),
+            execution_id: workflow_loop.execution_id,
+            round_id: workflow_loop.round_id,
+            compiled_revision_id: None,
+            step_key: step_key.to_string(),
+            step_type: db::models::workflow_types::WorkflowStepType::Task,
+            title: step_key.to_string(),
+            instructions: String::new(),
+            assigned_workflow_agent_session_id: None,
+            status: WorkflowStepStatus::Completed,
+            retry_count: 0,
+            max_retry: 1,
+            round_index: 1,
+            display_order: 1,
+            latest_run_id: None,
+            summary_text: None,
+            content: None,
+            loop_id: Some(workflow_loop.id),
+            lead_review_required: false,
+            user_review_required: false,
+            revision_context: None,
+            created_at: now,
+            updated_at: now,
+            started_at: None,
+            completed_at: Some(now),
+        }
+    }
+
     #[test]
     fn loop_lead_review_rejected_business_event_uses_review_node_rejected_context() {
         let execution = sample_execution();
@@ -870,6 +984,102 @@ mod tests {
         assert_eq!(
             meta["resolution"],
             serde_json::json!("review_node_rejected")
+        );
+    }
+
+    #[test]
+    fn pending_loop_feedback_is_independent_from_step_retry_count() {
+        let workflow_loop = sample_loop("loop-a");
+        let mut step = sample_loop_step(&workflow_loop, "member");
+        step.retry_count = 5;
+        step.revision_context = Some(
+            serde_json::json!({
+                "pending_feedback": {
+                    "scope": "loop",
+                    "loop_key": "loop-a",
+                    "feedback": "revise",
+                    "review_round": 1
+                }
+            })
+            .to_string(),
+        );
+
+        assert!(has_pending_feedback_for_loop(&step, &workflow_loop));
+    }
+
+    #[test]
+    fn pending_loop_feedback_ignores_other_loops() {
+        let workflow_loop = sample_loop("loop-a");
+        let mut step = sample_loop_step(&workflow_loop, "member");
+        step.revision_context = Some(
+            serde_json::json!({
+                "pending_feedback": {
+                    "scope": "loop",
+                    "loop_key": "loop-b",
+                    "feedback": "revise",
+                    "review_round": 1
+                }
+            })
+            .to_string(),
+        );
+
+        assert!(!has_pending_feedback_for_loop(&step, &workflow_loop));
+
+        step.revision_context = Some(
+            serde_json::json!({
+                "pending_feedback": {
+                    "scope": "step",
+                    "loop_key": "loop-a",
+                    "feedback": "revise",
+                    "review_round": 1
+                }
+            })
+            .to_string(),
+        );
+        assert!(!has_pending_feedback_for_loop(&step, &workflow_loop));
+    }
+
+    #[test]
+    fn loop_feedback_targets_only_named_steps_when_specific_feedback_exists() {
+        let workflow_loop = sample_loop("loop-a");
+        let step_a = sample_loop_step(&workflow_loop, "a");
+        let step_b = sample_loop_step(&workflow_loop, "b");
+        let steps = vec![step_a.clone(), step_b.clone()];
+        let member_ids = [step_a.id, step_b.id].into_iter().collect::<HashSet<_>>();
+        let step_feedbacks =
+            HashMap::from([("b".to_string(), "only b needs revision".to_string())]);
+
+        let feedback_by_step_id =
+            loop_feedback_by_step_id(&steps, &member_ids, &step_feedbacks, "whole loop issue");
+
+        assert_eq!(feedback_by_step_id.len(), 1);
+        assert!(!feedback_by_step_id.contains_key(&step_a.id));
+        assert_eq!(
+            feedback_by_step_id.get(&step_b.id).map(String::as_str),
+            Some("only b needs revision")
+        );
+    }
+
+    #[test]
+    fn loop_feedback_targets_all_members_when_specific_feedback_is_empty() {
+        let workflow_loop = sample_loop("loop-a");
+        let step_a = sample_loop_step(&workflow_loop, "a");
+        let step_b = sample_loop_step(&workflow_loop, "b");
+        let steps = vec![step_a.clone(), step_b.clone()];
+        let member_ids = [step_a.id, step_b.id].into_iter().collect::<HashSet<_>>();
+        let step_feedbacks = HashMap::new();
+
+        let feedback_by_step_id =
+            loop_feedback_by_step_id(&steps, &member_ids, &step_feedbacks, "whole loop issue");
+
+        assert_eq!(feedback_by_step_id.len(), 2);
+        assert_eq!(
+            feedback_by_step_id.get(&step_a.id).map(String::as_str),
+            Some("whole loop issue")
+        );
+        assert_eq!(
+            feedback_by_step_id.get(&step_b.id).map(String::as_str),
+            Some("whole loop issue")
         );
     }
 }

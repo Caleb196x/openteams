@@ -1074,7 +1074,7 @@
     "workflow": "工作流程",
     "chat": "聊天"
   },
-  "workflow_plan_generation_unavailable": "目前會話未啟用工作流程計畫生成。",
+  "workflow_plan_generation_unavailable": "無法生成工作流程計畫，請先確定實施方案",
   "workflow_retry": "重試",
   "workflow_retry_task": "重試任務",
   "workflow_retry_review": "重試審核",

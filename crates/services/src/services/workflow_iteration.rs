@@ -20,7 +20,7 @@ use db::{
         workflow_step_edge::{CreateWorkflowStepEdge, WorkflowStepEdge},
         workflow_types::{
             WorkflowAgentSessionRole, WorkflowEventType, WorkflowPlanJson, WorkflowRevisionEditor,
-            WorkflowRoundStatus, WorkflowStepStatus, WorkflowValidationStatus,
+            WorkflowRoundStatus, WorkflowStepStatus, WorkflowStepType, WorkflowValidationStatus,
         },
     },
 };
@@ -382,6 +382,12 @@ impl<'a> IterationManager<'a> {
                 })
                 .copied()
                 .or(lead_workflow_session_id);
+            let (lead_review_required, user_review_required) =
+                if compiled_step.step_type == WorkflowStepType::Review {
+                    (Some(false), Some(false))
+                } else {
+                    (None, None)
+                };
             let step = WorkflowStep::create(
                 self.pool,
                 &CreateWorkflowStep {
@@ -397,8 +403,8 @@ impl<'a> IterationManager<'a> {
                     round_index: round.round_index,
                     display_order: compiled_step.display_order,
                     loop_id: None,
-                    lead_review_required: None,
-                    user_review_required: None,
+                    lead_review_required,
+                    user_review_required,
                     revision_context: None,
                 },
                 step_id,

@@ -1,4 +1,4 @@
-//! Workflow Orchestrator 骨架
+﻿//! Workflow Orchestrator 骨架
 //!
 //! 核心职责：
 //! - command handler: 接收 bootstrap 命令并创建 execution 图
@@ -314,6 +314,12 @@ impl WorkflowOrchestrator {
                 .and_then(|aid| agent_session_map.get(aid))
                 .copied()
                 .or(lead_workflow_agent_session_id);
+            let (lead_review_required, user_review_required) =
+                if compiled_step.step_type == WorkflowStepType::Review {
+                    (Some(false), Some(false))
+                } else {
+                    (None, None)
+                };
 
             let step = WorkflowStep::create(
                 pool,
@@ -330,8 +336,8 @@ impl WorkflowOrchestrator {
                     round_index: 1,
                     display_order: compiled_step.display_order,
                     loop_id: None,
-                    lead_review_required: None,
-                    user_review_required: None,
+                    lead_review_required,
+                    user_review_required,
                     revision_context: None,
                 },
                 step_id,

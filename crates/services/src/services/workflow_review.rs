@@ -128,7 +128,9 @@ pub fn build_loop_review_prompt(
   "feedback": "回路审核通过的综合评价"
 }}
 
-不通过时返回（会导致回路内所有节点重新执行）：
+不通过时返回：
+如果只有部分节点需要返工，只在 step_feedbacks 中列出这些节点；未列出的节点会保持当前完成状态。
+如果整个回路都需要返工，可以省略 step_feedbacks 或返回空数组。
 {{
   "type": "loop_review_result",
   "loop_key": "{loop_key}",

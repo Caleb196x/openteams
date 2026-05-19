@@ -316,6 +316,41 @@ fn clear_pending_revision_feedback_removes_resume_payload() {
 }
 
 #[test]
+fn pending_revision_feedback_identifies_loop_scope() {
+    let loop_context = serde_json::json!({
+        "pending_feedback": {
+            "source": "lead",
+            "scope": "loop",
+            "loop_key": "loop-a",
+            "feedback": "revise this loop member",
+            "previous_summary": "summary",
+            "previous_outputs": [],
+            "review_round": 1
+        }
+    })
+    .to_string();
+    let step_context = WorkflowOrchestrator::merge_revision_context(
+        None,
+        WorkflowRevisionFeedbackSource::Lead,
+        "review feedback",
+        "Summary",
+        None,
+        &[],
+        1,
+    );
+
+    assert!(WorkflowOrchestrator::pending_revision_feedback_is_loop(
+        Some(&loop_context)
+    ));
+    assert!(!WorkflowOrchestrator::pending_revision_feedback_is_loop(
+        Some(&step_context)
+    ));
+    assert!(!WorkflowOrchestrator::pending_revision_feedback_is_loop(
+        None
+    ));
+}
+
+#[test]
 fn step_transition_duration_reports_terminal_elapsed_time() {
     let mut step = sample_step(WorkflowStepStatus::Running, None);
     step.started_at = Some(Utc::now());

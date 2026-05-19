@@ -1074,7 +1074,7 @@
     "workflow": "워크플로",
     "chat": "채팅"
   },
-  "workflow_plan_generation_unavailable": "이 세션에서는 워크플로 계획 생성을 사용할 수 없습니다.",
+  "workflow_plan_generation_unavailable": "워크플로 계획을 생성할 수 없습니다. 먼저 구현 방안을 확정해 주세요.",
   "workflow_retry": "다시 시도",
   "workflow_retry_task": "작업 다시 시도",
   "workflow_retry_review": "검토 다시 시도",
