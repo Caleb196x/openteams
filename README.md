@@ -36,7 +36,7 @@
 </div>
 
 ---
-![](readmes/images/hero.mp4)
+[hero video](./readmes/images/hero.mp4)
 
 ## What is openteam
 
