@@ -463,9 +463,12 @@ impl Codex {
                 };
                 let response = client.resume_thread(params).await?;
                 tracing::debug!(
-                    "resuming session using rollout file {}, response {:?}",
-                    rollout_path.display(),
-                    response
+                    rollout_path = %rollout_path.display(),
+                    thread_id = %response.thread.id,
+                    turns = response.thread.turns.len(),
+                    model = %response.model,
+                    model_provider = %response.model_provider,
+                    "resumed session using rollout file"
                 );
                 let thread_id = response.thread.id;
                 client.register_session(&thread_id).await?;
