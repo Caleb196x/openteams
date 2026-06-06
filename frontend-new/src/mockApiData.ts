@@ -587,6 +587,13 @@ export const mockShellOptions: ShellOptionsMock = {
   },
   projectManagementItems: [
     {
+      id: 'project-issue',
+      label: 'Issues',
+      icon: 'file-text',
+      helper: 'View project issues.',
+      targetPage: 'issue',
+    },
+    {
       id: 'github-repository',
       label: 'GitHub',
       icon: 'github',

@@ -140,6 +140,7 @@ export type SidebarPrimaryActionId = 'inbox' | 'new-session';
 
 export type SidebarNavigationTarget =
   | 'workspace'
+  | 'issue'
   | 'team'
   | 'team-templates'
   | 'tasks'
@@ -296,6 +297,20 @@ export interface GitHubDeviceFlowPollResponse {
   status: 'pending' | 'slow_down' | 'authorized' | 'expired' | 'denied' | 'error';
   account: GitHubAccount | null;
   error: GitHubErrorData | string | null;
+}
+
+export interface GitHubRepositorySummary {
+  id: number | string;
+  node_id: string;
+  full_name: string;
+  owner: string;
+  name: string;
+  private: boolean;
+  default_branch: string;
+  html_url: string;
+  clone_url: string;
+  ssh_url: string;
+  updated_at: string;
 }
 
 export interface ProjectRepoIntegration {
@@ -493,7 +508,8 @@ export interface ProjectWorkItemDetailResponse {
   external_links: ProjectWorkItemExternalLink[];
   execution_links: ProjectWorkItemExecutionLink[];
   delivery_records: ProjectDeliveryRecord[];
-  audits: GitHubOperationAudit[];
+  github_audits?: GitHubOperationAudit[];
+  audits?: GitHubOperationAudit[];
 }
 
 export interface ProjectDeliveryStatsSummary {

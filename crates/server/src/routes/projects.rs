@@ -22,12 +22,14 @@ use serde::{Deserialize, Serialize};
 use serde_with::rust::double_option;
 use services::services::{
     agent_runtime::{AgentRuntimeReasoningCapability, reasoning_capability_for_runner_type},
+    build_stats::project_stats::ProjectStatsService,
     chat::create_session_with_project_members,
     member_execution::parse_runner_type,
-    project::ProjectDetail,
-    project_member::{ProjectMemberService, ProjectMemberUpdateInput},
-    project_stats::ProjectStatsService,
-    workflow_analytics::{self, hash_user_id},
+    project::{
+        ProjectDetail,
+        member::{ProjectMemberService, ProjectMemberUpdateInput},
+    },
+    workflow::workflow_analytics::{self, hash_user_id},
 };
 use ts_rs::TS;
 use utils::response::ApiResponse;

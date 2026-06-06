@@ -61,6 +61,8 @@ export function ProjectWorkItemDetail({
   }
 
   const current = detail?.work_item ?? workItem;
+  const { externalLinks, executionLinks, deliveryRecords, audits } =
+    getWorkItemDetailCollections(detail);
 
   return (
     <section className="rounded-md border border-[var(--hairline)] bg-[var(--surface-1)] p-4">
@@ -93,9 +95,9 @@ export function ProjectWorkItemDetail({
         <Panel
           icon={<ExternalLink className="h-4 w-4" />}
           title="Issue and external mapping"
-          count={detail?.external_links.length ?? 0}
+          count={externalLinks.length}
         >
-          {(detail?.external_links ?? []).map((link) => (
+          {externalLinks.map((link) => (
             <Row key={link.id}>
               <div>
                 <p className="text-xs font-medium text-[var(--ink)]">
@@ -125,9 +127,9 @@ export function ProjectWorkItemDetail({
         <Panel
           icon={<Network className="h-4 w-4" />}
           title="Session, workflow, run, step links"
-          count={detail?.execution_links.length ?? 0}
+          count={executionLinks.length}
         >
-          {(detail?.execution_links ?? []).map((link) => (
+          {executionLinks.map((link) => (
             <Row key={link.id}>
               <div>
                 <p className="text-xs font-medium text-[var(--ink)]">
@@ -146,9 +148,9 @@ export function ProjectWorkItemDetail({
         <Panel
           icon={<GitPullRequest className="h-4 w-4" />}
           title="Delivery records"
-          count={detail?.delivery_records.length ?? 0}
+          count={deliveryRecords.length}
         >
-          {(detail?.delivery_records ?? []).map((record) => (
+          {deliveryRecords.map((record) => (
             <Row key={record.id}>
               <div>
                 <p className="text-xs font-medium text-[var(--ink)]">
@@ -175,9 +177,9 @@ export function ProjectWorkItemDetail({
         <Panel
           icon={<History className="h-4 w-4" />}
           title="GitHub operation audit"
-          count={detail?.audits.length ?? 0}
+          count={audits.length}
         >
-          {(detail?.audits ?? []).map((audit) => (
+          {audits.map((audit) => (
             <Row key={audit.id}>
               <div>
                 <p className="text-xs font-medium text-[var(--ink)]">
@@ -252,3 +254,12 @@ function Pill({ children }: { children: React.ReactNode }) {
     </span>
   );
 }
+
+export const getWorkItemDetailCollections = (
+  detail: ProjectWorkItemDetailResponse | null,
+) => ({
+  externalLinks: detail?.external_links ?? [],
+  executionLinks: detail?.execution_links ?? [],
+  deliveryRecords: detail?.delivery_records ?? [],
+  audits: detail?.github_audits ?? detail?.audits ?? [],
+});

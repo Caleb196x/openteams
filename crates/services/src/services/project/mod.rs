@@ -1,3 +1,9 @@
+pub mod delivery;
+pub mod member;
+pub mod migration;
+pub mod path;
+pub mod work_item;
+
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
@@ -18,9 +24,9 @@ use thiserror::Error;
 use ts_rs::TS;
 use uuid::Uuid;
 
+use self::member::ProjectMemberService;
 use super::{
     file_search::{FileSearchCache, SearchQuery},
-    project_member::ProjectMemberService,
     repo::{RepoError, RepoService},
 };
 
@@ -187,6 +193,8 @@ mod tests {
                 test_count INTEGER DEFAULT 0,
                 input_tokens BIGINT DEFAULT 0,
                 output_tokens BIGINT DEFAULT 0,
+                cache_read_tokens BIGINT DEFAULT 0,
+                reasoning_output_tokens BIGINT DEFAULT 0,
                 total_tokens BIGINT DEFAULT 0,
                 cost_total DECIMAL,
                 updated_at TEXT NOT NULL DEFAULT (datetime('now', 'subsec'))

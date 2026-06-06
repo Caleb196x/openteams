@@ -4,10 +4,14 @@ use axum::{
     response::Json as ResponseJson,
     routing::{get, post},
 };
+use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
-use services::services::github_auth::{
-    DeviceFlowGitHubAuthProvider, GitHubAuthProvider, GitHubDeviceFlowPollResponse,
-    GitHubDeviceFlowStartResponse,
+use services::services::github::{
+    auth::{
+        DeviceFlowGitHubAuthProvider, GitHubAuthProvider, GitHubDeviceFlowPollResponse,
+        GitHubDeviceFlowStartResponse,
+    },
+    rest_client::{GitHubApiErrorData, GitHubRepositorySummary, GitHubRestClient, GitHubRestError},
 };
 use ts_rs::TS;
 use utils::response::ApiResponse;
@@ -25,6 +29,7 @@ pub fn router() -> Router<DeploymentImpl> {
         .route("/github/auth/device/poll", post(poll_device_flow))
         .route("/github/auth/account", get(current_account))
         .route("/github/auth/disconnect", post(disconnect))
+        .route("/github/repos", get(list_github_repos))
 }
 
 fn provider() -> Result<DeviceFlowGitHubAuthProvider, ApiError> {
@@ -56,7 +61,7 @@ async fn poll_device_flow(
 async fn current_account(
     State(_deployment): State<DeploymentImpl>,
 ) -> Result<
-    ResponseJson<ApiResponse<Option<services::services::github_auth::GitHubAccount>>>,
+    ResponseJson<ApiResponse<Option<services::services::github::auth::GitHubAccount>>>,
     ApiError,
 > {
     let account = provider()?
@@ -73,4 +78,50 @@ async fn disconnect(
         .disconnect()
         .map_err(|err| ApiError::BadRequest(format!("GitHub disconnect failed: {err}")))?;
     Ok(ResponseJson(ApiResponse::success(())))
+}
+
+async fn list_github_repos(
+    State(_deployment): State<DeploymentImpl>,
+) -> Result<ResponseJson<ApiResponse<Vec<GitHubRepositorySummary>, GitHubApiErrorData>>, ApiError> {
+    let provider = provider()?;
+    let token = match provider.access_token().await {
+        Ok(token) => token,
+        Err(err) => {
+            return Ok(ResponseJson(ApiResponse::error_with_data(
+                github_error_data("github_auth_required", err.to_string()),
+            )));
+        }
+    };
+    let client = GitHubRestClient::new(SecretString::from(token.token.expose_secret().to_string()));
+    match client.list_authenticated_repositories().await {
+        Ok(repos) => Ok(ResponseJson(ApiResponse::success(repos))),
+        Err(GitHubRestError::Api(data)) => Ok(ResponseJson(ApiResponse::error_with_data(data))),
+        Err(err) => Ok(ResponseJson(ApiResponse::error_with_data(
+            github_error_data("github_write_failed", err.to_string()),
+        ))),
+    }
+}
+
+fn github_error_data(code: &str, message: impl Into<String>) -> GitHubApiErrorData {
+    GitHubApiErrorData {
+        code: code.to_string(),
+        message: message.into(),
+        retry_after: None,
+        last_synced_at: None,
+        stale: false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::github_error_data;
+
+    #[test]
+    fn github_repo_list_auth_errors_are_structured() {
+        let data = github_error_data("github_auth_required", "GitHub auth required");
+
+        assert_eq!(data.code, "github_auth_required");
+        assert_eq!(data.message, "GitHub auth required");
+        assert!(!data.stale);
+    }
 }

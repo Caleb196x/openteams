@@ -16,9 +16,9 @@ use super::{
     GitHostProvider,
     types::{CreatePrRequest, GitHostError, OpenPrInfo, ProviderKind, UnifiedPrComment},
 };
-use crate::services::{
-    github_auth::{DeviceFlowGitHubAuthProvider, GitHubAuthProvider},
-    github_rest_client::{CreateGitHubPullRequest, GitHubPullRequestSummary, GitHubRestClient},
+use crate::services::github::{
+    auth::{DeviceFlowGitHubAuthProvider, GitHubAuthProvider},
+    rest_client::{CreateGitHubPullRequest, GitHubPullRequestSummary, GitHubRestClient},
 };
 
 #[derive(Debug, Clone)]

@@ -13,11 +13,11 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use super::{
-    github_audit::GitHubAuditService,
-    github_operation_approval::GitHubOperationApprovalService,
-    github_rest_client::{GitHubIssueDetail, GitHubIssueSummary, GitHubRestClient},
-    repo_integration::RepoIntegrationService,
+    audit::GitHubAuditService,
+    operation_approval::GitHubOperationApprovalService,
+    rest_client::{GitHubIssueDetail, GitHubIssueSummary, GitHubRestClient},
 };
+use crate::services::repo_integration::RepoIntegrationService;
 
 #[derive(Clone, Default)]
 pub struct GitHubIssueService;

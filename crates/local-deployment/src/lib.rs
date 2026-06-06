@@ -165,7 +165,8 @@ impl Deployment for LocalDeployment {
         }
 
         if let Err(err) =
-            services::services::workflow_runtime::run_workflow_retention_janitor(&db.pool).await
+            services::services::workflow::workflow_runtime::run_workflow_retention_janitor(&db.pool)
+                .await
         {
             tracing::warn!(?err, "Workflow retention janitor failed during startup");
         }

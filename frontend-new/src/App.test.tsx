@@ -256,6 +256,7 @@ check(
 check(
   "imports non-session pages from pages directory",
   source.includes("@/pages/GitHubRepositoryPage") &&
+    source.includes("@/pages/IssuePage") &&
     source.includes("@/pages/TeamPage") &&
     source.includes("@/pages/TeamTemplatesPage") &&
     source.includes("@/pages/SettingsPage"),
@@ -266,6 +267,11 @@ check(
   !source.includes("import { OnboardingPro }") &&
     !source.includes("import { SettingsWorkspace }") &&
     !source.includes("import { TokensWorkspace }"),
+  source,
+);
+check(
+  "renders issue placeholder page",
+  source.includes('case "issue"') && source.includes("<IssuePage />"),
   source,
 );
 check(

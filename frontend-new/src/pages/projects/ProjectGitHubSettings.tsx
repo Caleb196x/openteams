@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Copy, Github, RefreshCw, Unplug } from 'lucide-react';
 import { githubAuthApi, projectGithubApi } from '@/lib/api';
 import type {
   GitHubAccount,
   GitHubDeviceFlowStartResponse,
   GitHubErrorData,
+  GitHubRepositorySummary,
   JsonValue,
   ProjectRepoIntegration,
 } from '@/types';
@@ -24,15 +25,29 @@ const statusClass: Record<string, string> = {
   error: 'text-amber-400',
 };
 
+export const DEVICE_FLOW_POLL_INTERVAL_MS = 1000;
+
+export const getDeviceFlowOpenUrl = (
+  flow: GitHubDeviceFlowStartResponse,
+): string => flow.verification_uri_complete ?? flow.verification_uri;
+
+export const shouldContinueDeviceFlowPolling = (
+  status: string,
+): boolean => status === 'pending' || status === 'slow_down';
+
 export function ProjectGitHubSettings({ projectId }: ProjectGitHubSettingsProps) {
   const [account, setAccount] = useState<GitHubAccount | null>(null);
   const [repos, setRepos] = useState<ProjectRepoIntegration[]>([]);
+  const [githubRepos, setGithubRepos] = useState<GitHubRepositorySummary[]>([]);
   const [deviceFlow, setDeviceFlow] =
     useState<GitHubDeviceFlowStartResponse | null>(null);
+  const [deviceFlowStatus, setDeviceFlowStatus] = useState<string | null>(null);
+  const [pollingDeviceFlow, setPollingDeviceFlow] = useState(false);
   const [loading, setLoading] = useState(true);
   const [action, setAction] = useState<string | null>(null);
   const [error, setError] = useState<GitHubErrorData | null>(null);
-  const [repoId, setRepoId] = useState('');
+  const devicePollInFlightRef = useRef(false);
+  const [githubRepoFullName, setGithubRepoFullName] = useState('');
   const [owner, setOwner] = useState('');
   const [repoName, setRepoName] = useState('');
   const [defaultBranch, setDefaultBranch] = useState('main');
@@ -42,6 +57,8 @@ export function ProjectGitHubSettings({ projectId }: ProjectGitHubSettingsProps)
   const auxiliaryRepos = repos.slice(1);
   const canAddRepo = repos.length < 3;
   const shownError = useMemo(() => presentGitHubError(error), [error]);
+  const selectedGitHubRepo =
+    githubRepos.find((repo) => repo.full_name === githubRepoFullName) ?? null;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -53,6 +70,11 @@ export function ProjectGitHubSettings({ projectId }: ProjectGitHubSettingsProps)
       ]);
       setAccount(accountResult);
       setRepos(repoResult);
+      if (accountResult) {
+        setGithubRepos(await githubAuthApi.listRepos());
+      } else {
+        setGithubRepos([]);
+      }
     } catch (err) {
       setError(toSettingsError(err));
     } finally {
@@ -65,36 +87,57 @@ export function ProjectGitHubSettings({ projectId }: ProjectGitHubSettingsProps)
   }, [load]);
 
   const startDeviceFlow = async () => {
+    const authWindow =
+      typeof window === 'undefined' ? null : window.open('about:blank', '_blank');
     setAction('connect');
     setError(null);
     try {
       const flow = await githubAuthApi.startDeviceFlow();
       setDeviceFlow(flow);
+      setDeviceFlowStatus('pending');
+      void copyDeviceCode(flow.user_code);
+      openDeviceFlowUrl(flow, authWindow);
     } catch (err) {
+      authWindow?.close();
       setError(toSettingsError(err));
     } finally {
       setAction(null);
     }
   };
 
-  const pollDeviceFlow = async () => {
-    if (!deviceFlow) return;
-    setAction('poll');
+  const pollDeviceFlow = useCallback(async () => {
+    if (!deviceFlow || devicePollInFlightRef.current) return;
+    devicePollInFlightRef.current = true;
+    setPollingDeviceFlow(true);
     setError(null);
     try {
       const result = await githubAuthApi.pollDeviceFlow(deviceFlow.device_code);
+      setDeviceFlowStatus(result.status);
       if (result.account) {
         setAccount(result.account);
         setDeviceFlow(null);
-      } else if (result.error && typeof result.error === 'object') {
-        setError(result.error);
+        await load();
+      } else if (!shouldContinueDeviceFlowPolling(result.status)) {
+        setDeviceFlow(null);
+        setError(deviceFlowPollError(result.status, result.error));
       }
     } catch (err) {
       setError(toSettingsError(err));
     } finally {
-      setAction(null);
+      devicePollInFlightRef.current = false;
+      setPollingDeviceFlow(false);
     }
-  };
+  }, [deviceFlow, load]);
+
+  useEffect(() => {
+    if (!deviceFlow) return;
+    void pollDeviceFlow();
+    if (typeof window === 'undefined') return;
+    const timer = window.setInterval(() => {
+      void pollDeviceFlow();
+    }, DEVICE_FLOW_POLL_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [deviceFlow, pollDeviceFlow]);
 
   const disconnectAccount = async () => {
     setAction('disconnect-account');
@@ -111,19 +154,31 @@ export function ProjectGitHubSettings({ projectId }: ProjectGitHubSettingsProps)
 
   const addRepo = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!repoId.trim() || !canAddRepo) return;
+    if (!canAddRepo) return;
     setAction('add-repo');
     setError(null);
     try {
+      const ownerValue = selectedGitHubRepo?.owner ?? (owner.trim() || null);
+      const nameValue = selectedGitHubRepo?.name ?? (repoName.trim() || null);
+      const defaultBranchValue =
+        selectedGitHubRepo?.default_branch ?? (defaultBranch.trim() || 'main');
       const created = await projectGithubApi.createRepo(projectId, {
-        repo_id: repoId.trim(),
-        owner: owner.trim() || null,
-        name: repoName.trim() || null,
-        default_branch: defaultBranch.trim() || 'main',
+        repo_id: null,
+        provider: 'github',
+        owner: ownerValue,
+        name: nameValue,
+        full_name: selectedGitHubRepo?.full_name ?? null,
+        html_url: selectedGitHubRepo?.html_url ?? null,
+        clone_url: selectedGitHubRepo?.clone_url ?? null,
+        ssh_url: selectedGitHubRepo?.ssh_url ?? null,
+        remote_url: selectedGitHubRepo?.clone_url ?? null,
+        default_branch: defaultBranchValue,
+        external_id: selectedGitHubRepo?.node_id ?? null,
+        sync_status: 'connected',
         repo_grant_json: parseRepoGrant(repoGrantText),
       });
       setRepos((current) => [...current, created].slice(0, 3));
-      setRepoId('');
+      setGithubRepoFullName('');
       setOwner('');
       setRepoName('');
       setRepoGrantText('{"permissions":["metadata","contents","issues","pull_requests"]}');
@@ -132,6 +187,15 @@ export function ProjectGitHubSettings({ projectId }: ProjectGitHubSettingsProps)
     } finally {
       setAction(null);
     }
+  };
+
+  const selectGitHubRepo = (fullName: string) => {
+    setGithubRepoFullName(fullName);
+    const repo = githubRepos.find((item) => item.full_name === fullName);
+    if (!repo) return;
+    setOwner(repo.owner);
+    setRepoName(repo.name);
+    setDefaultBranch(repo.default_branch || 'main');
   };
 
   const refreshRepo = async (repo: ProjectRepoIntegration) => {
@@ -291,9 +355,12 @@ export function ProjectGitHubSettings({ projectId }: ProjectGitHubSettingsProps)
                 <p className="text-xs font-medium text-[var(--ink)]">
                   Enter code {deviceFlow.user_code} at GitHub
                 </p>
+                <p className="mt-1 text-[11px] text-[var(--ink-subtle)]">
+                  Waiting for authorization. Status checks run every second.
+                  {deviceFlowStatus ? ` Current status: ${deviceFlowStatus}.` : ''}
+                </p>
                 <p className="mt-1 font-mono text-[11px] text-[var(--ink-tertiary)]">
-                  {deviceFlow.verification_uri_complete ??
-                    deviceFlow.verification_uri}
+                  {getDeviceFlowOpenUrl(deviceFlow)}
                 </p>
               </div>
               <div className="flex gap-2">
@@ -307,13 +374,21 @@ export function ProjectGitHubSettings({ projectId }: ProjectGitHubSettingsProps)
                   <Copy className="h-3.5 w-3.5" />
                   Copy
                 </button>
+                <a
+                  href={getDeviceFlowOpenUrl(deviceFlow)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center rounded-md border border-[var(--hairline)] px-3 py-1.5 text-xs text-[var(--ink-subtle)]"
+                >
+                  Open GitHub
+                </a>
                 <button
                   type="button"
-                  onClick={pollDeviceFlow}
-                  disabled={action === 'poll'}
+                  onClick={() => void pollDeviceFlow()}
+                  disabled={pollingDeviceFlow}
                   className="rounded-md bg-[var(--primary)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
                 >
-                  Check status
+                  {pollingDeviceFlow ? 'Checking...' : 'Check now'}
                 </button>
               </div>
             </div>
@@ -363,14 +438,22 @@ export function ProjectGitHubSettings({ projectId }: ProjectGitHubSettingsProps)
 
         <form
           onSubmit={(event) => void addRepo(event)}
-          className="mt-4 grid gap-2 rounded-md border border-[var(--hairline)] bg-[var(--surface-2)] p-3 md:grid-cols-[1fr_1fr_1fr_120px_auto]"
+          className="mt-4 grid gap-2 rounded-md border border-[var(--hairline)] bg-[var(--surface-2)] p-3 md:grid-cols-[1.4fr_1fr_1fr_120px_auto]"
         >
-          <input
-            value={repoId}
-            onChange={(event) => setRepoId(event.target.value)}
-            placeholder="local repo id"
+          <select
+            value={githubRepoFullName}
+            onChange={(event) => selectGitHubRepo(event.target.value)}
             className="rounded-md border border-[var(--hairline)] bg-[var(--surface-1)] px-2 py-1.5 text-xs text-[var(--ink)] outline-none"
-          />
+          >
+            <option value="">
+              {account ? 'GitHub repository' : 'Connect GitHub first'}
+            </option>
+            {githubRepos.map((repo) => (
+              <option key={repo.node_id || String(repo.id)} value={repo.full_name}>
+                {repo.full_name}
+              </option>
+            ))}
+          </select>
           <input
             value={owner}
             onChange={(event) => setOwner(event.target.value)}
@@ -391,11 +474,20 @@ export function ProjectGitHubSettings({ projectId }: ProjectGitHubSettingsProps)
           />
           <button
             type="submit"
-            disabled={!canAddRepo || action === 'add-repo' || !repoId.trim()}
+            disabled={
+              !canAddRepo ||
+              action === 'add-repo' ||
+              (!githubRepoFullName && (!owner.trim() || !repoName.trim()))
+            }
             className="rounded-md bg-[var(--primary)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
           >
             Add repo
           </button>
+          {account && githubRepos.length === 0 && (
+            <p className="text-[11px] text-[var(--ink-tertiary)] md:col-span-5">
+              No GitHub repositories returned for this account.
+            </p>
+          )}
           <textarea
             value={repoGrantText}
             onChange={(event) => setRepoGrantText(event.target.value)}
@@ -530,6 +622,42 @@ export const parseRepoGrant = (value: string): JsonValue | null => {
 
 export const formatRepoGrant = (value: JsonValue | null): string =>
   value === null ? '' : JSON.stringify(value, null, 2);
+
+const copyDeviceCode = async (userCode: string): Promise<void> => {
+  try {
+    await navigator.clipboard?.writeText(userCode);
+  } catch {
+    // Browser clipboard permissions are best-effort; the code remains visible.
+  }
+};
+
+const openDeviceFlowUrl = (
+  flow: GitHubDeviceFlowStartResponse,
+  authWindow: Window | null,
+): void => {
+  const url = getDeviceFlowOpenUrl(flow);
+  if (authWindow && !authWindow.closed) {
+    authWindow.location.href = url;
+    return;
+  }
+  if (typeof window !== 'undefined') {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+};
+
+const deviceFlowPollError = (
+  status: string,
+  error: GitHubErrorData | string | null,
+): GitHubErrorData => {
+  if (error && typeof error === 'object') return error;
+  return {
+    code: `github_device_flow_${status}`,
+    message:
+      typeof error === 'string' && error
+        ? error
+        : `GitHub authorization ${status}. Start the connection again if needed.`,
+  };
+};
 
 const toSettingsError = (error: unknown): GitHubErrorData => {
   const githubError = extractGitHubError(error);

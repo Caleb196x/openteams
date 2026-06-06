@@ -1,6 +1,6 @@
 use axum::{Json, Router, extract::State, routing::post};
 use deployment::Deployment;
-use services::services::project_migration::{ProjectMigrationReport, ProjectMigrationService};
+use services::services::project::migration::{ProjectMigrationReport, ProjectMigrationService};
 use utils::response::ApiResponse;
 
 use crate::{DeploymentImpl, error::ApiError};

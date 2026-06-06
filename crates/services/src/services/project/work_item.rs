@@ -81,7 +81,7 @@ impl ProjectWorkItemService {
         let delivery_records =
             ProjectDeliveryRecord::find_by_project(pool, project_id, Some(work_item_id), None)
                 .await?;
-        let github_audits = super::github_audit::GitHubAuditService::new()
+        let github_audits = crate::services::github::audit::GitHubAuditService::new()
             .list_by_project(pool, project_id, None, Some(work_item_id))
             .await?;
         Ok(ProjectWorkItemDetail {

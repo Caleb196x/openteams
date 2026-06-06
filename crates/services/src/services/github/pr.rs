@@ -24,11 +24,11 @@ use ts_rs::TS;
 use uuid::Uuid;
 
 use super::{
-    github_audit::GitHubAuditService,
-    github_operation_approval::GitHubOperationApprovalService,
-    github_rest_client::{CreateGitHubPullRequest, GitHubPullRequestSummary, GitHubRestClient},
-    repo_integration::RepoIntegrationService,
+    audit::GitHubAuditService,
+    operation_approval::GitHubOperationApprovalService,
+    rest_client::{CreateGitHubPullRequest, GitHubPullRequestSummary, GitHubRestClient},
 };
+use crate::services::repo_integration::RepoIntegrationService;
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct GitHubPrPreviewCommit {
@@ -938,7 +938,7 @@ mod tests {
         GitHubPrService, GitHubRetryPrRequest, PendingPrRetryAction,
         remote_head_matches_local_output, retry_action,
     };
-    use crate::services::github_rest_client::GitHubRestClient;
+    use crate::services::github::rest_client::GitHubRestClient;
 
     #[test]
     fn retry_pending_pr_push_failure_repushes_before_create() {

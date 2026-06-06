@@ -101,6 +101,7 @@ const primaryActionIcons: Record<SidebarPrimaryAction["icon"], LucideIcon> = {
 const navigationIcons: Record<string, LucideIcon> = {
   bot: Bot,
   "book-open": BookOpen,
+  "file-text": FileText,
   github: Github,
   settings: Settings2,
   users: Users,

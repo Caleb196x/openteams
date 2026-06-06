@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use services::services::{
     analytics_events::{AnalyticsProjector, DomainEvent},
     chat::create_session_with_project_members,
-    workflow_analytics::{self, hash_user_id},
+    workflow::workflow_analytics::{self, hash_user_id},
 };
 use sqlx::FromRow;
 use ts_rs::TS;

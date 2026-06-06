@@ -106,6 +106,8 @@ export enum RepoIntegrationSyncStatus { connected = "connected", disconnected = 
 
 export enum RepoIntegrationRole { primary = "primary", auxiliary = "auxiliary" }
 
+export type CreateProjectGitHubRepoIntegration = { repo_id?: string, owner?: string, name?: string, full_name?: string, html_url?: string, clone_url?: string, ssh_url?: string, default_branch?: string, external_id?: string, installation_id?: string, github_account_id?: string, repo_grant_json?: JsonValue | null, role?: RepoIntegrationRole, };
+
 export type GitHubPendingOperation = { id: string, project_id: string, repo_integration_id: string, audit_id: string, operation_kind: GitHubPendingOperationKind, target_type: GitHubTargetType, target_id: string | null, payload_json: string, status: GitHubPendingOperationStatus, last_error: string | null, created_at: Date, updated_at: Date, };
 
 export type CreateGitHubPendingOperation = { project_id: string, repo_integration_id: string, audit_id: string, operation_kind: GitHubPendingOperationKind, target_type: GitHubTargetType, target_id: string | null, payload_json: string, };
@@ -135,6 +137,8 @@ export type GitHubIssueDetail = { summary: GitHubIssueSummary, body: string | nu
 export type GitHubIssueComment = { id: bigint, body: string, author: string | null, created_at: Date, };
 
 export type GitHubPullRequestSummary = { number: bigint, title: string, state: string, url: string, head_branch: string, base_branch: string, };
+
+export type GitHubRepositorySummary = { id: bigint, node_id: string, full_name: string, owner: string, name: string, private: boolean, default_branch: string, html_url: string, clone_url: string, ssh_url: string, updated_at: Date, };
 
 export type CreateGitHubPullRequest = { title: string, body: string | null, head: string, base: string, draft: boolean, };
 

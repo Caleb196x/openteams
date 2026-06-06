@@ -8,8 +8,8 @@ use executors::{
 };
 use server::{DeploymentImpl, npx_browser_lifecycle, routes};
 use services::services::{
-    container::ContainerService, model_pricing_sync::ModelPricingSyncService,
-    project_migration::ProjectMigrationService,
+    build_stats::model_pricing_sync::ModelPricingSyncService, container::ContainerService,
+    project::migration::ProjectMigrationService,
 };
 use sqlx::Error as SqlxError;
 use strip_ansi_escapes::strip;

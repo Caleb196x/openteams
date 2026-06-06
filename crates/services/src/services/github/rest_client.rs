@@ -1,9 +1,15 @@
 use chrono::{DateTime, Utc};
-use reqwest::{Method, StatusCode};
+use reqwest::{
+    Method, StatusCode,
+    header::{HeaderMap, LINK},
+};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
 use ts_rs::TS;
+
+const GITHUB_PAGE_SIZE: usize = 100;
+const MAX_PAGINATED_PAGES: usize = 100;
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct GitHubApiErrorData {
@@ -74,6 +80,22 @@ pub struct GitHubPullRequestSummary {
     pub base_branch: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct GitHubRepositorySummary {
+    pub id: i64,
+    pub node_id: String,
+    pub full_name: String,
+    pub owner: String,
+    pub name: String,
+    pub private: bool,
+    pub default_branch: String,
+    pub html_url: String,
+    pub clone_url: String,
+    pub ssh_url: String,
+    #[ts(type = "Date")]
+    pub updated_at: DateTime<Utc>,
+}
+
 #[derive(Clone)]
 pub struct GitHubRestClient {
     client: reqwest::Client,
@@ -119,6 +141,14 @@ impl GitHubRestClient {
         .await
     }
 
+    pub async fn list_authenticated_repositories(
+        &self,
+    ) -> Result<Vec<GitHubRepositorySummary>, GitHubRestError> {
+        let raw: Vec<GitHubRepositoryRaw> =
+            self.request_paginated(authenticated_repos_path()).await?;
+        Ok(raw.into_iter().map(Into::into).collect())
+    }
+
     pub async fn list_issues(
         &self,
         owner: &str,
@@ -127,19 +157,14 @@ impl GitHubRestClient {
     ) -> Result<Vec<GitHubIssueSummary>, GitHubRestError> {
         let path = issue_list_path(owner, repo, query);
         if query.map(str::trim).is_some_and(|query| !query.is_empty()) {
-            let raw: GitHubIssueSearchResponse = self
-                .request(Method::GET, &path, Option::<&()>::None)
-                .await?;
+            let raw = self.request_paginated_issue_search(&path).await?;
             return Ok(raw
-                .items
                 .into_iter()
                 .filter(github_issue_raw_is_issue)
                 .map(Into::into)
                 .collect());
         }
-        let raw: Vec<GitHubIssueRaw> = self
-            .request(Method::GET, &path, Option::<&()>::None)
-            .await?;
+        let raw: Vec<GitHubIssueRaw> = self.request_paginated(&path).await?;
         Ok(raw
             .into_iter()
             .filter(github_issue_raw_is_issue)
@@ -161,11 +186,7 @@ impl GitHubRestClient {
             )
             .await?;
         let comments: Vec<GitHubIssueCommentRaw> = self
-            .request(
-                Method::GET,
-                &format!("/repos/{owner}/{repo}/issues/{number}/comments"),
-                Option::<&()>::None,
-            )
+            .request_paginated(&issue_comments_path(owner, repo, number))
             .await?;
         Ok(GitHubIssueDetail {
             body: raw.body.clone(),
@@ -279,11 +300,7 @@ impl GitHubRestClient {
         number: i64,
     ) -> Result<Vec<GitHubPrIssueComment>, GitHubRestError> {
         let rows: Vec<GitHubPrIssueCommentRaw> = self
-            .request(
-                Method::GET,
-                &format!("/repos/{owner}/{repo}/issues/{number}/comments"),
-                None::<&()>,
-            )
+            .request_paginated(&issue_comments_path(owner, repo, number))
             .await?;
         Ok(rows.into_iter().map(Into::into).collect())
     }
@@ -295,11 +312,7 @@ impl GitHubRestClient {
         number: i64,
     ) -> Result<Vec<GitHubPrReviewComment>, GitHubRestError> {
         let rows: Vec<GitHubPrReviewCommentRaw> = self
-            .request(
-                Method::GET,
-                &format!("/repos/{owner}/{repo}/pulls/{number}/comments"),
-                None::<&()>,
-            )
+            .request_paginated(&pr_review_comments_path(owner, repo, number))
             .await?;
         Ok(rows.into_iter().map(Into::into).collect())
     }
@@ -311,13 +324,66 @@ impl GitHubRestClient {
         state: &str,
         head: Option<&str>,
     ) -> Result<Vec<GitHubPullRequestSummary>, GitHubRestError> {
-        let mut path = format!("/repos/{owner}/{repo}/pulls?state={state}");
-        if let Some(head) = head {
-            path.push_str("&head=");
-            path.push_str(head);
-        }
-        let rows: Vec<GitHubPullRequestRaw> = self.request(Method::GET, &path, None::<&()>).await?;
+        let path = pull_requests_path(owner, repo, state, head);
+        let rows: Vec<GitHubPullRequestRaw> = self.request_paginated(&path).await?;
         Ok(rows.into_iter().map(Into::into).collect())
+    }
+
+    async fn request_paginated<T>(&self, first_path: &str) -> Result<Vec<T>, GitHubRestError>
+    where
+        T: DeserializeOwned,
+    {
+        let mut rows = Vec::new();
+        let mut path = Some(first_path.to_string());
+        let mut pages = 0;
+
+        while let Some(current_path) = path {
+            let (mut page, next_path) = self.request_page::<Vec<T>>(&current_path).await?;
+            rows.append(&mut page);
+            pages += 1;
+            if pages >= MAX_PAGINATED_PAGES {
+                break;
+            }
+            path = next_path;
+        }
+
+        Ok(rows)
+    }
+
+    async fn request_paginated_issue_search(
+        &self,
+        first_path: &str,
+    ) -> Result<Vec<GitHubIssueRaw>, GitHubRestError> {
+        let mut rows = Vec::new();
+        let mut path = Some(first_path.to_string());
+        let mut pages = 0;
+
+        while let Some(current_path) = path {
+            let (page, next_path) = self
+                .request_page::<GitHubIssueSearchResponse>(&current_path)
+                .await?;
+            rows.extend(page.items);
+            pages += 1;
+            if pages >= MAX_PAGINATED_PAGES {
+                break;
+            }
+            path = next_path;
+        }
+
+        Ok(rows)
+    }
+
+    async fn request_page<T>(&self, path: &str) -> Result<(T, Option<String>), GitHubRestError>
+    where
+        T: DeserializeOwned,
+    {
+        let response = self.build_request(Method::GET, path).send().await?;
+        let status = response.status();
+        let next_path = next_link_path(response.headers());
+        if status.is_success() {
+            return Ok((response.json::<T>().await?, next_path));
+        }
+        Err(GitHubRestError::Api(map_error(status, response).await))
     }
 
     async fn request<T, B>(
@@ -449,6 +515,21 @@ struct GitHubPullRequestRaw {
 }
 
 #[derive(Debug, Deserialize)]
+struct GitHubRepositoryRaw {
+    id: i64,
+    node_id: String,
+    name: String,
+    full_name: String,
+    private: bool,
+    default_branch: String,
+    html_url: String,
+    clone_url: String,
+    ssh_url: String,
+    updated_at: DateTime<Utc>,
+    owner: GitHubUserRaw,
+}
+
+#[derive(Debug, Deserialize)]
 struct GitHubPullRequestRefRaw {
     #[serde(rename = "ref")]
     ref_name: String,
@@ -541,6 +622,24 @@ impl From<GitHubPullRequestRaw> for GitHubPullRequestSummary {
     }
 }
 
+impl From<GitHubRepositoryRaw> for GitHubRepositorySummary {
+    fn from(value: GitHubRepositoryRaw) -> Self {
+        Self {
+            id: value.id,
+            node_id: value.node_id,
+            full_name: value.full_name,
+            owner: value.owner.login,
+            name: value.name,
+            private: value.private,
+            default_branch: value.default_branch,
+            html_url: value.html_url,
+            clone_url: value.clone_url,
+            ssh_url: value.ssh_url,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
 async fn map_error(status: StatusCode, response: reqwest::Response) -> GitHubApiErrorData {
     let retry_after = response
         .headers()
@@ -566,24 +665,74 @@ async fn map_error(status: StatusCode, response: reqwest::Response) -> GitHubApi
     }
 }
 
+pub(crate) fn authenticated_repos_path() -> &'static str {
+    "/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator,organization_member"
+}
+
 pub(crate) fn issue_list_path(owner: &str, repo: &str, query: Option<&str>) -> String {
     let Some(query) = query.map(str::trim).filter(|query| !query.is_empty()) else {
-        return format!("/repos/{owner}/{repo}/issues?state=all");
+        return format!("/repos/{owner}/{repo}/issues?state=all&per_page={GITHUB_PAGE_SIZE}");
     };
     let search_query = format!("repo:{owner}/{repo} is:issue {query}");
     let encoded = url::form_urlencoded::byte_serialize(search_query.as_bytes()).collect::<String>();
-    format!("/search/issues?q={encoded}")
+    format!("/search/issues?q={encoded}&per_page={GITHUB_PAGE_SIZE}")
+}
+
+fn issue_comments_path(owner: &str, repo: &str, number: i64) -> String {
+    format!("/repos/{owner}/{repo}/issues/{number}/comments?per_page={GITHUB_PAGE_SIZE}")
+}
+
+fn pr_review_comments_path(owner: &str, repo: &str, number: i64) -> String {
+    format!("/repos/{owner}/{repo}/pulls/{number}/comments?per_page={GITHUB_PAGE_SIZE}")
+}
+
+fn pull_requests_path(owner: &str, repo: &str, state: &str, head: Option<&str>) -> String {
+    let mut path = format!("/repos/{owner}/{repo}/pulls?state={state}&per_page={GITHUB_PAGE_SIZE}");
+    if let Some(head) = head {
+        let encoded = url::form_urlencoded::byte_serialize(head.as_bytes()).collect::<String>();
+        path.push_str("&head=");
+        path.push_str(&encoded);
+    }
+    path
+}
+
+fn next_link_path(headers: &HeaderMap) -> Option<String> {
+    let link = headers.get(LINK)?.to_str().ok()?;
+    link.split(',').find_map(|part| {
+        if !part.contains("rel=\"next\"") {
+            return None;
+        }
+        let start = part.find('<')? + 1;
+        let end = part[start..].find('>')? + start;
+        url_to_path(&part[start..end])
+    })
+}
+
+fn url_to_path(value: &str) -> Option<String> {
+    if value.starts_with('/') {
+        return Some(value.to_string());
+    }
+    let url = url::Url::parse(value).ok()?;
+    let mut path = url.path().to_string();
+    if let Some(query) = url.query() {
+        path.push('?');
+        path.push_str(query);
+    }
+    Some(path)
 }
 
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
-    use reqwest::Method;
+    use reqwest::{
+        Method,
+        header::{HeaderMap, HeaderValue, LINK},
+    };
     use serde_json::json;
 
     use super::{
-        GitHubIssueRaw, GitHubLabelRaw, GitHubRestClient, GitHubUserRaw, github_issue_raw_is_issue,
-        issue_list_path,
+        GitHubIssueRaw, GitHubLabelRaw, GitHubRestClient, GitHubUserRaw, authenticated_repos_path,
+        github_issue_raw_is_issue, issue_list_path, next_link_path, pull_requests_path,
     };
 
     #[test]
@@ -609,7 +758,15 @@ mod tests {
 
         assert_eq!(
             path,
-            "/search/issues?q=repo%3Aopenai%2Fcodex+is%3Aissue+label%3Abug+panic"
+            "/search/issues?q=repo%3Aopenai%2Fcodex+is%3Aissue+label%3Abug+panic&per_page=100"
+        );
+    }
+
+    #[test]
+    fn authenticated_repo_list_uses_user_repos_api_with_affiliations() {
+        assert_eq!(
+            authenticated_repos_path(),
+            "/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator,organization_member"
         );
     }
 
@@ -617,7 +774,31 @@ mod tests {
     fn issue_list_without_search_uses_repo_issue_api() {
         assert_eq!(
             issue_list_path("openai", "codex", Some("   ")),
-            "/repos/openai/codex/issues?state=all"
+            "/repos/openai/codex/issues?state=all&per_page=100"
+        );
+    }
+
+    #[test]
+    fn pull_request_list_path_uses_page_size_and_encodes_head_filter() {
+        assert_eq!(
+            pull_requests_path("openai", "codex", "all", Some("openai:feature/github")),
+            "/repos/openai/codex/pulls?state=all&per_page=100&head=openai%3Afeature%2Fgithub"
+        );
+    }
+
+    #[test]
+    fn next_link_path_extracts_github_next_page_url() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            LINK,
+            HeaderValue::from_static(
+                r#"<https://api.github.com/user/repos?page=2&per_page=100>; rel="next", <https://api.github.com/user/repos?page=4&per_page=100>; rel="last""#,
+            ),
+        );
+
+        assert_eq!(
+            next_link_path(&headers).as_deref(),
+            Some("/user/repos?page=2&per_page=100")
         );
     }
 

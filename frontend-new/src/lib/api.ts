@@ -47,6 +47,7 @@ import type {
   GitHubIssueSummary,
   GitHubOperationAudit,
   GitHubPrPreview,
+  GitHubRepositorySummary,
   InstalledNativeSkill,
   InterruptStepResponse,
   JsonValue,
@@ -1074,6 +1075,10 @@ export const githubAuthApi = {
     });
     return handleApiResponse<GitHubAccount | null, GitHubErrorData>(r);
   },
+  listRepos: async (): Promise<GitHubRepositorySummary[]> => {
+    const r = await makeRequest("/api/github/repos", { cache: "no-store" });
+    return handleApiResponse<GitHubRepositorySummary[], GitHubErrorData>(r);
+  },
   disconnect: async (): Promise<void> => {
     const r = await makeRequest("/api/github/auth/disconnect", {
       method: "POST",
@@ -1093,10 +1098,18 @@ export const projectGithubApi = {
   createRepo: async (
     projectId: string,
     data: {
-      repo_id: string;
+      repo_id?: string | null;
+      provider?: string;
       owner?: string | null;
       name?: string | null;
+      full_name?: string | null;
+      html_url?: string | null;
+      clone_url?: string | null;
+      ssh_url?: string | null;
+      remote_url?: string | null;
       default_branch?: string | null;
+      external_id?: string | null;
+      sync_status?: "connected" | "disconnected" | "error";
       repo_grant_json?: JsonValue | null;
     },
   ): Promise<ProjectRepoIntegration> => {

@@ -12,6 +12,7 @@ import { CreateAgentSessionModal } from "@/components/CreateAgentSessionModal";
 import { DialogManager } from "@/components/DialogManager";
 import { ProjectSidebar } from "@/components/ProjectSidebar";
 import { GitHubRepositoryPage } from "@/pages/GitHubRepositoryPage";
+import { IssuePage } from "@/pages/IssuePage";
 import { RoutingPage } from "@/pages/RoutingPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { TasksPage } from "@/pages/TasksPage";
@@ -23,6 +24,7 @@ import {
   Activity,
   BookOpen,
   Bot,
+  FileText,
   Github,
   Menu,
   Network,
@@ -66,6 +68,7 @@ const pageTabConfig: Record<
   { label: string; icon: LucideIcon }
 > = {
   workspace: { label: "Workspace", icon: Network },
+  issue: { label: "Issues", icon: FileText },
   team: { label: "Members", icon: Users },
   "team-templates": { label: "Team templates", icon: Users },
   tasks: { label: "Action center", icon: SquareCheckBig },
@@ -353,6 +356,8 @@ function WorkspaceLayout() {
     switch (activeAppPage) {
       case "team":
         return <TeamPage />;
+      case "issue":
+        return <IssuePage />;
       case "team-templates":
         return <TeamTemplatesPage />;
       case "tasks":

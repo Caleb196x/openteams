@@ -7,7 +7,7 @@ use axum::{
 use chrono::{NaiveDate, Utc};
 use deployment::Deployment;
 use serde::{Deserialize, Serialize};
-use services::services::token_cost_stats::TokenCostStatsService;
+use services::services::build_stats::token_cost_stats::TokenCostStatsService;
 use ts_rs::TS;
 use utils::response::ApiResponse;
 use uuid::Uuid;

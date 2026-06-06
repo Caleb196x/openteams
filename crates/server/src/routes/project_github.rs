@@ -24,27 +24,31 @@ use db::models::{
     project_work_item_external_link::{
         CreateProjectWorkItemExternalLink, ProjectWorkItemExternalLink,
     },
-    repo_integration::{CreateRepoIntegration, RepoIntegration, UpdateRepoIntegration},
+    repo_integration::{RepoIntegration, UpdateRepoIntegration},
 };
 use deployment::Deployment;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use services::services::{
-    github_audit::GitHubAuditService,
-    github_auth::{DeviceFlowGitHubAuthProvider, GitHubAuthProvider},
-    github_issue::GitHubIssueService,
-    github_operation_approval::GitHubOperationApprovalService,
-    github_pr::{
-        GitHubCreatePrRequest, GitHubCreatePrResponse, GitHubPrPreview, GitHubPrPreviewRequest,
-        GitHubPrService, GitHubRetryPrRequest,
+    github::{
+        audit::GitHubAuditService,
+        auth::{DeviceFlowGitHubAuthProvider, GitHubAuthProvider},
+        issue::GitHubIssueService,
+        operation_approval::GitHubOperationApprovalService,
+        pr::{
+            GitHubCreatePrRequest, GitHubCreatePrResponse, GitHubPrPreview, GitHubPrPreviewRequest,
+            GitHubPrService, GitHubRetryPrRequest,
+        },
+        rest_client::{
+            GitHubApiErrorData, GitHubIssueDetail, GitHubIssueSummary, GitHubRestClient,
+            GitHubRestError,
+        },
     },
-    github_rest_client::{
-        GitHubApiErrorData, GitHubIssueDetail, GitHubIssueSummary, GitHubRestClient,
-        GitHubRestError,
+    project::{
+        delivery::ProjectDeliveryService,
+        work_item::{ProjectWorkItemDetail, ProjectWorkItemService},
     },
-    project_delivery::ProjectDeliveryService,
-    project_work_item::{ProjectWorkItemDetail, ProjectWorkItemService},
-    repo_integration::RepoIntegrationService,
+    repo_integration::{CreateProjectGitHubRepoIntegration, RepoIntegrationService},
 };
 use ts_rs::TS;
 use utils::response::ApiResponse;
@@ -270,11 +274,11 @@ async fn list_repos(
 async fn create_repo(
     State(deployment): State<DeploymentImpl>,
     Path(project_id): Path<Uuid>,
-    Json(payload): Json<CreateRepoIntegration>,
+    Json(payload): Json<CreateProjectGitHubRepoIntegration>,
 ) -> Result<ResponseJson<ApiResponse<RepoIntegration>>, ApiError> {
     ensure_project(&deployment, project_id).await?;
     let row = RepoIntegrationService::new()
-        .create_project_repo_integration(&deployment.db().pool, project_id, payload)
+        .create_project_github_repo_integration(&deployment.db().pool, project_id, payload)
         .await
         .map_err(|err| ApiError::BadRequest(err.to_string()))?;
     Ok(ResponseJson(ApiResponse::success(row)))
@@ -687,7 +691,7 @@ where
     T: serde::Serialize,
     F: FnOnce(GitHubRestClient, String, String) -> Fut,
     Fut: std::future::Future<
-            Output = Result<T, services::services::github_rest_client::GitHubRestError>,
+            Output = Result<T, services::services::github::rest_client::GitHubRestError>,
         >,
 {
     ensure_project(&deployment, project_id).await?;

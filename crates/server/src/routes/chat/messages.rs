@@ -23,10 +23,12 @@ use deployment::Deployment;
 use serde::Deserialize;
 use services::services::{
     chat::{ChatAttachmentMeta, emit_user_message_workflow_analytics},
-    workflow_analytics,
-    workflow_runtime::{
-        WorkflowCardProjection, WorkflowCardState, WorkflowCardStep,
-        build_workflow_card_projection, build_workflow_card_projection_lightweight,
+    workflow::{
+        workflow_analytics,
+        workflow_runtime::{
+            WorkflowCardProjection, WorkflowCardState, WorkflowCardStep,
+            build_workflow_card_projection, build_workflow_card_projection_lightweight,
+        },
     },
 };
 use tokio::{fs, fs::File};
@@ -610,12 +612,14 @@ async fn build_plan_workflow_card_projection(
             let agent = agents
                 .iter()
                 .find(|item| item.id == session_agent.agent_id)?;
-            Some(services::services::workflow_runtime::WorkflowCardAgent {
-                session_agent_id: session_agent.id.to_string(),
-                workflow_agent_session_id: None,
-                agent_id: agent.id.to_string(),
-                name: agent.name.clone(),
-            })
+            Some(
+                services::services::workflow::workflow_runtime::WorkflowCardAgent {
+                    session_agent_id: session_agent.id.to_string(),
+                    workflow_agent_session_id: None,
+                    agent_id: agent.id.to_string(),
+                    name: agent.name.clone(),
+                },
+            )
         })
         .collect::<Vec<_>>();
     let agent_name_by_id: std::collections::HashMap<String, String> = agent_views

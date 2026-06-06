@@ -28,15 +28,18 @@ use db::models::{
 use deployment::Deployment;
 use serde::{Deserialize, Serialize};
 use services::services::{
-    chat, config, workflow_analytics,
-    workflow_compiler::WorkflowCompiler,
-    workflow_orchestrator::WorkflowOrchestrator,
-    workflow_runtime::{
-        WorkflowCardAgent, WorkflowCardProjection, build_plan_generation_prompt,
-        extract_json_payload, resolve_lead_agent, resolve_workflow_goal,
-        resolve_workflow_response_language_instruction, run_workflow_agent_prompt,
+    chat, config,
+    workflow::{
+        workflow_analytics,
+        workflow_compiler::WorkflowCompiler,
+        workflow_orchestrator::WorkflowOrchestrator,
+        workflow_runtime::{
+            WorkflowCardAgent, WorkflowCardProjection, build_plan_generation_prompt,
+            extract_json_payload, resolve_lead_agent, resolve_workflow_goal,
+            resolve_workflow_response_language_instruction, run_workflow_agent_prompt,
+        },
+        workflow_validator,
     },
-    workflow_validator,
 };
 use ts_rs::TS;
 use utils::{assets::config_path, response::ApiResponse};
