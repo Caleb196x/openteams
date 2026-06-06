@@ -44,13 +44,113 @@ export type ProjectDeliveryEvent = { id: string, project_id: string, session_id:
 
 export enum ProjectDeliveryEventType { feature = "feature", bugfix = "bugfix", test = "test" }
 
+export type ProjectWorkItem = { id: string, project_id: string, type: ProjectWorkItemType, status: ProjectWorkItemStatus, title: string, description: string | null, priority: ProjectWorkItemPriority, source: ProjectWorkItemSource, created_by: string | null, created_at: Date, updated_at: Date, };
+
+export type CreateProjectWorkItem = { type: ProjectWorkItemType, title: string, description: string | null, priority: ProjectWorkItemPriority, source: ProjectWorkItemSource, created_by: string | null, };
+
+export type UpdateProjectWorkItem = { type: ProjectWorkItemType | null, status: ProjectWorkItemStatus | null, title: string | null, description: string | null, priority: ProjectWorkItemPriority | null, };
+
+export enum ProjectWorkItemType { feature = "feature", bug = "bug", task = "task", deploy = "deploy", test = "test", doc = "doc", refactor = "refactor" }
+
+export enum ProjectWorkItemStatus { open = "open", in_progress = "in_progress", blocked = "blocked", done = "done", cancelled = "cancelled" }
+
+export enum ProjectWorkItemPriority { low = "low", medium = "medium", high = "high", urgent = "urgent" }
+
+export enum ProjectWorkItemSource { manual = "manual", github_issue = "github_issue", workflow = "workflow", session = "session" }
+
+export type ProjectWorkItemExternalLink = { id: string, project_work_item_id: string, provider: string, repo_id: string | null, external_type: ProjectExternalType, external_id: string, number: bigint | null, url: string | null, state: string | null, metadata_json: string | null, last_synced_at: Date | null, stale: boolean, created_at: Date, updated_at: Date, };
+
+export type CreateProjectWorkItemExternalLink = { provider: string, repo_id: string | null, external_type: ProjectExternalType, external_id: string, number: bigint | null, url: string | null, state: string | null, metadata_json: string | null, last_synced_at: Date | null, stale: boolean, };
+
+export enum ProjectExternalType { github_issue = "github_issue", github_pr = "github_pr", github_commit = "github_commit", github_deployment = "github_deployment", github_release = "github_release" }
+
+export type ProjectWorkItemExecutionLink = { id: string, project_work_item_id: string, session_id: string | null, workflow_execution_id: string | null, workflow_step_id: string | null, run_id: string | null, link_type: ProjectExecutionLinkType, created_at: Date, };
+
+export type CreateProjectWorkItemExecutionLink = { session_id: string | null, workflow_execution_id: string | null, workflow_step_id: string | null, run_id: string | null, link_type: ProjectExecutionLinkType, };
+
+export enum ProjectExecutionLinkType { created_from = "created_from", discussed_in = "discussed_in", implemented_by = "implemented_by", reviewed_by = "reviewed_by", delivered_by = "delivered_by" }
+
+export type ProjectDeliveryRecord = { id: string, project_work_item_id: string | null, repo_id: string | null, external_link_id: string | null, event_type: ProjectDeliveryEventTypeV2, external_id: string | null, url: string | null, actor: string | null, source_session_id: string | null, source_workflow_execution_id: string | null, metadata_json: string | null, occurred_at: Date, created_at: Date, };
+
+export type CreateProjectDeliveryRecord = { project_work_item_id: string | null, repo_id: string | null, external_link_id: string | null, event_type: ProjectDeliveryEventTypeV2, external_id: string | null, url: string | null, actor: string | null, source_session_id: string | null, source_workflow_execution_id: string | null, metadata_json: string | null, occurred_at: Date | null, };
+
+export enum ProjectDeliveryEventTypeV2 { pr_opened = "pr_opened", pr_merged = "pr_merged", deployment = "deployment", release = "release", test_passed = "test_passed", test_failed = "test_failed" }
+
+export type ProjectDeliveryStatsSummary = { period_start: string, period_end: string, pr_opened_count: bigint, pr_merged_count: bigint, deployment_count: bigint, release_count: bigint, test_passed_count: bigint, test_failed_count: bigint, };
+
+export type GitHubOperationAudit = { id: string, actor: string | null, operation_source: GitHubOperationSource, session_id: string | null, workflow_execution_id: string | null, repo_id: string | null, target_type: GitHubTargetType, target_id: string | null, action: string, result: GitHubOperationResult, error: string | null, created_at: Date, };
+
+export type CreateGitHubOperationAudit = { actor: string | null, operation_source: GitHubOperationSource, session_id: string | null, workflow_execution_id: string | null, repo_id: string | null, target_type: GitHubTargetType, target_id: string | null, action: string, result: GitHubOperationResult, error: string | null, };
+
+export enum GitHubOperationSource { user_ui = "user_ui", agent = "agent" }
+
+export enum GitHubOperationResult { pending_approval = "pending_approval", approved = "approved", denied = "denied", success = "success", failed = "failed" }
+
+export enum GitHubTargetType { issue = "issue", pull_request = "pull_request", repo = "repo" }
+
+export type GitHubPendingPrCreation = { id: string, project_id: string, repo_integration_id: string, work_item_id: string | null, audit_id: string | null, base_branch: string, head_branch: string, title: string, body: string | null, status: GitHubPendingPrStatus, pull_request_number: bigint | null, pull_request_url: string | null, last_error: string | null, created_at: Date, updated_at: Date, };
+
+export type CreateGitHubPendingPrCreation = { project_id: string, repo_integration_id: string, work_item_id: string | null, audit_id: string | null, base_branch: string, head_branch: string, title: string, body: string | null, status: GitHubPendingPrStatus, pull_request_number: bigint | null, pull_request_url: string | null, last_error: string | null, };
+
+export enum GitHubPendingPrStatus { push_failed = "push_failed", pushed = "pushed", create_failed = "create_failed", local_link_failed = "local_link_failed", completed = "completed" }
+
 export type Repo = { id: string, path: string, name: string, display_name: string, setup_script: string | null, cleanup_script: string | null, archive_script: string | null, copy_files: string | null, parallel_setup_script: boolean, dev_server_script: string | null, default_target_branch: string | null, default_working_dir: string | null, created_at: Date, updated_at: Date, };
 
-export type RepoIntegration = { id: string, repo_id: string, provider: string, owner: string | null, name: string | null, remote_url: string | null, default_branch: string | null, external_id: string | null, installation_id: string | null, sync_status: string | null, last_synced_at: Date | null, created_at: Date, updated_at: Date, };
+export type RepoIntegration = { id: string, repo_id: string, provider: string, owner: string | null, name: string | null, remote_url: string | null, default_branch: string | null, external_id: string | null, installation_id: string | null, github_account_id: string | null, repo_grant_json: string | null, role: RepoIntegrationRole, sync_status: RepoIntegrationSyncStatus, last_synced_at: Date | null, last_error: string | null, created_at: Date, updated_at: Date, };
 
-export type UpdateRepoIntegration = { provider: string | null, owner: string | null, name: string | null, remote_url: string | null, default_branch: string | null, external_id: string | null, installation_id: string | null, sync_status: string | null, last_synced_at: Date | null, };
+export type UpdateRepoIntegration = { provider: string | null, owner: string | null, name: string | null, remote_url: string | null, default_branch: string | null, external_id: string | null, installation_id: string | null, github_account_id: string | null, repo_grant_json: string | null, role: RepoIntegrationRole | null, sync_status: RepoIntegrationSyncStatus | null, last_synced_at: Date | null, last_error: string | null, };
+
+export type CreateRepoIntegration = { repo_id: string, provider: string, owner: string | null, name: string | null, remote_url: string | null, default_branch: string | null, external_id: string | null, installation_id: string | null, github_account_id: string | null, repo_grant_json: string | null, role: RepoIntegrationRole | null, sync_status: RepoIntegrationSyncStatus, };
+
+export enum RepoIntegrationSyncStatus { connected = "connected", disconnected = "disconnected", error = "error" }
+
+export enum RepoIntegrationRole { primary = "primary", auxiliary = "auxiliary" }
+
+export type GitHubPendingOperation = { id: string, project_id: string, repo_integration_id: string, audit_id: string, operation_kind: GitHubPendingOperationKind, target_type: GitHubTargetType, target_id: string | null, payload_json: string, status: GitHubPendingOperationStatus, last_error: string | null, created_at: Date, updated_at: Date, };
+
+export type CreateGitHubPendingOperation = { project_id: string, repo_integration_id: string, audit_id: string, operation_kind: GitHubPendingOperationKind, target_type: GitHubTargetType, target_id: string | null, payload_json: string, };
+
+export enum GitHubPendingOperationKind { issue_comment = "issue_comment", issue_state = "issue_state", issue_labels = "issue_labels", issue_assignees = "issue_assignees" }
+
+export enum GitHubPendingOperationStatus { pending_approval = "pending_approval", completed = "completed", failed = "failed", denied = "denied" }
 
 export type ProjectDetail = { project: Project, paths: Array<ProjectPath>, members: Array<ProjectMember>, sessions: Array<ChatSession>, repos: Array<Repo>, stats: Array<ProjectStats>, };
+
+export type ProjectWorkItemDetail = { work_item: ProjectWorkItem, external_links: Array<ProjectWorkItemExternalLink>, execution_links: Array<ProjectWorkItemExecutionLink>, delivery_records: Array<ProjectDeliveryRecord>, github_audits: Array<GitHubOperationAudit>, };
+
+export type GitHubAccount = { login: string, id: bigint, avatar_url: string | null, html_url: string | null, scopes: Array<string>, connected_at: Date, };
+
+export type GitHubDeviceFlowStartResponse = { device_code: string, user_code: string, verification_uri: string, verification_uri_complete: string | null, expires_in: bigint, interval: bigint, };
+
+export type GitHubDeviceFlowPollResponse = { status: GitHubDeviceFlowPollStatus, account: GitHubAccount | null, error: string | null, };
+
+export type GitHubDeviceFlowPollStatus = "pending" | "slow_down" | "authorized" | "denied" | "expired" | "error";
+
+export type GitHubApiErrorData = { code: string, message: string, retry_after: Date | null, last_synced_at: Date | null, stale: boolean, };
+
+export type GitHubIssueSummary = { number: bigint, node_id: string, title: string, state: string, url: string, author: string | null, labels: Array<string>, assignees: Array<string>, updated_at: Date, last_synced_at: Date | null, stale: boolean, work_item_id: string | null, };
+
+export type GitHubIssueDetail = { summary: GitHubIssueSummary, body: string | null, comments: Array<GitHubIssueComment>, };
+
+export type GitHubIssueComment = { id: bigint, body: string, author: string | null, created_at: Date, };
+
+export type GitHubPullRequestSummary = { number: bigint, title: string, state: string, url: string, head_branch: string, base_branch: string, };
+
+export type CreateGitHubPullRequest = { title: string, body: string | null, head: string, base: string, draft: boolean, };
+
+export type GitHubRepoMetadata = { id: bigint, node_id: string, full_name: string, default_branch: string, html_url: string, };
+
+export type GitHubPrPreviewCommit = { sha: string, subject: string, };
+
+export type GitHubPrPreview = { repo_id: string, base_branch: string, head_branch: string, head_pushed: boolean, commits: Array<GitHubPrPreviewCommit>, diff_summary: string, diff_text: string, requires_push: boolean, };
+
+export type GitHubPrPreviewRequest = { repo_integration_id: string, base_branch: string, head_branch: string, };
+
+export type GitHubCreatePrRequest = { repo_integration_id: string, base_branch: string, head_branch: string, title: string, body: string | null, work_item_id: string | null, operation_source: GitHubOperationSource, };
+
+export type GitHubRetryPrRequest = { pending_pr_id: string, operation_source: GitHubOperationSource, };
+
+export type GitHubCreatePrResponse = { pull_request: GitHubPullRequestSummary | null, delivery_record: ProjectDeliveryRecord | null, external_link: ProjectWorkItemExternalLink | null, audit_id: string, result: GitHubOperationResult, pending_pr: GitHubPendingPrCreation | null, };
 
 export type RepoWithTargetBranch = { target_branch: string, id: string, path: string, name: string, display_name: string, setup_script: string | null, cleanup_script: string | null, archive_script: string | null, copy_files: string | null, parallel_setup_script: boolean, dev_server_script: string | null, default_target_branch: string | null, default_working_dir: string | null, created_at: Date, updated_at: Date, };
 
@@ -489,6 +589,28 @@ export type ProjectSessionResponse = { session: ChatSession, };
 export type ProjectReposResponse = { repos: Array<Repo>, };
 
 export type ProjectStatsResponse = { stats: Array<ProjectStats>, };
+
+export type GitHubDevicePollRequest = { device_code: string, };
+
+export type GitHubIssueQuery = { repo_integration_id: string, q: string | null, };
+
+export type DeliveryRecordsQuery = { work_item_id: string | null, repo_id: string | null, };
+
+export type DeliveryStatsQuery = { period_start: string, period_end: string, };
+
+export type IssueCommentRequest = { body: string, operation_source: GitHubOperationSource, };
+
+export type IssueStateRequest = { state: string, operation_source: GitHubOperationSource, };
+
+export type IssueLabelsRequest = { labels: Array<string>, operation_source: GitHubOperationSource, };
+
+export type IssueAssigneesRequest = { assignees: Array<string>, operation_source: GitHubOperationSource, };
+
+export type PushBranchRequest = { repo_integration_id: string, head_branch: string, base_branch: string | null, title: string | null, body: string | null, work_item_id: string | null, operation_source: GitHubOperationSource, };
+
+export type BranchListQuery = { repo_integration_id: string, };
+
+export type DenyGitHubOperationRequest = { reason: string | null, };
 
 export type ImageResponse = { id: string, file_path: string, original_name: string, mime_type: string | null, size_bytes: bigint, hash: string, created_at: string, updated_at: string, };
 

@@ -62,8 +62,10 @@ export const trimOrNull = (value: string): string | null => {
   return trimmed ? trimmed : null;
 };
 
-export const compactRunnerLabel = (runner?: BaseCodingAgent | null) =>
-  runner ? getRunnerLabel(runner) : "Runtime";
+export const compactRunnerLabel = (
+  runner?: BaseCodingAgent | null,
+  fallback = "Runtime",
+) => (runner ? getRunnerLabel(runner) : fallback);
 
 export const memberName = (
   member: ProjectMemberWithExecution,

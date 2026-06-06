@@ -20,9 +20,22 @@ import {
   type SessionAgentLookup,
 } from "./teamUtils";
 
-function MemberRoleAvatar({ lead }: { lead: boolean }) {
+type TranslateFn = (
+  key: string,
+  replacements?: Record<string, string | number>,
+) => string;
+
+function MemberRoleAvatar({
+  lead,
+  t,
+}: {
+  lead: boolean;
+  t: TranslateFn;
+}) {
   const Icon = lead ? Crown : Bot;
-  const label = lead ? "Main agent" : "Work agent";
+  const label = lead
+    ? t("teamPage.sidebar.mainAgent")
+    : t("teamPage.sidebar.workAgent");
   return (
     <span
       className={cx(
@@ -39,7 +52,13 @@ function MemberRoleAvatar({ lead }: { lead: boolean }) {
   );
 }
 
-function MemberRunStateBadge({ state }: { state: MemberRunState }) {
+function MemberRunStateBadge({
+  state,
+  t,
+}: {
+  state: MemberRunState;
+  t: TranslateFn;
+}) {
   return (
     <span
       className={cx(
@@ -59,7 +78,7 @@ function MemberRunStateBadge({ state }: { state: MemberRunState }) {
           state === "dead" && "bg-red-500",
         )}
       />
-      {state}
+      {t(`teamPage.state.${state}`)}
     </span>
   );
 }
@@ -72,6 +91,7 @@ type TeamMemberSidebarProps = {
   selectedMemberId: string;
   sessionAgentLookup: SessionAgentLookup;
   switchingLeadMemberId: string | null;
+  t: TranslateFn;
   onSelectMember: (memberId: string) => void;
   onSetLeadMember: (member: ProjectMemberWithExecution) => void;
   onAddMember?: (agentId: string) => void;
@@ -85,6 +105,7 @@ export function TeamMemberSidebar({
   selectedMemberId,
   sessionAgentLookup,
   switchingLeadMemberId,
+  t,
   onSelectMember,
   onSetLeadMember,
   onAddMember,
@@ -131,7 +152,7 @@ export function TeamMemberSidebar({
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b border-[var(--hairline)] px-4 py-3">
         <h3 className="text-[12px] font-bold uppercase tracking-[0.05em] text-[var(--ink-tertiary)]">
-          Project Members · {members.length}
+          {t("teamPage.sidebar.title", { count: members.length })}
         </h3>
         <div className="relative" ref={menuRef}>
           <button
@@ -141,7 +162,7 @@ export function TeamMemberSidebar({
               "group flex h-7 w-7 items-center justify-center rounded-md border border-[var(--hairline)] bg-[var(--surface-2)] transition-all hover:border-[var(--primary)]/40 hover:bg-[var(--surface-3)]",
               showAddMenu && "border-[var(--primary)] ring-2 ring-[var(--primary-tint)]"
             )}
-            title="Add Project Member"
+            title={t("teamPage.sidebar.addMember")}
           >
             <Plus className={cx("h-4 w-4 text-[var(--ink-subtle)] transition-colors group-hover:text-[var(--primary)]", showAddMenu && "text-[var(--primary)]")} />
           </button>
@@ -153,7 +174,7 @@ export function TeamMemberSidebar({
                 <input
                   autoFocus
                   type="text"
-                  placeholder="Find agent..."
+                  placeholder={t("teamPage.sidebar.findAgent")}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full bg-transparent text-[13px] text-[var(--ink)] placeholder:text-[var(--ink-tertiary)] focus:outline-none"
@@ -162,7 +183,9 @@ export function TeamMemberSidebar({
               <div className="max-h-[300px] overflow-y-auto p-1.5 ot-scroll-area-styled">
                 {filteredAgents.length === 0 ? (
                   <div className="px-3 py-4 text-center">
-                    <p className="text-[12px] text-[var(--ink-tertiary)]">No available agents</p>
+                    <p className="text-[12px] text-[var(--ink-tertiary)]">
+                      {t("teamPage.sidebar.noAvailableAgents")}
+                    </p>
                   </div>
                 ) : (
                   filteredAgents.map((agent) => (
@@ -180,7 +203,12 @@ export function TeamMemberSidebar({
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-[13px] font-medium text-[var(--ink)]">{agent.name}</p>
-                        <p className="truncate text-[11px] text-[var(--ink-tertiary)]">{compactRunnerLabel(normalizeRunnerType(agent.runner_type))}</p>
+                        <p className="truncate text-[11px] text-[var(--ink-tertiary)]">
+                          {compactRunnerLabel(
+                            normalizeRunnerType(agent.runner_type),
+                            t("teamPage.fallback.runtime"),
+                          )}
+                        </p>
                       </div>
                       <Plus className="h-3.5 w-3.5 text-[var(--ink-tertiary)]" />
                     </button>
@@ -199,10 +227,10 @@ export function TeamMemberSidebar({
               <UserPlus className="h-6 w-6" />
             </div>
             <h3 className="mt-4 text-[15px] font-semibold text-[var(--ink)]">
-              No project members
+              {t("teamPage.sidebar.emptyTitle")}
             </h3>
             <p className="mt-2 max-w-[200px] text-[13px] leading-relaxed text-[var(--ink-subtle)]">
-              Add agents from your configuration as project members.
+              {t("teamPage.sidebar.emptyDesc")}
             </p>
           </div>
         ) : (
@@ -244,7 +272,7 @@ export function TeamMemberSidebar({
                   <div className="absolute left-0 top-3 h-8 w-1 rounded-r-full bg-[var(--primary)]" />
                 )}
                 
-                <MemberRoleAvatar lead={lead} />
+                <MemberRoleAvatar lead={lead} t={t} />
                 
                 <div className="min-w-0">
                   <div className="flex min-w-0 items-center gap-1.5">
@@ -257,9 +285,12 @@ export function TeamMemberSidebar({
                   </div>
                   <div className="mt-1 flex min-w-0 items-center gap-2">
                     <span className="truncate font-mono text-[11px] tracking-tight text-[var(--ink-tertiary)]">
-                      {compactRunnerLabel(runner)}
+                      {compactRunnerLabel(
+                        runner,
+                        t("teamPage.fallback.runtime"),
+                      )}
                     </span>
-                    <MemberRunStateBadge state={runState} />
+                    <MemberRunStateBadge state={runState} t={t} />
                   </div>
                 </div>
 
@@ -272,7 +303,7 @@ export function TeamMemberSidebar({
                         onSetLeadMember(member);
                       }}
                       disabled={saving}
-                      title="Set as Lead"
+                      title={t("teamPage.sidebar.setLead")}
                       className="flex h-7 w-7 items-center justify-center rounded-lg border border-[var(--hairline)] bg-[var(--surface-1)] text-[var(--ink-tertiary)] opacity-0 shadow-sm transition-all group-hover:opacity-100 hover:border-[var(--primary)]/40 hover:text-[var(--primary)] disabled:cursor-not-allowed disabled:opacity-0"
                     >
                       <Crown

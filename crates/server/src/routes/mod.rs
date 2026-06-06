@@ -14,12 +14,13 @@ pub mod browser_lifecycle;
 pub mod build_stats;
 pub mod chat;
 pub mod config;
-pub mod filesystem;
-// pub mod github;
 pub mod events;
+pub mod filesystem;
 pub mod frontend;
+pub mod github;
 pub mod health;
 pub mod images;
+pub mod project_github;
 pub mod projects;
 pub mod scratch;
 pub mod tags;
@@ -39,6 +40,8 @@ pub fn router(deployment: DeploymentImpl) -> IntoMakeService<Router> {
         .merge(agents::router())
         .merge(approvals::router())
         .merge(projects::router())
+        .merge(github::router())
+        .merge(project_github::router())
         .merge(scratch::router(&deployment))
         .merge(workflow::router())
         .merge(version::router())

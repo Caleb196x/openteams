@@ -1,4 +1,10 @@
-import { useMemo, useState, type ReactNode } from "react";
+import {
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   AlertCircle,
   Check,
@@ -35,6 +41,11 @@ import {
 
 type MemberConfigTab = "config" | "mcp";
 
+type TranslateFn = (
+  key: string,
+  replacements?: Record<string, string | number>,
+) => string;
+
 type TeamConfigTabsProps = {
   allowedSkillIds: string[];
   capability: AgentRuntimeReasoningCapability | null;
@@ -65,6 +76,7 @@ type TeamConfigTabsProps = {
   skills: BackendChatSkill[];
   skillsError: string | null;
   skillsLoading: boolean;
+  t: TranslateFn;
   workspacePath: string;
   onApplyMcpServers: () => void;
   onDiscardMemberChanges: () => void;
@@ -175,18 +187,17 @@ function SkillSettingBlock({
 const inputClassName =
   "h-10 w-full rounded-[8px] border border-[var(--hairline)] bg-[var(--surface-3)] px-3 font-mono text-[13px] text-[var(--ink)] outline-none transition-colors placeholder:text-[var(--ink-tertiary)] focus:ring-2 focus:ring-[var(--primary-focus)]/50";
 
-function EmptyMemberState() {
+function EmptyMemberState({ t }: { t: TranslateFn }) {
   return (
     <div className="flex min-h-full flex-col items-center justify-center p-12 text-center">
       <div className="flex h-14 w-14 items-center justify-center rounded-[8px] border border-[var(--hairline)] bg-[var(--surface-2)] text-[var(--ink-tertiary)]">
         <UserRoundCog className="h-7 w-7" />
       </div>
       <h3 className="mt-5 text-[16px] font-medium text-[var(--ink)]">
-        No project member selected
+        {t("teamPage.empty.noMemberTitle")}
       </h3>
       <p className="mt-2 max-w-[320px] text-[14px] leading-relaxed text-[var(--ink-subtle)]">
-        Select a project member from the left sidebar to manage runtime,
-        responsibilities, skills, and MCP configuration.
+        {t("teamPage.empty.noMemberDesc")}
       </p>
     </div>
   );
@@ -199,6 +210,7 @@ function SkillsSection({
   skillsError,
   skillsLoading,
   setAllowedSkillIds,
+  t,
 }: {
   allowedSkillIds: string[];
   skillLookup: BackendChatSkill[];
@@ -206,6 +218,7 @@ function SkillsSection({
   skillsError: string | null;
   skillsLoading: boolean;
   setAllowedSkillIds: (ids: string[]) => void;
+  t: TranslateFn;
 }) {
   const [detailSkillId, setDetailSkillId] = useState<string | null>(null);
   const detailSkill =
@@ -234,13 +247,10 @@ function SkillsSection({
 
   return (
     <>
-      <SkillSettingBlock
-        title="Add Skills"
-        description="Skills currently attached to this project member."
-      >
+      <SkillSettingBlock title={t("teamPage.skills.addTitle")}>
         {selectedSkills.length === 0 ? (
           <p className="rounded-[8px] border border-[var(--hairline)] bg-[var(--surface-3)] p-3 text-[14px] text-[var(--ink-subtle)]">
-            No skills added.
+            {t("teamPage.skills.noneAdded")}
           </p>
         ) : (
           <div className="flex flex-wrap gap-2">
@@ -259,13 +269,10 @@ function SkillsSection({
         )}
       </SkillSettingBlock>
 
-      <SkillSettingBlock
-        title="Installed Skills"
-        description="Skills installed for the selected Agent Runtime."
-      >
+      <SkillSettingBlock title={t("teamPage.skills.installedTitle")}>
         {skillsLoading ? (
           <p className="rounded-[8px] border border-[var(--hairline)] bg-[var(--surface-3)] p-3 text-[14px] text-[var(--ink-subtle)]">
-            Loading installed skills for this runtime...
+            {t("teamPage.skills.loading")}
           </p>
         ) : skillsError ? (
           <p className="rounded-[8px] border border-red-500/20 bg-red-500/10 p-3 text-[14px] text-red-400">
@@ -273,7 +280,7 @@ function SkillsSection({
           </p>
         ) : skills.length === 0 ? (
           <p className="rounded-[8px] border border-[var(--hairline)] bg-[var(--surface-3)] p-3 text-[14px] text-[var(--ink-subtle)]">
-            No installed skills available for this runtime.
+            {t("teamPage.skills.noneInstalled")}
           </p>
         ) : (
           <div
@@ -334,7 +341,9 @@ function SkillsSection({
                             ) : (
                               <PackagePlus className="h-3.5 w-3.5" />
                             )}
-                            {selected ? "Added" : "Add"}
+                            {selected
+                              ? t("teamPage.action.added")
+                              : t("teamPage.action.add")}
                           </button>
                           <button
                             type="button"
@@ -349,7 +358,9 @@ function SkillsSection({
                               detailSkillId === skill.id &&
                                 "text-[var(--primary)]",
                             )}
-                            aria-label={`View ${skill.name} skill content`}
+                            aria-label={t("teamPage.aria.viewSkill", {
+                              name: skill.name,
+                            })}
                           >
                             <CircleAlert className="h-3.5 w-3.5" />
                           </button>
@@ -358,7 +369,7 @@ function SkillsSection({
 
                       <div className="mt-2 min-w-0">
                         <p className="line-clamp-2 overflow-hidden text-[13px] leading-[1.45] text-[var(--ink-subtle)]">
-                          {skill.description || "No description."}
+                          {skill.description || t("teamPage.fallback.noDesc")}
                         </p>
                       </div>
 
@@ -377,6 +388,7 @@ function SkillsSection({
               <SkillMarkdownPanel
                 skill={detailSkill}
                 onClose={() => setDetailSkillId(null)}
+                t={t}
               />
             )}
           </div>
@@ -388,9 +400,11 @@ function SkillsSection({
 
 function SkillMarkdownPanel({
   skill,
+  t,
   onClose,
 }: {
   skill: BackendChatSkill;
+  t: TranslateFn;
   onClose: () => void;
 }) {
   const tags = skill.tags ?? [];
@@ -404,14 +418,14 @@ function SkillMarkdownPanel({
             {skill.name}
           </p>
           <p className="mt-1 text-[13px] leading-[1.45] text-[var(--ink-subtle)]">
-            {skill.description || "No description."}
+            {skill.description || t("teamPage.fallback.noDesc")}
           </p>
         </div>
         <button
           type="button"
           onClick={onClose}
           className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border border-[var(--hairline)] bg-[var(--surface-2)] text-[var(--ink-tertiary)] transition-colors hover:text-[var(--ink)]"
-          aria-label={`Close ${skill.name} skill content`}
+          aria-label={t("teamPage.aria.closeSkill", { name: skill.name })}
         >
           <X className="h-4 w-4" />
         </button>
@@ -430,7 +444,7 @@ function SkillMarkdownPanel({
       )}
       <div className="mt-4 max-h-[680px] overflow-auto rounded-[8px] border border-[var(--hairline)] bg-[var(--surface-2)] p-4 text-[13px] leading-relaxed text-[var(--ink-muted)] ot-scroll-area-styled">
         <AgentMarkdown
-          content={skill.content || "No skill content."}
+          content={skill.content || t("teamPage.fallback.noSkillContent")}
           fontSize={13}
         />
       </div>
@@ -468,6 +482,7 @@ function ConfigTab({
   setRunnerType,
   setThinkingEffort,
   setWorkspacePath,
+  t,
   memberName,
   memberNamePlaceholder,
 }: Omit<
@@ -487,23 +502,34 @@ function ConfigTab({
   | "onToggleMcpServer"
   | "selectedMember"
 >) {
+  const roleTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useLayoutEffect(() => {
+    const textarea = roleTextareaRef.current;
+    if (!textarea) return;
+
+    textarea.style.height = "auto";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }, [roleDefinition]);
+
   return (
     <div className="space-y-0">
       <div
-        className="grid gap-6 pb-8"
+        className="grid items-stretch gap-6 pb-4"
         style={{
           gridTemplateColumns:
             "repeat(auto-fit, minmax(min(100%, 520px), 1fr))",
         }}
       >
         <ConfigSection
-          title="PROJECT MEMBER CONFIG"
-          description="Choose name, runtime, model, workspace, and lead status."
-          className="pb-0"
+          title={t("teamPage.config.title")}
+          description={t("teamPage.config.desc")}
+          className="!pb-0"
+          bodyClassName="space-y-4 p-4"
         >
           <SettingRow
-            title="Member name"
-            description="Project-specific display name for this AI member."
+            title={t("teamPage.form.memberName")}
+            description={t("teamPage.form.memberNameDesc")}
           >
             <input
               value={memberName}
@@ -514,13 +540,13 @@ function ConfigTab({
           </SettingRow>
 
           <SettingRow
-            title="Agent Runtime"
-            description="Installed executor used when this project member runs."
+            title={t("teamPage.form.runtime")}
+            description={t("teamPage.form.runtimeDesc")}
           >
             <DropdownSelect
               value={runnerType}
               options={runtimeOptions}
-              searchPlaceholder="Search runtimes..."
+              searchPlaceholder={t("teamPage.search.runtimes")}
               className="[&>button]:h-10 [&>button]:bg-[var(--surface-3)] [&>button]:font-mono [&>button]:text-[13px]"
               triggerIcon={
                 <AgentBrandAvatar
@@ -535,13 +561,13 @@ function ConfigTab({
           </SettingRow>
 
           <SettingRow
-            title="Model"
-            description="Use the runtime default or pick a discovered model."
+            title={t("teamPage.form.model")}
+            description={t("teamPage.form.modelDesc")}
           >
             <DropdownSelect
               value={selectedModelValue}
               options={modelOptions}
-              searchPlaceholder="Search models..."
+              searchPlaceholder={t("teamPage.search.models")}
               className="[&>button]:h-10 [&>button]:bg-[var(--surface-3)] [&>button]:font-mono [&>button]:text-[13px]"
               onChange={(value) =>
                 setModelName(value === defaultOptionId ? "" : value)
@@ -550,8 +576,8 @@ function ConfigTab({
           </SettingRow>
 
           <SettingRow
-            title="Reasoning level"
-            description="Optional executor-specific thinking effort or variant."
+            title={t("teamPage.form.reasoning")}
+            description={t("teamPage.form.reasoningDesc")}
           >
             <DropdownSelect
               value={selectedReasoningValue}
@@ -570,22 +596,25 @@ function ConfigTab({
           </SettingRow>
 
           <SettingRow
-            title="Local Workspace Path"
-            description="当前项目成员的主要工作路径"
+            title={t("teamPage.form.workspacePath")}
+            description={t("teamPage.form.workspacePathDesc")}
           >
             <input
               value={workspacePath}
               onChange={(event) => setWorkspacePath(event.target.value)}
-              placeholder="e.g. /home/user/workspace"
+              placeholder={t("teamPage.placeholder.workspacePath")}
               className={inputClassName}
             />
           </SettingRow>
 
-          <SettingRow title="是否为主Agent">
+          <SettingRow
+            title={t("teamPage.form.mainAgent")}
+            description={t("teamPage.form.mainAgentDesc")}
+          >
             <button
               type="button"
               onClick={() => setIsLeader((value) => !value)}
-              aria-label="Toggle main agent"
+              aria-label={t("teamPage.aria.toggleMainAgent")}
               aria-pressed={isLeader}
               className={cx(
                 "relative h-6 w-11 rounded-full border transition-colors",
@@ -605,37 +634,25 @@ function ConfigTab({
         </ConfigSection>
 
         <ConfigSection
-          title="SYSTEM PROMPT"
-          description="Define the project member's responsibilities, role, and working style."
-          className="pb-0"
-          bodyClassName="p-0"
+          title={t("teamPage.systemPrompt.title")}
+          description={t("teamPage.systemPrompt.desc")}
+          className="!pb-0"
+          bodyClassName="!p-0"
         >
           <textarea
+            ref={roleTextareaRef}
             value={roleDefinition}
             onChange={(event) => setRoleDefinition(event.target.value)}
             spellCheck={false}
-            placeholder={`在这里定义项目成员的工作职责、角色和工作风格
-
-示例：
-你是游戏开发工程师 Agent，负责将策划需求转化为可落地的工程实现。
-
-## 职责：
-理解玩法目标，拆解模块、数据结构、核心流程与实现步骤，输出清晰方案或代码。
-
-## 风格：
-务实、稳定、可维护，优先复用已有架构，避免过度设计和擅自扩展需求。
-
-## 约束：
-信息不足时明确假设并继续推进；主动识别性能、多人同步、资源依赖和测试风险；
-输出需包含任务理解、实现方案、风险点和验证清单。`}
-            className="block h-full min-h-[420px] w-full resize-none rounded-[12px] border-0 bg-[var(--surface-2)] px-5 py-5 font-mono text-[14px] leading-relaxed text-[var(--ink)] outline-none transition-colors placeholder:text-[var(--ink-muted)] placeholder:opacity-100 focus:ring-2 focus:ring-[var(--primary-focus)]/50"
+            placeholder={t("teamPage.systemPrompt.placeholder")}
+            className="block min-h-full w-full resize-none overflow-hidden rounded-[12px] border-0 bg-[var(--surface-2)] px-5 py-5 font-mono text-[14px] leading-relaxed text-[var(--ink)] outline-none transition-colors placeholder:text-[var(--ink-muted)] placeholder:opacity-100 focus:ring-2 focus:ring-[var(--primary-focus)]/50"
           />
         </ConfigSection>
       </div>
 
       <ConfigSection
-        title="SKILLS"
-        description="Review installed skills and add the ones this project member can use."
+        title={t("teamPage.skills.title")}
+        description={t("teamPage.skills.desc")}
       >
         <SkillsSection
           allowedSkillIds={allowedSkillIds}
@@ -644,6 +661,7 @@ function ConfigTab({
           skillsError={skillsError}
           skillsLoading={skillsLoading}
           setAllowedSkillIds={setAllowedSkillIds}
+          t={t}
         />
       </ConfigSection>
 
@@ -657,7 +675,7 @@ function ConfigTab({
               className="inline-flex h-10 items-center gap-2 rounded-[8px] border border-[var(--hairline)] bg-[var(--surface-2)] px-3.5 text-[14px] font-medium text-[var(--ink-subtle)] hover:text-[var(--ink)] disabled:cursor-not-allowed disabled:opacity-50"
             >
               <RotateCcw className="h-4 w-4" />
-              Discard
+              {t("teamPage.action.discard")}
             </button>
           )}
           <button
@@ -673,7 +691,11 @@ function ConfigTab({
             ) : (
               <Save className="h-4 w-4" />
             )}
-            {memberSuccess ? "Saved" : saving ? "Saving..." : "Save changes"}
+            {memberSuccess
+              ? t("teamPage.action.saved")
+              : saving
+                ? t("teamPage.action.saving")
+                : t("teamPage.action.saveChanges")}
           </button>
         </div>
       )}
@@ -705,6 +727,7 @@ function McpConfigTab({
   onDiscardMcpChanges,
   onMcpServersChange,
   onToggleMcpServer,
+  t,
 }: Pick<
   TeamConfigTabsProps,
   | "configuredMcpServerKeys"
@@ -720,6 +743,7 @@ function McpConfigTab({
   | "onDiscardMcpChanges"
   | "onMcpServersChange"
   | "onToggleMcpServer"
+  | "t"
 >) {
   const preconfiguredObj = (mcpConfig?.preconfigured ?? {}) as Record<
     string,
@@ -740,33 +764,33 @@ function McpConfigTab({
     <div className="space-y-6">
       {mcpError && !unsupported && (
         <div className="rounded-[8px] border border-red-500/20 bg-red-500/10 p-3 text-[14px] text-red-400">
-          MCP configuration error: {mcpError}
+          {t("teamPage.mcp.error", { error: mcpError })}
         </div>
       )}
 
       <ConfigSection
-        title="MCP SERVER CONFIG"
-        description="Edit the full MCP JSON for the selected project member runtime."
+        title={t("teamPage.mcp.title")}
+        description={t("teamPage.mcp.desc")}
       >
         {unsupported ? (
           <div className="m-4 rounded-[8px] border border-amber-500/30 bg-amber-500/10 p-4 text-[14px] leading-[1.5] text-amber-300">
-            <p className="font-medium">MCP is not supported by this runtime.</p>
+            <p className="font-medium">{t("teamPage.mcp.unsupported")}</p>
             <p className="mt-1 text-[13px]">{mcpError}</p>
           </div>
         ) : (
           <>
             <SettingRow
-              title="Server Configuration"
+              title={t("teamPage.mcp.serverConfig")}
               description={
                 mcpLoading
-                  ? "Loading current MCP configuration..."
-                  : "JSON is saved to the executor's MCP config file."
+                  ? t("teamPage.mcp.loadingCurrent")
+                  : t("teamPage.mcp.savedToFile")
               }
             >
               <textarea
                 value={
                   mcpLoading
-                    ? "Loading MCP server configuration..."
+                    ? t("teamPage.mcp.loadingTextarea")
                     : mcpServersJson
                 }
                 onChange={(event) => onMcpServersChange(event.target.value)}
@@ -794,15 +818,15 @@ function McpConfigTab({
               typeof mcpConfig.preconfigured === "object" &&
               Object.keys(servers).length > 0 && (
                 <SettingRow
-                  title="Built-in MCP Servers"
-                  description="Click a card to insert the preset into the JSON above."
+                  title={t("teamPage.mcp.builtinTitle")}
+                  description={t("teamPage.mcp.builtinDesc")}
                 >
                   <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
                     {Object.entries(servers).map(([key]) => {
                       const metaObj = meta[key] ?? {};
                       const name = metaObj.name || key;
                       const description =
-                        metaObj.description || "No description.";
+                        metaObj.description || t("teamPage.fallback.noDesc");
                       const icon = getMcpIconSrc(metaObj.icon);
                       const selected = configuredMcpServerKeys.includes(key);
                       return (
@@ -861,7 +885,7 @@ function McpConfigTab({
               className="inline-flex h-10 items-center gap-2 rounded-[8px] border border-[var(--hairline)] bg-[var(--surface-2)] px-3.5 text-[14px] font-medium text-[var(--ink-subtle)] hover:text-[var(--ink)] disabled:cursor-not-allowed disabled:opacity-50"
             >
               <RotateCcw className="h-4 w-4" />
-              Discard
+              {t("teamPage.action.discard")}
             </button>
           )}
           <button
@@ -878,10 +902,10 @@ function McpConfigTab({
               <Save className="h-4 w-4" />
             )}
             {mcpSuccess
-              ? "Saved"
+              ? t("teamPage.action.saved")
               : mcpApplying
-                ? "Saving..."
-                : "Save MCP config"}
+                ? t("teamPage.action.saving")
+                : t("teamPage.action.saveMcpConfig")}
           </button>
         </div>
       )}
@@ -891,34 +915,34 @@ function McpConfigTab({
 
 export function TeamConfigTabs(props: TeamConfigTabsProps) {
   const [activeTab, setActiveTab] = useState<MemberConfigTab>("config");
-  const { selectedMember } = props;
+  const { selectedMember, t } = props;
   const dirtyNotice =
     props.memberDirty && props.mcpDirty
-      ? "Unsaved project member and MCP changes"
+      ? t("teamPage.notice.unsavedBoth")
       : props.memberDirty
-        ? "Unsaved project member changes"
+        ? t("teamPage.notice.unsavedMember")
         : props.mcpDirty
-          ? "Unsaved MCP changes"
+          ? t("teamPage.notice.unsavedMcp")
           : null;
   const savedNotice =
     props.memberSuccess && props.mcpSuccess
-      ? "Project member and MCP configuration saved"
+      ? t("teamPage.notice.savedBoth")
       : props.memberSuccess
-        ? "Project member configuration saved"
+        ? t("teamPage.notice.savedMember")
         : props.mcpSuccess
-          ? "MCP configuration saved"
+          ? t("teamPage.notice.savedMcp")
           : null;
   const statusNotice = dirtyNotice ?? savedNotice;
   const statusKind = dirtyNotice ? "dirty" : savedNotice ? "saved" : null;
   const tabItems = useMemo(
     () => [
-      { id: "config" as const, label: "Config", icon: Settings },
-      { id: "mcp" as const, label: "MCP Config", icon: Server },
+      { id: "config" as const, label: t("teamPage.tabs.config"), icon: Settings },
+      { id: "mcp" as const, label: t("teamPage.tabs.mcp"), icon: Server },
     ],
-    [],
+    [t],
   );
 
-  if (!selectedMember) return <EmptyMemberState />;
+  if (!selectedMember) return <EmptyMemberState t={t} />;
 
   return (
     <div className="flex min-h-full flex-col bg-[var(--surface-1)]">
@@ -990,6 +1014,7 @@ export function TeamConfigTabs(props: TeamConfigTabsProps) {
             onDiscardMcpChanges={props.onDiscardMcpChanges}
             onMcpServersChange={props.onMcpServersChange}
             onToggleMcpServer={props.onToggleMcpServer}
+            t={t}
           />
         )}
       </div>

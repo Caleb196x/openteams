@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck, Users } from "lucide-react";
 import type { DropdownSelectOption } from "@/components/DropdownSelect";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import {
@@ -49,28 +49,43 @@ const createRunnerOptions = (
     }));
 };
 
-const createModelOptions = (models: string[]): DropdownSelectOption[] => [
+type TranslateFn = (
+  key: string,
+  replacements?: Record<string, string | number>,
+) => string;
+
+const createModelOptions = (
+  models: string[],
+  t: TranslateFn,
+): DropdownSelectOption[] => [
   {
     id: defaultOptionId,
-    label: "Default model",
-    description: "Use runtime default",
+    label: t("teamPage.options.defaultModel"),
+    description: t("teamPage.options.runtimeDefault"),
   },
   ...models.map((model) => ({
     id: model,
     label: model,
-    description: "Discovered model",
+    description: t("teamPage.options.discoveredModel"),
   })),
 ];
 
 const createReasoningOptions = (
+  t: TranslateFn,
   capability?: AgentRuntimeReasoningCapability | null,
 ): DropdownSelectOption[] => [
-  { id: defaultOptionId, label: "Default", description: "Use runtime default" },
+  {
+    id: defaultOptionId,
+    label: t("teamPage.options.default"),
+    description: t("teamPage.options.runtimeDefault"),
+  },
   ...(capability?.options ?? []).filter(Boolean).map((option) => ({
     id: option,
     label: option.replace(/^thinking-/u, ""),
     description:
-      capability?.kind === "variant" ? "Runtime variant" : "Reasoning effort",
+      capability?.kind === "variant"
+        ? t("teamPage.options.runtimeVariant")
+        : t("teamPage.options.reasoningEffort"),
   })),
 ];
 
@@ -141,6 +156,7 @@ export function TeamPage() {
     activeSessionId,
     refreshMembers,
     refreshMessages,
+    t,
   } = useWorkspace();
   const [members, setMembers] = useState<ProjectMemberWithExecution[]>([]);
   const [agents, setAgents] = useState<BackendChatAgent[]>([]);
@@ -232,12 +248,12 @@ export function TeamPage() {
     const models = Array.from(
       new Set([modelName, ...discovered].filter(Boolean)),
     );
-    return createModelOptions(models);
-  }, [modelName, selectedRuntime]);
+    return createModelOptions(models, t);
+  }, [modelName, selectedRuntime, t]);
   const capability = selectedMember?.reasoning_capability ?? null;
   const reasoningOptions = useMemo(
-    () => createReasoningOptions(capability),
-    [capability],
+    () => createReasoningOptions(t, capability),
+    [capability, t],
   );
   const selectedModelValue = modelName || defaultOptionId;
   const selectedReasoningValue =
@@ -310,7 +326,7 @@ export function TeamPage() {
           : (nextProjectMembers[0]?.id ?? ""),
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load members");
+      setError(err instanceof Error ? err.message : t("teamPage.error.load"));
     } finally {
       setLoading(false);
     }
@@ -388,7 +404,7 @@ export function TeamPage() {
         setRuntimeSkillsError(
           err instanceof Error
             ? err.message
-            : "Installed skills are unavailable for this runtime.",
+            : t("teamPage.error.runtimeSkillsUnavailable"),
         );
       })
       .finally(() => {
@@ -420,7 +436,7 @@ export function TeamPage() {
         setMcpError(
           err instanceof Error
             ? err.message
-            : "MCP server config is unavailable.",
+            : t("teamPage.error.mcpConfigUnavailable"),
         );
       })
       .finally(() => {
@@ -467,10 +483,14 @@ export function TeamPage() {
         }),
       );
       setSelectedMemberId(member.id);
-      setNotice(`${memberName(member, agent)} is now the main agent.`);
+      setNotice(
+        t("teamPage.notice.mainAgentChanged", {
+          name: memberName(member, agent),
+        }),
+      );
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Failed to switch main agent",
+        err instanceof Error ? err.message : t("teamPage.error.switchLead"),
       );
     } finally {
       setSaving(false);
@@ -569,7 +589,7 @@ export function TeamPage() {
       setMemberSuccess(true);
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Failed to save project member",
+        err instanceof Error ? err.message : t("teamPage.error.saveMember"),
       );
     } finally {
       setSaving(false);
@@ -587,10 +607,10 @@ export function TeamPage() {
     } catch (err) {
       setMcpError(
         err instanceof SyntaxError
-          ? "Invalid JSON"
+          ? t("teamPage.error.invalidJson")
           : err instanceof Error
             ? err.message
-            : "Invalid MCP configuration",
+            : t("teamPage.error.invalidMcpConfig"),
       );
     }
   };
@@ -622,7 +642,7 @@ export function TeamPage() {
       setMcpSuccess(false);
     } catch (err) {
       setMcpError(
-        err instanceof Error ? err.message : "Failed to add MCP server",
+        err instanceof Error ? err.message : t("teamPage.error.addMcpServer"),
       );
     }
   };
@@ -645,10 +665,10 @@ export function TeamPage() {
     } catch (err) {
       setMcpError(
         err instanceof SyntaxError
-          ? "Invalid JSON"
+          ? t("teamPage.error.invalidJson")
           : err instanceof Error
             ? err.message
-            : "Failed to save MCP configuration",
+            : t("teamPage.error.saveMcpConfig"),
       );
     } finally {
       setMcpApplying(false);
@@ -722,10 +742,14 @@ export function TeamPage() {
         refreshMembers().catch(() => undefined),
         refreshMessages().catch(() => undefined),
       ]);
-      setNotice(`Added ${agent?.name ?? "agent"} as a project member.`);
+      setNotice(
+        t("teamPage.notice.memberAdded", {
+          name: agent?.name ?? t("teamPage.fallback.agent"),
+        }),
+      );
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Failed to add project member",
+        err instanceof Error ? err.message : t("teamPage.error.addMember"),
       );
     } finally {
       setSaving(false);
@@ -735,7 +759,7 @@ export function TeamPage() {
   if (!selectedProjectId) {
     return (
       <div className="mx-auto max-w-6xl rounded-[8px] border border-[var(--hairline)] bg-[var(--surface-1)] p-4 text-[14px] text-[var(--ink-subtle)]">
-        Select a project to configure project members.
+        {t("teamPage.empty.noProject")}
       </div>
     );
   }
@@ -745,15 +769,15 @@ export function TeamPage() {
       <header className="shrink-0 bg-[var(--canvas)] px-4 py-4 md:px-5">
         <div className="flex flex-col gap-2 xl:flex-row xl:items-end xl:justify-between">
           <div className="min-w-0">
-            <p className="text-[13px] font-medium tracking-[0.4px] text-[var(--ink-subtle)]">
-              TEAM · PROJECT MEMBER CONFIG
-            </p>
-            <h1 className="mt-1 text-[28px] font-semibold leading-[1.15] tracking-[-0.6px] text-[var(--ink)]">
-              Project Members
+            <h1 className="inline-flex items-center gap-2.5 text-[28px] font-semibold leading-[1.15] tracking-[-0.6px] text-[var(--ink)]">
+              <Users
+                aria-hidden="true"
+                className="h-7 w-7 shrink-0 text-[var(--primary)]"
+              />
+              {t("teamPage.header.title")}
             </h1>
             <p className="mt-1 max-w-[680px] text-[16px] leading-[1.5] text-[var(--ink-subtle)]">
-              Configure project member runtimes, responsibilities, skills, and
-              MCP servers.
+              {t("teamPage.header.subtitle")}
             </p>
           </div>
         </div>
@@ -790,6 +814,7 @@ export function TeamPage() {
                 onSelectMember={setSelectedMemberId}
                 onSetLeadMember={(member) => void setLeadMember(member)}
                 onAddMember={addMember}
+                t={t}
               />
             </aside>
 
@@ -800,7 +825,9 @@ export function TeamPage() {
                 configuredMcpServerKeys={configuredMcpServerKeys}
                 isLeader={isLeader}
                 memberName={memberNameValue}
-                memberNamePlaceholder={selectedAgent?.name ?? "Member name"}
+                memberNamePlaceholder={
+                  selectedAgent?.name ?? t("teamPage.form.memberName")
+                }
                 memberDirty={memberDirty}
                 memberSuccess={memberSuccess}
                 mcpApplying={mcpApplying}
@@ -840,6 +867,7 @@ export function TeamPage() {
                 setRunnerType={handleRunnerTypeChange}
                 setThinkingEffort={setThinkingEffort}
                 setWorkspacePath={setWorkspacePath}
+                t={t}
               />
             </main>
           </div>

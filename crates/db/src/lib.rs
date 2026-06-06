@@ -1911,14 +1911,23 @@ mod tests {
                 default_branch: Some("trunk".to_string()),
                 external_id: None,
                 installation_id: None,
-                sync_status: Some("pending".to_string()),
+                github_account_id: None,
+                repo_grant_json: None,
+                role: None,
+                sync_status: Some(
+                    crate::models::repo_integration::RepoIntegrationSyncStatus::Disconnected,
+                ),
                 last_synced_at: None,
+                last_error: Some("user disconnected".to_string()),
             },
         )
         .await
         .expect("update repo integration");
         assert_eq!(updated.name.as_deref(), Some("renamed"));
-        assert_eq!(updated.sync_status.as_deref(), Some("pending"));
+        assert_eq!(
+            updated.sync_status,
+            crate::models::repo_integration::RepoIntegrationSyncStatus::Disconnected
+        );
 
         assert_eq!(
             RepoIntegration::delete(&pool, integration.id)

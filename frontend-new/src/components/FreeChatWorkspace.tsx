@@ -30,7 +30,7 @@ import { AgentMessageContent } from "@/components/AgentMessageContent";
 import { chatMessagesApi, sessionAgentsApi } from "@/lib/api";
 import { mockFrontendApi } from "@/lib/mockFrontendApi";
 import { mockSessionWorkspaceChanges } from "@/mockSessionWorkspaceChanges";
-import type { ChatAttachment, QuotedMessageReference } from "@/types";
+import type { ChatAttachment, Member, QuotedMessageReference } from "@/types";
 
 interface FreeChatWorkspaceProps {
   embedded?: boolean;
@@ -282,6 +282,24 @@ const getVisibleSidebarMemberCount = (
     Math.min(memberCount - 1, visibleCount),
   );
 };
+
+function SessionMemberAvatar({ member }: { member: Member }) {
+  return (
+    <span
+      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border font-mono text-[9px] font-semibold transition-colors ${
+        member.status === "run"
+          ? "animate-pulse border-[var(--success)] bg-[var(--success)]/10 text-[var(--success)] ring-2 ring-[var(--success)]/20"
+          : member.status === "on"
+            ? "border-[var(--mono-border)] bg-[var(--mono-bg)] text-[var(--ink-muted)]"
+            : "border-red-500/35 bg-red-500/10 text-red-400"
+      }`}
+      title={`${member.name} · ${member.roleDetail}`}
+      aria-label={`${member.name} ${member.roleDetail}`}
+    >
+      {member.avatar}
+    </span>
+  );
+}
 
 export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
   embedded = false,
@@ -1323,15 +1341,13 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
                       className={`group/member flex h-7 w-7 shrink-0 items-center overflow-hidden rounded-full border border-[var(--hairline)] bg-[var(--surface-1)] text-left ${
                         isMemberRailExpanded
                           ? ""
-                          : "transition-[width,background-color,border-color] duration-200 hover:w-28 hover:border-[var(--hairline-strong)] hover:bg-[var(--surface-3)] focus-visible:w-28 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)]"
+                          : "transition-[width,background-color,border-color] duration-200 hover:w-32 hover:border-[var(--hairline-strong)] hover:bg-[var(--surface-3)] focus-visible:w-32 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)]"
                       }`}
                       title={member.name}
                     >
-                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--mono-bg)] font-mono text-[9px] font-semibold text-[var(--ink-muted)]">
-                        {member.avatar}
-                      </span>
+                      <SessionMemberAvatar member={member} />
                       {!isMemberRailExpanded && (
-                        <span className="min-w-0 max-w-0 truncate pr-2 font-mono text-[10px] font-semibold text-[var(--ink)] opacity-0 transition-[max-width,opacity] duration-200 group-hover/member:max-w-20 group-hover/member:opacity-100 group-focus-visible/member:max-w-20 group-focus-visible/member:opacity-100">
+                        <span className="ml-1.5 min-w-0 max-w-0 truncate pr-2 font-mono text-[10px] font-semibold text-[var(--ink)] opacity-0 transition-[max-width,opacity] duration-200 group-hover/member:max-w-20 group-hover/member:opacity-100 group-focus-visible/member:max-w-20 group-focus-visible/member:opacity-100">
                           {member.name}
                         </span>
                       )}

@@ -49,10 +49,12 @@ impl ProjectStatsService {
         let rows = sqlx::query(
             r#"
             SELECT event_type, COUNT(*) AS count
-            FROM project_delivery_events
-            WHERE project_id = ?1
-              AND date(created_at) >= ?2
-              AND date(created_at) <= ?3
+            FROM project_delivery_records dr
+            LEFT JOIN project_work_items pwi ON pwi.id = dr.project_work_item_id
+            LEFT JOIN project_repos pr ON pr.repo_id = dr.repo_id
+            WHERE (pwi.project_id = ?1 OR pr.project_id = ?1)
+              AND date(dr.occurred_at) >= ?2
+              AND date(dr.occurred_at) <= ?3
             GROUP BY event_type
             "#,
         )
@@ -63,16 +65,15 @@ impl ProjectStatsService {
         .await?;
 
         let mut feature_count = 0;
-        let mut bugfix_count = 0;
+        let bugfix_count = 0;
         let mut test_count = 0;
 
         for row in rows {
             let event_type: String = row.try_get("event_type")?;
             let count: i64 = row.try_get("count")?;
             match event_type.as_str() {
-                "feature" => feature_count = count,
-                "bugfix" => bugfix_count = count,
-                "test" => test_count = count,
+                "pr_opened" | "pr_merged" | "deployment" | "release" => feature_count += count,
+                "test_passed" | "test_failed" => test_count += count,
                 _ => {}
             }
         }
@@ -147,6 +148,43 @@ mod tests {
             )
             "#,
             r#"
+            CREATE TABLE project_work_items (
+                id BLOB PRIMARY KEY,
+                project_id BLOB,
+                type TEXT,
+                status TEXT,
+                title TEXT,
+                priority TEXT,
+                source TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'subsec')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now', 'subsec'))
+            )
+            "#,
+            r#"
+            CREATE TABLE project_repos (
+                id BLOB PRIMARY KEY,
+                project_id BLOB,
+                repo_id BLOB
+            )
+            "#,
+            r#"
+            CREATE TABLE project_delivery_records (
+                id BLOB PRIMARY KEY,
+                project_work_item_id BLOB,
+                repo_id BLOB,
+                external_link_id BLOB,
+                event_type TEXT NOT NULL,
+                external_id TEXT,
+                url TEXT,
+                actor TEXT,
+                source_session_id BLOB,
+                source_workflow_execution_id BLOB,
+                metadata_json TEXT,
+                occurred_at TEXT NOT NULL DEFAULT (datetime('now', 'subsec')),
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'subsec'))
+            )
+            "#,
+            r#"
             CREATE UNIQUE INDEX idx_project_stats_project_period
             ON project_stats(project_id, period_start, period_end)
             "#,
@@ -215,12 +253,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn refresh_stats_counts_delivery_events_and_token_cost() {
+    async fn refresh_stats_counts_delivery_records_and_token_cost() {
         let pool = setup_pool().await;
         let service = ProjectStatsService::new();
         let project_id = Uuid::new_v4();
         let session_id = Uuid::new_v4();
         let agent_id = Uuid::new_v4();
+        let work_item_id = Uuid::new_v4();
 
         service
             .record_delivery_event(
@@ -242,6 +281,29 @@ mod tests {
             )
             .await
             .expect("record bugfix");
+        sqlx::query(
+            r#"
+            INSERT INTO project_work_items (id, project_id, type, status, title, priority, source)
+            VALUES (?1, ?2, 'feature', 'open', 'PR work', 'medium', 'manual')
+            "#,
+        )
+        .bind(work_item_id)
+        .bind(project_id)
+        .execute(&pool)
+        .await
+        .expect("insert work item");
+        sqlx::query(
+            r#"
+            INSERT INTO project_delivery_records (id, project_work_item_id, event_type)
+            VALUES (?1, ?2, 'pr_opened'), (?3, ?2, 'test_passed')
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(work_item_id)
+        .bind(Uuid::new_v4())
+        .execute(&pool)
+        .await
+        .expect("insert delivery records");
 
         sqlx::query("INSERT INTO chat_sessions (id, title, project_id) VALUES (?1, ?2, ?3)")
             .bind(session_id)
@@ -313,8 +375,8 @@ mod tests {
             .expect("refresh stats");
 
         assert_eq!(stats.feature_count, 1);
-        assert_eq!(stats.bugfix_count, 1);
-        assert_eq!(stats.test_count, 0);
+        assert_eq!(stats.bugfix_count, 0);
+        assert_eq!(stats.test_count, 1);
         assert_eq!(stats.input_tokens, 1_000_000);
         assert_eq!(stats.output_tokens, 500_000);
         assert_eq!(stats.cache_read_tokens, 1_000_000);

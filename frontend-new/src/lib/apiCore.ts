@@ -29,13 +29,18 @@ export const handleApiResponse = async <T, E = T>(
 ): Promise<T> => {
   if (!response.ok) {
     let message = `Request failed with status ${response.status}`;
+    let errorData: E | undefined;
     try {
-      const body = await response.json();
+      const body: Partial<ApiResponse<T, E>> & {
+        error?: E;
+        error_data?: E | null;
+      } = await response.json();
       if (body?.message) message = body.message;
+      errorData = body.error_data ?? body.error ?? undefined;
     } catch {
       message = response.statusText || message;
     }
-    throw new ApiError<E>(message, response.status);
+    throw new ApiError<E>(message, response.status, errorData);
   }
 
   if (response.status === 204) return undefined as T;
