@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { UsersThreeIcon, CaretDoubleDownIcon } from '@phosphor-icons/react';
+import { CaretRightIcon, CaretDoubleDownIcon } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -6487,7 +6487,8 @@ export function ChatSessions() {
             title={t('header.openMembersPanel')}
           >
             <span className="chat-session-right-collapsed-toggle-icon">
-              <UsersThreeIcon className="size-icon-xs" />
+              <CaretRightIcon className="size-icon-xs" />
+              <CaretRightIcon className="size-icon-xs -ml-1.5" />
             </span>
             <span>
               {sessionMembers.length} {t('header.aiMembers')}

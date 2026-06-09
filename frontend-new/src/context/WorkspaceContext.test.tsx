@@ -109,6 +109,38 @@ check(
   source,
 );
 check(
+  'syncs and sends workflow chat input mode like the legacy frontend',
+  source.includes("type ChatInputMode = 'free' | 'workflow'") &&
+    source.includes('resolveChatInputMode(session.chat_input_mode)') &&
+    source.includes('chatSessionsApi') &&
+    source.includes('chat_input_mode: toSessionChatInputMode(nextMode)') &&
+    source.includes("meta.chat_input_mode = 'workflow'") &&
+    source.includes("effectiveChatInputMode !== 'workflow' && mentions.length > 0"),
+  source,
+);
+check(
+  'derives the plan-mode main agent from the project lead member',
+  source.includes('resolveProjectMainAgentName') &&
+    source.includes('resolveProjectMainAgentId') &&
+    source.includes("member.member_type === 'agent' && member.role === 'lead'") &&
+    source.includes('const mainAgentName = resolveProjectMainAgentName(projectMembers, agents)') &&
+    source.includes('setMainAgentName(mainAgentName)') &&
+    source.includes('mainAgentName,'),
+  source,
+);
+check(
+  'routes workflow input mode messages to the project main agent',
+  source.includes('sessionLeadAgentIdBySessionIdRef') &&
+    source.includes('workflowRouteAgentIdRef') &&
+    source.includes('const syncSessionLeadAgent = useCallback') &&
+    source.includes("chatSessionUpdatePayload({ lead_agent_id: agentId })") &&
+    source.includes('const hasMainAgentInSession') &&
+    source.includes('void syncSessionLeadAgent(sid, mainAgentId)') &&
+    source.includes('ensureWorkflowRouteToMainAgent') &&
+    source.includes('await syncSessionLeadAgent(sid, workflowLeadAgentId)'),
+  source,
+);
+check(
   'message refresh preserves running placeholders until stream replacement',
   source.includes('mergePersistedWithRunningPlaceholders') &&
     source.includes('isPendingAgentPlaceholder') &&

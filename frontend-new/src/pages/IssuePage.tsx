@@ -164,6 +164,17 @@ const issueGroupOrder: Array<IssueGroup['id']> = [
   'duplicate',
 ];
 
+const issueGroupHeaderBgClass: Record<IssueGroup['id'], string> = {
+  backlog: 'bg-[var(--issue-section-backlog-bg)]',
+  todo: 'bg-[var(--issue-section-todo-bg)]',
+  in_progress: 'bg-[var(--issue-section-in-progress-bg)]',
+  ready_to_merge: 'bg-[var(--issue-section-ready-to-merge-bg)]',
+  merging: 'bg-[var(--issue-section-merging-bg)]',
+  done: 'bg-[var(--issue-section-done-bg)]',
+  cancelled: 'bg-[var(--issue-section-cancelled-bg)]',
+  duplicate: 'bg-[var(--issue-section-duplicate-bg)]',
+};
+
 export const projectWorkItemToIssueItem = (
   item: ProjectWorkItem,
   projectName: string | null | undefined,
@@ -1336,7 +1347,7 @@ export function IssuePage() {
   };
 
   return (
-    <div className="issue-page flex h-full min-h-0 flex-col overflow-hidden bg-[var(--canvas)] text-[var(--ink)]">
+    <div className="issue-page flex h-full min-h-0 flex-col overflow-hidden bg-[var(--surface-2)] text-[var(--ink)]">
       <span className="sr-only" aria-live="polite">
         {interactionMessage}
       </span>
@@ -1383,7 +1394,7 @@ export function IssuePage() {
             onAction={handleAction}
           />
 
-          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[var(--surface-1)] pb-10">
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[var(--surface-2)] pb-10">
             {suppressIssuePlaceholder ? (
               null
             ) : workItemsError ? (
@@ -1710,7 +1721,7 @@ function IssueHeader({
   tr: IssueTranslator;
 }) {
   return (
-    <header className="flex h-[49px] shrink-0 items-center justify-between border-b border-[var(--hairline)] bg-[var(--surface-1)] px-[29px]">
+    <header className="flex h-[49px] shrink-0 items-center justify-between border-b border-[var(--hairline)] bg-[var(--surface-2)] px-[29px]">
       <div className="flex min-w-0 items-center gap-[7px]">
         <ProjectBreadcrumbAvatar name={projectName} />
         <span className="truncate text-[16px] font-semibold leading-none text-[var(--ink)]">
@@ -2454,7 +2465,7 @@ function IssueToolbar({
   onAction: (message: string) => void;
 }) {
   return (
-    <section className="flex h-[46px] shrink-0 items-center justify-between bg-[var(--surface-1)] px-[17px]">
+    <section className="flex h-[46px] shrink-0 items-center justify-between bg-[var(--surface-2)] px-[17px]">
       <div className="flex items-center gap-1.5">
         <FilterTab
           active={activeFilter === 'all'}
@@ -2526,8 +2537,8 @@ function FilterTab({
       className={cn(
         'h-[33px] rounded-[17px] border px-3 text-[15px] font-semibold leading-none transition',
         active
-          ? 'border-[var(--hairline-strong)] bg-[var(--surface-3)] text-[var(--ink)]'
-          : 'border-[var(--hairline)] bg-[var(--surface-1)] text-[var(--ink-subtle)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)]',
+          ? 'border-[var(--hairline-strong)] bg-[var(--surface-1)] text-[var(--ink)]'
+          : 'border-[var(--hairline)] bg-[var(--surface-3)] text-[var(--ink-subtle)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)]',
       )}
     >
       {label}
@@ -2599,7 +2610,10 @@ function IssueSection({
             onToggle();
           }
         }}
-        className="flex h-[39px] items-center justify-between rounded-[9px] bg-[var(--surface-2)] px-4"
+        className={cn(
+          'flex h-[39px] items-center justify-between rounded-[9px] px-4',
+          issueGroupHeaderBgClass[group.id],
+        )}
       >
         <div className="flex items-center gap-[10px]">
           <ChevronDown
@@ -2671,8 +2685,8 @@ function IssueRow({
         }
       }}
       className={cn(
-        'grid h-[48px] grid-cols-[32px_70px_25px_minmax(0,1fr)_48px_62px] items-center px-9 text-[var(--ink)] transition hover:bg-[var(--surface-2)]',
-        selected && 'bg-[var(--surface-2)]',
+        'group grid h-[48px] grid-cols-[32px_70px_25px_minmax(0,1fr)_48px_62px] items-center px-9 text-[var(--ink)] transition hover:bg-[var(--issue-row-hover-bg)]',
+        selected && 'bg-[var(--issue-row-selected-bg)]',
       )}
     >
       <button
@@ -2691,12 +2705,26 @@ function IssueRow({
         />
       </button>
 
-      <IssueDisplayId id={issue.id} />
+      <IssueDisplayId
+        id={issue.id}
+        className={
+          selected
+            ? 'text-[var(--issue-row-active-muted)]'
+            : 'group-hover:text-[var(--issue-row-active-muted)]'
+        }
+      />
 
       <StatusIcon status={issue.status} size="row" />
 
       <div className="flex min-w-0 items-center gap-2 pr-2">
-        <h3 className="min-w-0 flex-1 truncate text-[13px] font-semibold leading-none text-[var(--ink)]">
+        <h3
+          className={cn(
+            'min-w-0 flex-1 truncate text-[13px] font-semibold leading-none',
+            selected
+              ? 'text-[var(--issue-row-active-ink)]'
+              : 'text-[var(--ink)] group-hover:text-[var(--issue-row-active-ink)]',
+          )}
+        >
           {issue.title}
         </h3>
 
@@ -2713,7 +2741,14 @@ function IssueRow({
         <IssueSourceIcon source={issue.workItem.source} />
       </div>
 
-      <time className="whitespace-nowrap text-right text-[13px] font-medium leading-none text-[var(--ink-subtle)]">
+      <time
+        className={cn(
+          'whitespace-nowrap text-right text-[13px] font-medium leading-none',
+          selected
+            ? 'text-[var(--issue-row-active-muted)]'
+            : 'text-[var(--ink-subtle)] group-hover:text-[var(--issue-row-active-muted)]',
+        )}
+      >
         {issue.date}
       </time>
     </article>
@@ -2774,7 +2809,6 @@ function StatusIcon({
   const dimension = size === 'header' ? 17 : 18;
   const borderWidth = size === 'header' ? 2 : 2.2;
   const iconSizeStyle = { height: dimension, width: dimension };
-  const innerBackground = size === 'header' ? '#191a1b' : '#0c0c0d';
 
   if (status === 'backlog') {
     return (
@@ -2841,13 +2875,6 @@ function StatusIcon({
             width: dimension * 0.29,
           }}
         />
-        <span
-          className="absolute rounded-full"
-          style={{
-            backgroundColor: innerBackground,
-            inset: borderWidth * 2,
-          }}
-        />
       </span>
     );
   }
@@ -2862,7 +2889,6 @@ function StatusIcon({
         <span
           className="absolute rounded-full border-l-[#4fc38b] border-t-[#4fc38b]"
           style={{
-            backgroundColor: innerBackground,
             borderLeftWidth: borderWidth * 1.6,
             borderTopWidth: borderWidth * 1.6,
             height: dimension * 0.48,

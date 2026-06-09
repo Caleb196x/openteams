@@ -158,11 +158,8 @@ export function TeamAddMemberButton({
     );
   }, [runtimeOptions, searchQuery]);
 
-  const showRuntimeOptions =
-    availableAgents.length === 0 || filteredAgents.length === 0;
   const hasAddOptions =
-    filteredAgents.length > 0 ||
-    (showRuntimeOptions && filteredRuntimeOptions.length > 0);
+    filteredAgents.length > 0 || filteredRuntimeOptions.length > 0;
 
   return (
     <div className="relative" ref={menuRef}>
@@ -235,33 +232,32 @@ export function TeamAddMemberButton({
                   </button>
                 ))}
 
-                {showRuntimeOptions &&
-                  filteredRuntimeOptions.map((option) => (
-                    <button
-                      key={option.runnerType}
-                      type="button"
-                      onClick={() => {
-                        onCreateMember(option.runnerType);
-                        setShowAddMenu(false);
-                        setSearchQuery("");
-                      }}
-                      className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-[var(--surface-2)]"
-                    >
-                      <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--primary-tint)] text-[var(--primary-hover)]">
-                        <Bot className="h-4 w-4" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-[13px] font-medium text-[var(--ink)]">
-                          {option.label}
-                        </p>
-                        <p className="truncate text-[11px] text-[var(--ink-tertiary)]">
-                          {option.modelName ||
-                            t("teamPage.options.runtimeDefault")}
-                        </p>
-                      </div>
-                      <Plus className="h-3.5 w-3.5 text-[var(--ink-tertiary)]" />
-                    </button>
-                  ))}
+                {filteredRuntimeOptions.map((option) => (
+                  <button
+                    key={option.runnerType}
+                    type="button"
+                    onClick={() => {
+                      onCreateMember(option.runnerType);
+                      setShowAddMenu(false);
+                      setSearchQuery("");
+                    }}
+                    className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-[var(--surface-2)]"
+                  >
+                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--primary-tint)] text-[var(--primary-hover)]">
+                      <Bot className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[13px] font-medium text-[var(--ink)]">
+                        {option.label}
+                      </p>
+                      <p className="truncate text-[11px] text-[var(--ink-tertiary)]">
+                        {option.modelName ||
+                          t("teamPage.options.runtimeDefault")}
+                      </p>
+                    </div>
+                    <Plus className="h-3.5 w-3.5 text-[var(--ink-tertiary)]" />
+                  </button>
+                ))}
               </>
             )}
           </div>

@@ -44,18 +44,13 @@ check(
 const projectManagementIds = new Set(
   mockShellOptions.projectManagementItems.map((item) => item.id),
 );
-check('project management includes GitHub repository', projectManagementIds.has('github-repository'));
+check('project management omits GitHub repository tab', !projectManagementIds.has('github-repository'));
 check('project management includes issues', projectManagementIds.has('project-issue'));
 check('project management includes members', projectManagementIds.has('member-configuration'));
 eq(
   'project issues opens its own page',
   mockShellOptions.projectManagementItems.find((item) => item.id === 'project-issue')?.targetPage,
   'issue',
-);
-eq(
-  'GitHub repository opens its own page',
-  mockShellOptions.projectManagementItems.find((item) => item.id === 'github-repository')?.targetPage,
-  'github',
 );
 
 const systemIds = new Set(mockShellOptions.systemItems.map((item) => item.id));

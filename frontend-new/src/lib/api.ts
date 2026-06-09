@@ -68,6 +68,7 @@ import type {
   ProfilesContent,
   ResolveActionResponse,
   ResumeExecutionResponse,
+  RetryWorkflowPlanGenerationResponse,
   SessionWorkspacesResponse,
   UpdateAgentRuntimeConfig,
   UpdateAgentSkill,
@@ -81,7 +82,11 @@ import type {
   UserReviewResponseRequest,
   UserReviewResponseResponse,
   UserSystemInfo,
+  WorkflowCardLoop,
   WorkflowCardProjection,
+  WorkflowIterationSummaryData,
+  WorkflowPendingInputData,
+  WorkflowPendingReviewData,
   WorkflowTranscriptEntry,
   WorkspaceChangesResponse,
 } from "@/types";
@@ -111,6 +116,14 @@ import { cliConfigApi } from "./cliConfigApi";
 export { ApiError } from "./apiCore";
 export { buildStatsApi } from "./buildStatsApi";
 export { cliConfigApi } from "./cliConfigApi";
+
+export type WorkflowCardData = WorkflowCardProjection;
+export type WorkflowCardLoopData = WorkflowCardLoop;
+export type {
+  WorkflowIterationSummaryData,
+  WorkflowPendingInputData,
+  WorkflowPendingReviewData,
+};
 
 // -----------------------------------------------------------------------------
 // System info / Config
@@ -423,7 +436,11 @@ export const chatMessagesApi = {
   uploadAttachment: async (
     sessionId: string,
     files: File | File[],
-    options?: { content?: string; referenceMessageId?: string },
+    options?: {
+      chatInputMode?: "free" | "workflow";
+      content?: string;
+      referenceMessageId?: string;
+    },
   ): Promise<BackendChatMessage> => {
     const form = new FormData();
     for (const file of Array.isArray(files) ? files : [files]) {
@@ -434,6 +451,9 @@ export const chatMessagesApi = {
     }
     if (options?.referenceMessageId) {
       form.append("reference_message_id", options.referenceMessageId);
+    }
+    if (options?.chatInputMode === "workflow") {
+      form.append("chat_input_mode", "workflow");
     }
     const r = await makeRequest(
       `/api/chat/sessions/${encodeURIComponent(sessionId)}/messages/upload`,
@@ -737,6 +757,19 @@ export const workflowApi = {
     );
     return handleApiResponse<ExecutePlanResponse>(r);
   },
+  updateReviewSettings: async (
+    sessionId: string,
+    executionId: string,
+    data: Pick<ExecutePlanRequest, "stepReviewOverrides">,
+  ): Promise<WorkflowCardProjection> => {
+    const r = await makeRequest(
+      `/api/chat/sessions/${encodeURIComponent(sessionId)}/workflow/executions/${encodeURIComponent(
+        executionId,
+      )}/review-settings`,
+      { method: "POST", body: JSON.stringify(data) },
+    );
+    return handleApiResponse<WorkflowCardProjection>(r);
+  },
   resumeExecution: async (
     sessionId: string,
     executionId: string,
@@ -748,6 +781,18 @@ export const workflowApi = {
       { method: "POST" },
     );
     return handleApiResponse<ResumeExecutionResponse>(r);
+  },
+  retryPlanGeneration: async (
+    sessionId: string,
+    messageId: string,
+  ): Promise<RetryWorkflowPlanGenerationResponse> => {
+    const r = await makeRequest(
+      `/api/chat/sessions/${encodeURIComponent(sessionId)}/workflow/plan-generations/${encodeURIComponent(
+        messageId,
+      )}/retry`,
+      { method: "POST" },
+    );
+    return handleApiResponse<RetryWorkflowPlanGenerationResponse>(r);
   },
   getExecutionTranscripts: async (
     sessionId: string,
@@ -766,7 +811,7 @@ export const workflowApi = {
         step_key: opts?.stepKey,
         workflow_agent_session_id: opts?.workflowAgentSessionId,
       })}`,
-      { method: "POST" },
+      { method: "GET" },
     );
     return handleApiResponse<WorkflowTranscriptEntry[]>(r);
   },
@@ -829,7 +874,7 @@ export const workflowApi = {
         step_key: opts?.stepKey,
         workflow_agent_session_id: opts?.workflowAgentSessionId,
       })}`,
-      { method: "POST" },
+      { method: "GET" },
     );
     return handleApiResponse<WorkflowTranscriptEntry[]>(r);
   },
@@ -940,6 +985,52 @@ export const workflowApi = {
     });
     return handleApiResponse<UserIterationFeedbackResponse>(r);
   },
+};
+
+const workflowTranscriptForOldUi = (entry: WorkflowTranscriptEntry) => ({
+  ...entry,
+  message_type:
+    entry.sender_type === "agent" ||
+    entry.sender_type === "user" ||
+    entry.sender_type === "system"
+      ? entry.sender_type
+      : "control",
+});
+
+export const chatApi = {
+  getWorkflowCard: chatMessagesApi.getWorkflowCard,
+  executePlan: workflowApi.executePlan,
+  updateWorkflowReviewSettings: workflowApi.updateReviewSettings,
+  resumeExecution: workflowApi.resumeExecution,
+  retryWorkflowPlanGeneration: workflowApi.retryPlanGeneration,
+  getWorkflowStepTranscripts: async (
+    sessionId: string,
+    stepId: string,
+    filters?: { stepKey?: string; workflowAgentSessionId?: string },
+  ) => {
+    const entries = await workflowApi.getStepTranscripts(
+      sessionId,
+      stepId,
+      filters,
+    );
+    return entries.map(workflowTranscriptForOldUi);
+  },
+  submitWorkflowStepInput: workflowApi.submitStepInput,
+  interruptWorkflowStep: workflowApi.interruptStepById,
+  stopWorkflowStep: workflowApi.stopStep,
+  retryWorkflowStep: workflowApi.retryStep,
+  approveWorkflowStep: workflowApi.approveStep,
+  resolveWorkflowStepPermission: workflowApi.resolveStepPermission,
+  getWorkflowTranscripts: async (sessionId: string, executionId: string) => {
+    const entries = await workflowApi.getExecutionTranscripts(
+      sessionId,
+      executionId,
+    );
+    return entries.map(workflowTranscriptForOldUi);
+  },
+  resolveWorkflowAction: workflowApi.resolveAction,
+  respondToWorkflowReview: workflowApi.respondToReview,
+  submitWorkflowIterationFeedback: workflowApi.submitIterationFeedback,
 };
 
 // -----------------------------------------------------------------------------

@@ -37,6 +37,7 @@ export interface Session {
 
 export interface Message {
   id: string;
+  sessionId?: string;
   avatar: string;
   sender: string;
   time: string;
@@ -53,6 +54,26 @@ export interface Message {
   sessionAgentId?: string;
   activityLines?: ChatRunActivityLine[];
   activityLoadState?: ActivityLoadState;
+  workflowCard?: WorkflowCardMessageReference;
+}
+
+export type WorkflowCardMessageType =
+  | 'workflow_execution'
+  | 'workflow_plan'
+  | 'workflow_plan_generation';
+
+export interface WorkflowCardMessageReference {
+  messageId: string;
+  cardType: WorkflowCardMessageType;
+  planGeneration?: WorkflowPlanGenerationMeta;
+}
+
+export interface WorkflowPlanGenerationMeta {
+  status?: string;
+  plan_goal?: string;
+  retryable?: boolean;
+  retry_endpoint?: string;
+  error_message?: string | null;
 }
 
 export interface QuotedMessageReference {
@@ -923,10 +944,18 @@ export interface WorkflowCardStep {
   retry_count: number;
   max_retry: number;
   loop_key: string | null;
-  latest_review: unknown | null;
+  latest_review: WorkflowCardReview | null;
   agent_name: string | null;
   summary_text: string | null;
   content: string | null;
+}
+
+export interface WorkflowCardReview {
+  reviewer_type: string;
+  verdict: string;
+  feedback: string;
+  review_round: number;
+  created_at: string;
 }
 
 export interface WorkflowCardAgent {
@@ -934,6 +963,118 @@ export interface WorkflowCardAgent {
   workflow_agent_session_id: string | null;
   agent_id: string;
   name: string;
+}
+
+export interface WorkflowCardLoop {
+  id: string;
+  loop_key: string;
+  status: string;
+  retry_count: number;
+  max_retry: number;
+  user_review_required: boolean;
+  rejection_reason: string | null;
+  member_step_ids: string[];
+  review_step_id: string;
+}
+
+export interface WorkflowPendingReviewField {
+  key: string;
+  label?: string | null;
+  field_type?: string | null;
+  placeholder?: string | null;
+  required?: boolean | null;
+}
+
+export interface WorkflowPendingReviewPromptTemplate {
+  message?: string | null;
+  fields: WorkflowPendingReviewField[];
+}
+
+export interface WorkflowPendingReviewData {
+  review_id: string;
+  review_type: string;
+  target_id: string;
+  target_title: string;
+  prompt_template: WorkflowPendingReviewPromptTemplate;
+  context_summary?: string | null;
+}
+
+export interface WorkflowPendingInputData {
+  input_id: string;
+  step_id: string;
+  step_key: string;
+  target_title: string;
+  prompt?: string | null;
+  description?: string | null;
+  placeholder?: string | null;
+}
+
+export interface WorkflowIterationSummaryData {
+  round_index: number;
+  status: string;
+  user_feedback: string | null;
+  result_summary: string | null;
+  created_at?: string | null;
+}
+
+export interface WorkflowCardPlanNode {
+  id: string;
+  position?: { x: number; y: number };
+  data: {
+    title?: string | null;
+    description?: string | null;
+    stepType?: string | null;
+    step_type?: string | null;
+    agentId?: string | null;
+    agent_id?: string | null;
+    agentName?: string | null;
+    agent_name?: string | null;
+    instructions?: string | null;
+    status?: string | null;
+    reviewScope?: string[] | null;
+    loopKey?: string | null;
+    loop_key?: string | null;
+    [key: string]: JsonValue | undefined;
+  };
+}
+
+export interface WorkflowCardPlanEdge {
+  id: string;
+  source: string;
+  target: string;
+  label?: string | null;
+}
+
+export interface WorkflowCardPlanLoop {
+  loopKey?: string | null;
+  loop_key?: string | null;
+  memberSteps?: string[];
+  member_step_keys?: string[];
+  reviewStep?: string | null;
+  review_step_key?: string | null;
+  reviewScope?: string[] | null;
+  review_scope_step_keys?: string[] | null;
+  maxRetry?: number | null;
+  max_retry?: number | null;
+  userReviewRequired?: boolean | null;
+  user_review_required?: boolean | null;
+}
+
+export interface WorkflowCardPlanData {
+  nodes: WorkflowCardPlanNode[];
+  edges: WorkflowCardPlanEdge[];
+  viewport?: { x: number; y: number; zoom: number } | null;
+  loops?: WorkflowCardPlanLoop[] | null;
+}
+
+export interface WorkflowRoundGraphData {
+  round_id: string;
+  round_index: number;
+  revision_id: string;
+  status: string;
+  plan: WorkflowCardPlanData;
+  steps: WorkflowCardStep[];
+  loops: WorkflowCardLoop[];
 }
 
 export interface WorkflowCardProjection {
@@ -952,13 +1093,13 @@ export interface WorkflowCardProjection {
   agents: WorkflowCardAgent[];
   steps: WorkflowCardStep[];
   current_round: number;
-  loops: unknown[];
-  pending_review: unknown | null;
-  pending_reviews: unknown[];
-  pending_input: unknown | null;
-  iteration_history: unknown[];
-  round_graphs: unknown[];
-  plan: unknown;
+  loops: WorkflowCardLoop[];
+  pending_review: WorkflowPendingReviewData | null;
+  pending_reviews: WorkflowPendingReviewData[];
+  pending_input: WorkflowPendingInputData | null;
+  iteration_history: WorkflowIterationSummaryData[];
+  round_graphs: WorkflowRoundGraphData[];
+  plan: WorkflowCardPlanData;
   started_at: string | null;
   completed_at: string | null;
   validation_errors: string | null;
@@ -1007,6 +1148,11 @@ export interface ResumeExecutionResponse {
 
 export interface PauseAllResponse {
   status: string;
+}
+
+export interface RetryWorkflowPlanGenerationResponse {
+  status: string;
+  message_id: string;
 }
 
 export interface InterruptStepResponse {

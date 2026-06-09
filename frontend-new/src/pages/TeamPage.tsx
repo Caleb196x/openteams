@@ -113,7 +113,7 @@ function TeamHeader({
   t: TranslateFn;
 }) {
   return (
-    <header className="flex h-[49px] shrink-0 items-center justify-between border-b border-[var(--hairline)] bg-[var(--surface-1)] px-[29px]">
+    <header className="flex h-[49px] shrink-0 items-center justify-between border-b border-[var(--hairline)] bg-[var(--surface-2)] px-[29px]">
       <nav
         aria-label="Breadcrumb"
         className="flex min-w-0 items-center gap-[7px]"
@@ -303,6 +303,29 @@ const createUniqueAgentName = (
   return `${baseName} ${Date.now()}`;
 };
 
+const removeAgentFromProjectSessions = async (
+  projectId: string,
+  agentId: string | null,
+) => {
+  if (!agentId) return;
+
+  const projectSessions = await projectApi.listSessions(projectId);
+  await Promise.all(
+    projectSessions.map(async (session) => {
+      const sessionMembers = await sessionAgentsApi.list(session.id);
+      const matchingSessionMembers = sessionMembers.filter(
+        (sessionMember) => sessionMember.agent_id === agentId,
+      );
+
+      await Promise.all(
+        matchingSessionMembers.map((sessionMember) =>
+          sessionAgentsApi.remove(session.id, sessionMember.id),
+        ),
+      );
+    }),
+  );
+};
+
 export function TeamPage() {
   const {
     projects,
@@ -398,16 +421,12 @@ export function TeamPage() {
   );
   const addableRuntimeOptions = useMemo(
     () =>
-      runners
-        .filter((runner) => getRuntimeDisplayState(runner) === "available")
-        .map((runner) => ({
-          label: getRunnerLabel(runner.runner_type),
-          modelName:
-            runtimeConfiguredModel(runner) ||
-            runner.discovered_models[0] ||
-            null,
-          runnerType: runner.runner_type,
-        })),
+      runners.map((runner) => ({
+        label: getRunnerLabel(runner.runner_type),
+        modelName:
+          runtimeConfiguredModel(runner) || runner.discovered_models[0] || null,
+        runnerType: runner.runner_type,
+      })),
     [runners],
   );
   const selectedRuntime = useMemo(
@@ -961,6 +980,7 @@ export function TeamPage() {
     setNotice(null);
     try {
       await projectApi.removeMember(selectedProjectId, member.id);
+      await removeAgentFromProjectSessions(selectedProjectId, member.agent_id);
       const nextMembers = members.filter((item) => item.id !== member.id);
       setMembers(nextMembers);
       setSelectedMemberId((current) => {
@@ -1010,7 +1030,7 @@ export function TeamPage() {
 
   if (!selectedProjectId) {
     return (
-      <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--canvas)] text-[var(--ink)]">
+      <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--surface-2)] text-[var(--ink)]">
         <TeamHeader projectName={currentProjectName} t={t} />
         {!projectSelectionPending && (
           <div className="p-[19px] text-[14px] text-[var(--ink-subtle)]">
@@ -1022,7 +1042,7 @@ export function TeamPage() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--canvas)] text-[var(--ink)]">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--surface-2)] text-[var(--ink)]">
       <TeamHeader
         projectName={currentProjectName}
         t={t}
@@ -1041,7 +1061,7 @@ export function TeamPage() {
         }
       />
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--surface-1)]">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--surface-2)]">
         {teamDataReady && (error || notice) && (
           <div className="shrink-0 space-y-2 border-b border-[var(--hairline)] p-3">
             {error && (
@@ -1069,7 +1089,7 @@ export function TeamPage() {
 
         {teamDataReady && (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:grid lg:grid-cols-[minmax(260px,280px)_minmax(0,1fr)]">
-          <aside className="min-h-0 overflow-y-auto border-b border-[var(--hairline)] bg-[var(--surface-1)] ot-scroll-area-styled lg:border-b-0 lg:border-r">
+          <aside className="min-h-0 overflow-y-auto border-b border-[var(--hairline)] bg-[var(--surface-2)] ot-scroll-area-styled lg:border-b-0 lg:border-r">
             <TeamMemberSidebar
               agents={agents}
               loading={false}
@@ -1083,7 +1103,7 @@ export function TeamPage() {
             />
           </aside>
 
-          <main className="min-h-0 overflow-y-auto bg-[var(--surface-1)] text-[var(--ink)] ot-scroll-area-styled">
+          <main className="min-h-0 overflow-y-auto bg-[var(--surface-2)] text-[var(--ink)] ot-scroll-area-styled">
             <TeamConfigTabs
               allowedSkillIds={allowedSkillIds}
               capability={capability}

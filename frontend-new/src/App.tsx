@@ -39,7 +39,12 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { chatAgentsApi, chatMessagesApi, projectApi } from "@/lib/api";
+import {
+  chatAgentsApi,
+  chatMessagesApi,
+  chatSessionsApi,
+  projectApi,
+} from "@/lib/api";
 import { mapSession } from "@/lib/mappers";
 import { mockFrontendApi } from "@/lib/mockFrontendApi";
 import { projectDisplayName } from "@/lib/projectDisplay";
@@ -643,11 +648,13 @@ function WorkspaceLayout() {
 
     try {
       let workspacePath: string | null = null;
+      let workflowLeadAgentId: string | null = null;
       try {
         const projectMembers = await projectApi.listMembers(selectedProjectId);
         if (options.taskMode === 'workflow') {
           const workflowProjectAgent = findWorkflowProjectAgent(projectMembers);
           workspacePath = workflowProjectAgent?.default_workspace_path ?? null;
+          workflowLeadAgentId = workflowProjectAgent?.agent_id ?? null;
         } else {
           const normalizedName = options.memberName?.replace(/^@/, '').toLowerCase();
           const matched = projectMembers.find((pm) => {
@@ -685,6 +692,26 @@ function WorkspaceLayout() {
         try {
           let content = prompt;
           const meta: { [key: string]: JsonValue } = {};
+
+          if (options.taskMode === 'workflow') {
+            meta.chat_input_mode = 'workflow';
+            if (workflowLeadAgentId) {
+              await chatSessionsApi
+                .update(backendSession.id, {
+                  title: null,
+                  status: null,
+                  lead_agent_id: workflowLeadAgentId,
+                  summary_text: null,
+                  archive_ref: null,
+                  last_seen_diff_key: null,
+                  team_protocol: null,
+                  team_protocol_enabled: null,
+                  default_workspace_path: null,
+                  chat_input_mode: null,
+                })
+                .catch(() => undefined);
+            }
+          }
 
           if (options.taskMode === 'freeChat' && options.memberName) {
             const handle = options.memberName.startsWith('@')
@@ -979,7 +1006,8 @@ function WorkspaceLayout() {
           </header>
 
           <main
-            className={`flex-1 min-h-0 rounded-lg border border-[var(--hairline)] bg-[var(--surface-2)] ${
+            id="app-main-content"
+            className={`relative flex-1 min-h-0 rounded-lg border border-[var(--hairline)] bg-[var(--surface-2)] ${
               activeAppPage === "providers" ||
               activeAppPage === "build-stats" ||
               activeAppPage === "github" ||

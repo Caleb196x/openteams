@@ -1003,8 +1003,8 @@ export function TeamConfigTabs(props: TeamConfigTabsProps) {
   if (!selectedMember) return <EmptyMemberState t={t} />;
 
   return (
-    <div className="flex min-h-full flex-col bg-[var(--surface-1)]">
-      <div className="sticky top-0 z-20 flex shrink-0 items-end justify-between gap-4 border-b border-[var(--hairline)] bg-[var(--surface-1)] px-5">
+    <div className="flex min-h-full flex-col bg-[var(--surface-2)]">
+      <div className="sticky top-0 z-20 flex shrink-0 items-end justify-between gap-4 border-b border-[var(--hairline)] bg-[var(--surface-2)] px-5">
         <div className="flex min-w-0 items-center gap-1">
           {tabItems.map((item) => {
             const Icon = item.icon;

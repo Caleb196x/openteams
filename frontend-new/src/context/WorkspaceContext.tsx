@@ -23,6 +23,7 @@ import {
   Strategy,
   BackendChatSkill,
   Config,
+  UpdateChatSession,
   WorkflowCardProjection,
   WorkspaceChangesResponse,
   JsonValue,
@@ -67,7 +68,32 @@ import { notifyBuildStatsUsageUpdated } from '@/lib/buildStatsEvents';
 
 type ListUpdater<T> = T[] | ((prev: T[]) => T[]);
 
+type ChatInputMode = 'free' | 'workflow';
+const DEFAULT_CHAT_INPUT_MODE: ChatInputMode = 'free';
+
+const resolveChatInputMode = (
+  value: string | null | undefined,
+): ChatInputMode => (value === 'workflow' ? 'workflow' : 'free');
+
+const toSessionChatInputMode = (mode: ChatInputMode): string | null =>
+  mode === 'workflow' ? 'workflow' : null;
+
+const chatSessionUpdatePayload = (
+  patch: Partial<UpdateChatSession>,
+): UpdateChatSession => ({
+  title: null,
+  status: null,
+  summary_text: null,
+  archive_ref: null,
+  last_seen_diff_key: null,
+  team_protocol: null,
+  team_protocol_enabled: null,
+  default_workspace_path: null,
+  ...patch,
+});
+
 interface SendMessageOptions {
+  chatInputMode?: ChatInputMode;
   quotedMessage?: QuotedMessageReference;
 }
 
@@ -172,6 +198,34 @@ const extractAgentMentions = (text: string): string[] =>
 
 const asAgentHandle = (name: string): string =>
   name.startsWith('@') ? name : `@${name}`;
+
+const resolveProjectMainAgentMember = (
+  projectMembers: ProjectMemberWithRuntime[],
+): ProjectMemberWithRuntime | null =>
+  projectMembers.find(
+    (member) => member.member_type === 'agent' && member.role === 'lead',
+  ) ??
+  projectMembers.find((member) => member.member_type === 'agent') ??
+  null;
+
+const resolveProjectMainAgentId = (
+  projectMembers: ProjectMemberWithRuntime[],
+): string | null =>
+  resolveProjectMainAgentMember(projectMembers)?.agent_id ?? null;
+
+const resolveProjectMainAgentName = (
+  projectMembers: ProjectMemberWithRuntime[],
+  agents: BackendChatAgent[],
+): string | null => {
+  const mainMember = resolveProjectMainAgentMember(projectMembers);
+  if (!mainMember) return null;
+
+  const agent = mainMember.agent_id
+    ? agents.find((candidate) => candidate.id === mainMember.agent_id)
+    : undefined;
+  const displayName = mainMember.member_name?.trim() || agent?.name?.trim();
+  return displayName ? asAgentHandle(displayName) : null;
+};
 
 const makePendingAgentPlaceholder = (
   text: string,
@@ -364,6 +418,10 @@ interface WorkspaceContextProps {
   messages: Message[];
   activeSessionId: string;
   setActiveSessionId: (id: string) => void;
+  chatInputMode: ChatInputMode;
+  setChatInputMode: (mode?: ChatInputMode) => void;
+  ensureWorkflowRouteToMainAgent: () => Promise<void>;
+  mainAgentName: string | null;
   providers: Provider[];
   setProviders: (p: ListUpdater<Provider>) => void;
   strategies: Strategy[];
@@ -500,6 +558,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
   const [membersAsync, setMembersAsync] = useState<
     AsyncResourceState<Member[]>
   >(() => initialAsync([]));
+  const [mainAgentName, setMainAgentName] = useState<string | null>(null);
   const [providersAsync, setProvidersAsync] = useState<
     AsyncResourceState<Provider[]>
   >(() => initialAsync([]));
@@ -515,6 +574,9 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
   const [workspaceChangesAsync, setWorkspaceChangesAsync] = useState<
     AsyncResourceState<WorkspaceChangesResponse | null>
   >(() => initialAsync(null));
+  const [chatInputModeBySessionId, setChatInputModeBySessionId] = useState<
+    Record<string, ChatInputMode>
+  >({});
 
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [mockAgentRepliesByMention, setMockAgentRepliesByMention] = useState<
@@ -554,6 +616,11 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
   // Cache the latest activeSessionId so async callbacks see the live value.
   const activeSessionIdRef = useRef(activeSessionId);
   const selectedProjectIdRef = useRef(selectedProjectId);
+  const sessionLeadAgentIdBySessionIdRef = useRef<Record<
+    string,
+    string | null
+  >>({});
+  const workflowRouteAgentIdRef = useRef<string | null>(null);
   const agentNamesByIdRef = useRef<Record<string, string>>({});
   const agentModelsByIdRef = useRef<Record<string, string | null>>({});
   useEffect(() => {
@@ -562,6 +629,12 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
   useEffect(() => {
     selectedProjectIdRef.current = selectedProjectId;
   }, [selectedProjectId]);
+
+  const chatInputMode =
+    activeSessionId !== ''
+      ? (chatInputModeBySessionId[activeSessionId] ??
+        DEFAULT_CHAT_INPUT_MODE)
+      : DEFAULT_CHAT_INPUT_MODE;
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -628,6 +701,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
     setActiveSessionId('');
     setMessagesAsync(succeed([]));
     setMembersAsync(succeed([]));
+    setMainAgentName(null);
   }, []);
 
   const setSelectedProjectId = useCallback(
@@ -642,6 +716,94 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
       }
     },
     [clearSessionScopedState],
+  );
+
+  const syncSessionLeadAgent = useCallback(
+    async (sessionId: string, agentId: string | null): Promise<void> => {
+      if (!sessionId || !agentId) return;
+
+      const currentLeadAgentId =
+        sessionLeadAgentIdBySessionIdRef.current[sessionId] ?? null;
+      if (currentLeadAgentId === agentId) return;
+
+      sessionLeadAgentIdBySessionIdRef.current = {
+        ...sessionLeadAgentIdBySessionIdRef.current,
+        [sessionId]: agentId,
+      };
+
+      try {
+        const updatedSession = await chatSessionsApi.update(
+          sessionId,
+          chatSessionUpdatePayload({ lead_agent_id: agentId }),
+        );
+        sessionLeadAgentIdBySessionIdRef.current = {
+          ...sessionLeadAgentIdBySessionIdRef.current,
+          [updatedSession.id]: updatedSession.lead_agent_id,
+        };
+      } catch (err) {
+        sessionLeadAgentIdBySessionIdRef.current = {
+          ...sessionLeadAgentIdBySessionIdRef.current,
+          [sessionId]: currentLeadAgentId,
+        };
+        console.warn('Failed to sync workflow lead agent', err);
+      }
+    },
+    [],
+  );
+
+  const ensureWorkflowRouteToMainAgent = useCallback(async (): Promise<void> => {
+    const sid = activeSessionIdRef.current;
+    const agentId = workflowRouteAgentIdRef.current;
+    await syncSessionLeadAgent(sid, agentId);
+  }, [syncSessionLeadAgent]);
+
+  const setChatInputMode = useCallback(
+    (mode?: ChatInputMode) => {
+      const sid = activeSessionIdRef.current;
+      if (!sid) return;
+
+      const previousMode =
+        chatInputModeBySessionId[sid] ?? DEFAULT_CHAT_INPUT_MODE;
+      const nextMode =
+        mode ?? (previousMode === 'workflow' ? 'free' : 'workflow');
+
+      setChatInputModeBySessionId((prev) => ({
+        ...prev,
+        [sid]: nextMode,
+      }));
+      if (nextMode === 'workflow') {
+        void ensureWorkflowRouteToMainAgent();
+      }
+
+      if (sessionsAsync.source !== 'api') return;
+
+      chatSessionsApi
+        .update(sid, {
+          ...chatSessionUpdatePayload({
+            chat_input_mode: toSessionChatInputMode(nextMode),
+          }),
+        })
+        .then((updatedSession) => {
+          setChatInputModeBySessionId((prev) => ({
+            ...prev,
+            [updatedSession.id]: resolveChatInputMode(
+              updatedSession.chat_input_mode,
+            ),
+          }));
+        })
+        .catch((err) => {
+          setChatInputModeBySessionId((prev) => ({
+            ...prev,
+            [sid]: previousMode,
+          }));
+          showToast(
+            err instanceof Error
+              ? `Mode switch failed: ${err.message}`
+              : 'Mode switch failed.',
+          );
+        });
+    },
+    [chatInputModeBySessionId, ensureWorkflowRouteToMainAgent, sessionsAsync.source],
   );
 
   const applyMockBootstrap = useCallback(
@@ -716,6 +878,22 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
     try {
       const backend = await projectApi.listSessions(projectId);
       if (selectedProjectIdRef.current !== projectId) return;
+
+      sessionLeadAgentIdBySessionIdRef.current = {
+        ...sessionLeadAgentIdBySessionIdRef.current,
+        ...Object.fromEntries(
+          backend.map((session) => [session.id, session.lead_agent_id]),
+        ),
+      };
+      setChatInputModeBySessionId((prev) => ({
+        ...prev,
+        ...Object.fromEntries(
+          backend.map((session) => [
+            session.id,
+            resolveChatInputMode(session.chat_input_mode),
+          ]),
+        ),
+      }));
 
       const currentActiveSessionId = activeSessionIdRef.current;
       const nextActiveSessionId = backend.some(
@@ -820,6 +998,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
     const sid = activeSessionIdRef.current;
     if (!sid) {
       setMembersAsync(succeed([]));
+      setMainAgentName(null);
       return;
     }
 
@@ -831,6 +1010,18 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
         sessionAgentsApi.list(sid).catch(() => []),
         projectId ? projectApi.listMembers(projectId).catch(() => []) : [],
       ]);
+      const mainAgentId = resolveProjectMainAgentId(projectMembers);
+      const mainAgentName = resolveProjectMainAgentName(projectMembers, agents);
+      const hasMainAgentInSession =
+        !!mainAgentId &&
+        sessionAgents.some((sessionAgent) => sessionAgent.agent_id === mainAgentId);
+      workflowRouteAgentIdRef.current = hasMainAgentInSession
+        ? mainAgentId
+        : null;
+      setMainAgentName(mainAgentName);
+      if (mainAgentId && hasMainAgentInSession) {
+        void syncSessionLeadAgent(sid, mainAgentId);
+      }
       const projectMemberNameByAgentId = new Map(
         projectMembers
           .filter((member) => member.agent_id && member.member_name?.trim())
@@ -867,11 +1058,13 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
       );
       setMembersAsync(succeed(mapped));
     } catch (err) {
+      workflowRouteAgentIdRef.current = null;
+      setMainAgentName(mockBootstrapRef.current?.members[0]?.name ?? null);
       setMembersAsync((prev) =>
         fail(prev, err, mockBootstrapRef.current?.members ?? []),
       );
     }
-  }, []);
+  }, [syncSessionLeadAgent]);
 
   const refreshProviders = useCallback(async (): Promise<void> => {
     setProvidersAsync(beginLoad);
@@ -1374,21 +1567,33 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
       .split(/\s+/)
       .filter((w) => w.startsWith('@'))
       .map((m) => m.slice(1).toLowerCase());
+    const effectiveChatInputMode = options.chatInputMode ?? chatInputMode;
     const meta: { [key: string]: JsonValue } = {};
-    if (mentions.length > 0) {
+    if (effectiveChatInputMode === 'workflow') {
+      meta.chat_input_mode = 'workflow';
+    }
+    if (effectiveChatInputMode !== 'workflow' && mentions.length > 0) {
       meta.mentions = mentions;
     }
     if (options.quotedMessage) {
       meta.reference = { message_id: options.quotedMessage.id };
     }
+    const workflowLeadAgentId =
+      effectiveChatInputMode === 'workflow'
+        ? workflowRouteAgentIdRef.current
+        : null;
 
-    chatMessagesApi
-      .send(sid, {
+    const persistMessage = async () => {
+      await syncSessionLeadAgent(sid, workflowLeadAgentId);
+      return chatMessagesApi.send(sid, {
         sender_type: 'user',
         sender_id: null,
         content: text,
         meta: Object.keys(meta).length > 0 ? meta : null,
-      })
+      });
+    };
+
+    persistMessage()
       .then(() => {
         void refreshMessages();
       })
@@ -1556,6 +1761,10 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
         messages,
         activeSessionId,
         setActiveSessionId,
+        chatInputMode,
+        setChatInputMode,
+        ensureWorkflowRouteToMainAgent,
+        mainAgentName,
         providers,
         setProviders,
         strategies,

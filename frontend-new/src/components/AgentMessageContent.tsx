@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { AgentActivityPanel } from "@/components/AgentActivityPanel";
 import { AgentMarkdown } from "@/components/AgentMarkdown";
 import { AgentRunStatusPill } from "@/components/AgentRunStatusPill";
+import { WorkflowCard } from "@/components/workflow/WorkflowCard";
 import { ApiError, chatRunsApi } from "@/lib/api";
 import type { ActivityLoadState, ChatRunActivityLine, Message } from "@/types";
 
@@ -143,6 +144,15 @@ export const AgentMessageContent: React.FC<AgentMessageContentProps> = ({
   return (
     <div className="space-y-2">
       {isRunning && <AgentRunStatusPill label={t("agentActivity.running")} />}
+
+      {message.workflowCard && message.sessionId && (
+        <WorkflowCard
+          sessionId={message.sessionId}
+          messageId={message.workflowCard.messageId}
+          cardType={message.workflowCard.cardType}
+          planGenerationMeta={message.workflowCard.planGeneration}
+        />
+      )}
 
       {message.runId && !isRunning && (
         <button

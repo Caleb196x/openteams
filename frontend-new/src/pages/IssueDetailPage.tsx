@@ -771,7 +771,7 @@ export function IssueDetailPage({
         tr={tr}
       />
 
-      <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[var(--surface-1)] text-[var(--ink)]">
+      <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[var(--surface-2)] text-[var(--ink)]">
         <div className="grid min-w-[820px] grid-cols-[minmax(0,1fr)_268px] gap-8 px-[15px] pb-14 pt-[6px]">
           <section className="min-w-0 pl-2 pr-1 pt-6">
             <h2 className="text-[23px] font-bold leading-tight text-[var(--ink)]">
@@ -1046,9 +1046,9 @@ export function IssueDetailPage({
                     return (
                       <div
                         key={linkId}
-                        className="flex w-full items-center gap-[10px] text-left text-[14px] font-semibold leading-none text-[#979aa1]"
+                        className="flex w-full items-center gap-[10px] text-left text-[14px] font-semibold leading-none text-[var(--ink)]"
                       >
-                        <span className="flex h-[17px] w-[17px] shrink-0 items-center justify-center text-[#979aa1]">
+                        <span className="flex h-[17px] w-[17px] shrink-0 items-center justify-center text-[var(--ink)]">
                           <Box
                             aria-hidden="true"
                             className="h-[16px] w-[16px]"
@@ -1159,7 +1159,7 @@ function IssueDetailHeader({
   tr: IssueDetailTranslator;
 }) {
   return (
-    <header className="flex h-[49px] shrink-0 items-center justify-between border-b border-[var(--hairline)] bg-[var(--surface-1)] px-[29px]">
+    <header className="flex h-[49px] shrink-0 items-center justify-between border-b border-[var(--hairline)] bg-[var(--surface-2)] px-[29px]">
       <div className="flex min-w-0 items-center gap-[7px]">
         <ProjectBreadcrumbAvatar name={projectName} />
         <button
@@ -1290,7 +1290,7 @@ function DetailPanel({
     .replace(/[^a-z0-9]+/g, '-')}`;
 
   return (
-    <section className="mb-[9px] rounded-[10px] border border-[var(--hairline)] bg-[var(--surface-2)] px-4 py-[15px]">
+    <section className="mb-[9px] rounded-[10px] border border-[var(--hairline)] bg-[var(--surface-1)] px-4 py-[15px]">
       <button
         type="button"
         className={cn(
@@ -1439,7 +1439,7 @@ function PriorityDropdown({
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className="inline-flex h-7 max-w-full items-center gap-2 rounded-full px-1.5 text-[14px] font-normal leading-none text-[var(--ink-subtle)] transition hover:bg-[var(--surface-4)] hover:text-[var(--ink)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+        className="inline-flex h-7 max-w-full items-center gap-2 rounded-full px-1.5 text-[14px] font-normal leading-none text-[var(--ink)] transition hover:bg-[var(--surface-4)] hover:text-[var(--ink)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
         onClick={() => onOpenChange(!open)}
       >
         <PriorityMenuIcon priority={value} selected={value === 'urgent'} />
@@ -1762,7 +1762,7 @@ function LabelDropdown({
           aria-label={saving ? 'Saving labels' : 'Add label'}
           title={saving ? 'Saving labels' : 'Add label'}
           className={cn(
-            'inline-flex h-7 max-w-full items-center rounded-full bg-[var(--surface-4)] text-[12px] font-bold leading-none text-[var(--ink-subtle)] transition hover:bg-[var(--surface-3)] hover:text-[var(--ink)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50',
+            'inline-flex h-7 max-w-full items-center rounded-full bg-[var(--surface-4)] text-[12px] font-bold leading-none text-[var(--ink)] transition hover:bg-[var(--surface-3)] hover:text-[var(--ink)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50',
             hasLabels ? 'w-7 justify-center px-0' : 'gap-1.5 px-2.5',
           )}
           onClick={() => onOpenChange(!open)}
@@ -1875,7 +1875,7 @@ function SessionDropdown({
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className="inline-flex h-7 max-w-full items-center gap-1.5 rounded-full bg-[var(--surface-4)] px-2.5 text-[12px] font-bold leading-none text-[var(--ink-subtle)] transition hover:bg-[var(--surface-3)] hover:text-[var(--ink)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+        className="inline-flex h-7 max-w-full items-center gap-1.5 rounded-full bg-[var(--surface-4)] px-2.5 text-[12px] font-bold leading-none text-[var(--ink)] transition hover:bg-[var(--surface-3)] hover:text-[var(--ink)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
         onClick={() => onOpenChange(!open)}
       >
         <Box
@@ -1972,8 +1972,8 @@ function DetailStaticRow({
   children: ReactNode;
 }) {
   return (
-    <div className="flex w-full items-center gap-[10px] text-left text-[14px] font-semibold leading-none text-[#979aa1]">
-      <span className="flex h-[17px] w-[17px] shrink-0 items-center justify-center text-[#979aa1]">
+    <div className="flex w-full items-center gap-[10px] text-left text-[14px] font-semibold leading-none text-[var(--ink)]">
+      <span className="flex h-[17px] w-[17px] shrink-0 items-center justify-center text-[var(--ink)]">
         <Icon aria-hidden="true" className="h-[16px] w-[16px]" strokeWidth={2.2} />
       </span>
       <span className="min-w-0 truncate">{children}</span>

@@ -594,14 +594,6 @@ export const mockShellOptions: ShellOptionsMock = {
       targetPage: 'issue',
     },
     {
-      id: 'github-repository',
-      label: 'GitHub',
-      icon: 'github',
-      helper: 'indiebob/my-saas',
-      targetPage: 'github',
-      badge: 'Connected',
-    },
-    {
       id: 'member-configuration',
       label: 'Members',
       icon: 'users',

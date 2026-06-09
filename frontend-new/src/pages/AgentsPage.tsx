@@ -1100,7 +1100,7 @@ function AgentConfigSidebar({
   return (
     <aside
       className={cx(
-        "relative flex h-full min-h-0 flex-col overflow-hidden bg-[var(--surface-1)]",
+        "relative flex h-full min-h-0 flex-col overflow-hidden bg-[var(--surface-2)]",
       )}
     >
       <header className="shrink-0 border-b border-[var(--hairline)] px-5 py-4">
@@ -1269,7 +1269,7 @@ function AgentConfigEmptyState({ t }: { t: TranslateFn }) {
   return (
     <aside
       className={cx(
-        "flex h-full min-h-0 flex-col bg-[var(--surface-1)]",
+        "flex h-full min-h-0 flex-col bg-[var(--surface-2)]",
       )}
     >
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
@@ -1523,8 +1523,8 @@ export function AgentsPage() {
   const systemBreadcrumbLabel = t("agents.breadcrumb.system");
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--canvas)] text-[var(--ink)]">
-      <header className="flex h-[49px] shrink-0 items-center justify-between border-b border-[var(--hairline)] bg-[var(--surface-1)] px-[29px]">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--surface-2)] text-[var(--ink)]">
+      <header className="flex h-[49px] shrink-0 items-center justify-between border-b border-[var(--hairline)] bg-[var(--surface-2)] px-[29px]">
         <nav
           aria-label="Breadcrumb"
           className="flex min-w-0 items-center gap-[7px]"
@@ -1583,7 +1583,7 @@ export function AgentsPage() {
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--surface-1)]">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--surface-2)]">
         {(loadError || notice) && (
           <div className="shrink-0 space-y-2 border-b border-[var(--hairline)] p-3">
             {loadError && (

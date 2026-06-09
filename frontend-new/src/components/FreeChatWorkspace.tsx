@@ -13,9 +13,12 @@ import {
   Mic,
   AtSign,
   Check,
+  GitBranch,
+  Lock,
   PanelRightClose,
   PanelRightOpen,
   ChevronsLeft,
+  ChevronsRight,
   Copy,
   Quote,
   Square,
@@ -28,7 +31,6 @@ import { ResourceStateNotice } from "@/components/ResourceState";
 import { ScrollArea } from "@/components/ScrollArea";
 import { AgentMessageContent } from "@/components/AgentMessageContent";
 import { chatMessagesApi, sessionAgentsApi } from "@/lib/api";
-import { mockFrontendApi } from "@/lib/mockFrontendApi";
 import type { ChatAttachment, Member, QuotedMessageReference } from "@/types";
 
 interface FreeChatWorkspaceProps {
@@ -223,9 +225,6 @@ const RELATED_FILES_MIN_CENTER_WIDTH = 540;
 const RELATED_FILES_SEPARATOR_WIDTH = 6;
 const SIDEBAR_MEMBER_AVATAR_WIDTH = 28;
 const SIDEBAR_MEMBER_GAP = 6;
-const SIDEBAR_MEMBER_OVERFLOW_CONTROLS_WIDTH =
-  SIDEBAR_MEMBER_AVATAR_WIDTH * 2 + SIDEBAR_MEMBER_GAP;
-const SIDEBAR_MEMBER_COLLAPSED_MIN_VISIBLE = 5;
 
 const getVisibleSidebarMemberCount = (
   memberCount: number,
@@ -238,24 +237,22 @@ const getVisibleSidebarMemberCount = (
     Math.max(0, memberCount - 1) * SIDEBAR_MEMBER_GAP;
 
   if (railWidth <= 0) {
-    return Math.min(SIDEBAR_MEMBER_COLLAPSED_MIN_VISIBLE, memberCount);
+    return 0;
   }
   if (fullWidth <= railWidth) return memberCount;
 
-  const availableWidth = Math.max(
-    0,
-    railWidth - SIDEBAR_MEMBER_OVERFLOW_CONTROLS_WIDTH - SIDEBAR_MEMBER_GAP,
-  );
   const visibleCount = Math.floor(
-    (availableWidth + SIDEBAR_MEMBER_GAP) /
+    (railWidth + SIDEBAR_MEMBER_GAP) /
       (SIDEBAR_MEMBER_AVATAR_WIDTH + SIDEBAR_MEMBER_GAP),
   );
 
-  return Math.max(
-    Math.min(SIDEBAR_MEMBER_COLLAPSED_MIN_VISIBLE, memberCount - 1),
-    Math.min(memberCount - 1, visibleCount),
-  );
+  return Math.max(0, Math.min(memberCount - 1, visibleCount));
 };
+
+const extractMentionHandles = (text: string): string[] =>
+  (text.match(/@[a-zA-Z0-9_-]+/g) ?? []).map((mention) =>
+    mention.toLowerCase(),
+  );
 
 function SessionMemberAvatar({ member }: { member: Member }) {
   return (
@@ -267,7 +264,7 @@ function SessionMemberAvatar({ member }: { member: Member }) {
             ? "border-[var(--mono-border)] bg-[var(--mono-bg)] text-[var(--ink-muted)]"
             : "border-red-500/35 bg-red-500/10 text-red-400"
       }`}
-      title={`${member.name} · ${member.roleDetail}`}
+      title={member.name}
       aria-label={`${member.name} ${member.roleDetail}`}
     >
       {member.avatar}
@@ -286,15 +283,17 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
     messages,
     sendMessage,
     members,
+    chatInputMode,
+    setChatInputMode,
+    ensureWorkflowRouteToMainAgent,
+    mainAgentName,
     showToast,
-    setTasks,
     sessionsAsync,
     refreshSessions,
     messagesAsync,
     refreshMessages,
     membersAsync,
     refreshMembers,
-    workflowCardAsync,
     chatMessageFontSize,
     workspaceChangesAsync,
     refreshWorkspaceChanges,
@@ -304,10 +303,14 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
 
   const [inputText, setInputText] = useState("");
   const [isMemberPickerOpen, setIsMemberPickerOpen] = useState(false);
+  const [activeMemberPickerIndex, setActiveMemberPickerIndex] = useState(0);
   const [isRelatedFilesOpen, setIsRelatedFilesOpen] = useState(true);
   const [wasRelatedFilesAutoCollapsed, setWasRelatedFilesAutoCollapsed] =
     useState(false);
   const [isMemberRailExpanded, setIsMemberRailExpanded] = useState(false);
+  const [selectedSidebarMemberId, setSelectedSidebarMemberId] = useState<
+    string | null
+  >(null);
   const [memberRailWidth, setMemberRailWidth] = useState(0);
   const [workspaceWidth, setWorkspaceWidth] = useState(0);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
@@ -376,9 +379,33 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
   );
   const hasSidebarMemberOverflow =
     visibleSidebarMemberCount < sidebarMembers.length;
+  const selectedSidebarMember = selectedSidebarMemberId
+    ? sidebarMembers.find((member) => member.id === selectedSidebarMemberId)
+    : undefined;
   const displayedSidebarMembers = isMemberRailExpanded
     ? sidebarMembers
     : sidebarMembers.slice(0, visibleSidebarMemberCount);
+  const memberMentionHandles = new Set(
+    sidebarMembers.map((member) => member.name.toLowerCase()),
+  );
+  const displayedMessages = selectedSidebarMember
+    ? messages.filter((message) => {
+        if (!message.isUser) {
+          return message.sender === selectedSidebarMember.name;
+        }
+
+        const matchedMemberMentions = extractMentionHandles(
+          message.text,
+        ).filter((mention) => memberMentionHandles.has(mention));
+        if (matchedMemberMentions.length === 0) {
+          return selectedSidebarMember.id === sidebarMembers[0]?.id;
+        }
+
+        return matchedMemberMentions.includes(
+          selectedSidebarMember.name.toLowerCase(),
+        );
+      })
+    : messages;
   const canFitRelatedFiles =
     workspaceWidth === 0 ||
     workspaceWidth >=
@@ -516,6 +543,27 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
     }
   }, [hasSidebarMemberOverflow, isMemberRailExpanded]);
 
+  useEffect(() => {
+    if (
+      selectedSidebarMemberId &&
+      !sidebarMembers.some((member) => member.id === selectedSidebarMemberId)
+    ) {
+      setSelectedSidebarMemberId(null);
+    }
+  }, [selectedSidebarMemberId, sidebarMembers]);
+
+  useEffect(() => {
+    if (chatInputMode === "workflow") {
+      setIsMemberPickerOpen(false);
+    }
+  }, [chatInputMode]);
+
+  useEffect(() => {
+    if (activeMemberPickerIndex >= members.length) {
+      setActiveMemberPickerIndex(Math.max(0, members.length - 1));
+    }
+  }, [activeMemberPickerIndex, members.length]);
+
   // Keep the latest message anchored before paint so session switches do not
   // visibly animate through older scroll positions.
   useLayoutEffect(() => {
@@ -535,6 +583,7 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
     setCopiedMessageId(null);
     setQuotedMessage(null);
     setAttachedFiles([]);
+    setSelectedSidebarMemberId(null);
     setStoppingSessionAgentIds(new Set());
   }, [activeSessionId]);
 
@@ -691,7 +740,11 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
 
       setIsUploadingAttachments(true);
       try {
+        if (chatInputMode === "workflow") {
+          await ensureWorkflowRouteToMainAgent();
+        }
         await chatMessagesApi.uploadAttachment(activeSessionId, attachedFiles, {
+          chatInputMode,
           content: trimmedInput || undefined,
           referenceMessageId: quotedMessage?.id,
         });
@@ -707,34 +760,114 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
       return;
     }
 
-    sendMessage(trimmedInput, quotedMessage ? { quotedMessage } : undefined);
+    sendMessage(trimmedInput, {
+      chatInputMode,
+      ...(quotedMessage ? { quotedMessage } : {}),
+    });
     setInputText("");
     setQuotedMessage(null);
   };
 
+  const handleInputChange = (
+    event: React.ChangeEvent<HTMLTextAreaElement>,
+  ) => {
+    const nextValue = event.target.value;
+    const cursor = event.target.selectionStart ?? nextValue.length;
+    setInputText(nextValue);
+
+    if (!isPlanMode && cursor > 0 && nextValue[cursor - 1] === "@") {
+      setIsMemberPickerOpen(true);
+      setActiveMemberPickerIndex(0);
+    }
+  };
+
+  const insertMemberMention = (member: Member) => {
+    const handle = member.name.startsWith("@") ? member.name : `@${member.name}`;
+    const input = inputRef.current;
+    const currentValue = input?.value ?? inputText;
+    const cursorStart = input?.selectionStart ?? currentValue.length;
+    const cursorEnd = input?.selectionEnd ?? cursorStart;
+    const beforeCursor = currentValue.slice(0, cursorStart);
+    const tokenMatch = beforeCursor.match(/@[a-zA-Z0-9_-]*$/);
+    const replaceStart = tokenMatch
+      ? cursorStart - tokenMatch[0].length
+      : cursorStart;
+    const prefix = currentValue.slice(0, replaceStart);
+    const suffix = currentValue.slice(cursorEnd);
+    const leadingSpace =
+      replaceStart === 0 || /\s$/.test(prefix) ? "" : " ";
+    const trailingSpace =
+      suffix.length === 0 || /^\s/.test(suffix) ? " " : " ";
+    const inserted = `${leadingSpace}${handle}${trailingSpace}`;
+    const nextValue = `${prefix}${inserted}${suffix}`;
+    const nextCursor = prefix.length + inserted.length;
+
+    setInputText(nextValue);
+    setIsMemberPickerOpen(false);
+    setActiveMemberPickerIndex(0);
+
+    const restoreCursor = () => {
+      inputRef.current?.focus();
+      inputRef.current?.setSelectionRange(nextCursor, nextCursor);
+    };
+    if (typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(restoreCursor);
+    } else {
+      restoreCursor();
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!isPlanMode && isMemberPickerOpen) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setActiveMemberPickerIndex((current) =>
+          members.length === 0 ? 0 : (current + 1) % members.length,
+        );
+        return;
+      }
+
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setActiveMemberPickerIndex((current) =>
+          members.length === 0
+            ? 0
+            : (current - 1 + members.length) % members.length,
+        );
+        return;
+      }
+
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        const member = members[activeMemberPickerIndex] ?? members[0];
+        if (member) {
+          insertMemberMention(member);
+        } else {
+          setIsMemberPickerOpen(false);
+        }
+        return;
+      }
+
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setIsMemberPickerOpen(false);
+        return;
+      }
+    }
+
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       void handleSend();
     }
   };
 
-  // Convert chat context through the local mock API workflow preset.
-  const handleTurnIntoWorkflow = () => {
-    void mockFrontendApi.getWorkflowPreset("chat").then((preset) => {
-      if (!preset) return;
-      setTasks(preset.tasks);
-      showToast(t("turnWorkflowSuccess"));
-    });
+  const handleTogglePlanMode = () => {
+    setChatInputMode(chatInputMode === "workflow" ? "free" : "workflow");
   };
 
   // Quick summon clicks
-  const handleQuickAddClick = (handle: string) => {
-    setInputText((prev) => {
-      const space = prev.endsWith(" ") || prev === "" ? "" : " ";
-      return `${prev}${space}${handle} `;
-    });
-    inputRef.current?.focus();
+  const handleQuickAddClick = (member: Member) => {
+    insertMemberMention(member);
   };
 
   const handleRelatedFileClick = (file: RelatedFileChange) => {
@@ -793,6 +926,8 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
   const mentionedMembers = members.filter((member) =>
     mentionedMemberNames.has(member.name.toLowerCase()),
   );
+  const isPlanMode = chatInputMode === "workflow";
+  const planModeMainAgentName = mainAgentName ?? members[0]?.name ?? "@agent";
   const canSend =
     (Boolean(inputText.trim()) || attachedFiles.length > 0) &&
     !isUploadingAttachments;
@@ -915,7 +1050,7 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
               }}
               onRetry={() => void refreshMessages()}
             />
-            {messages.map((msg) => (
+            {displayedMessages.map((msg) => (
               <div
                 key={msg.id}
                 className={`group/message relative flex gap-3 items-start rounded-md ${
@@ -1167,7 +1302,11 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
             )}
             <div
               onClick={() => inputRef.current?.focus()}
-              className="relative rounded-md border border-[var(--hairline-strong)] bg-[var(--surface-1)] focus-within:border-[var(--primary)] p-3.5 transition-all flex flex-col gap-3 min-h-[95px]"
+              className={`relative rounded-md border bg-[var(--surface-1)] focus-within:border-[var(--primary)] p-3.5 transition-all flex flex-col gap-3 min-h-[95px] ${
+                isPlanMode
+                  ? "plan-mode-input-active border-[var(--primary)]"
+                  : "border-[var(--hairline-strong)]"
+              }`}
             >
               <input
                 ref={fileInputRef}
@@ -1183,11 +1322,17 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
                 rows={1}
                 className="w-full bg-transparent resize-none border-none text-[13px] text-[var(--ink)] outline-none placeholder:text-[var(--ink-tertiary)] select-text flex-1 min-h-[30px]"
                 value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
+                onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
                 onPaste={handlePaste}
                 onClick={(e) => e.stopPropagation()}
-                placeholder={t("discussPlaceholder")}
+                placeholder={
+                  isPlanMode
+                    ? t("planModePlaceholder", {
+                        agent: planModeMainAgentName,
+                      })
+                    : t("discussPlaceholder")
+                }
               />
 
               {/* Bottom control row inside input slot */}
@@ -1215,17 +1360,49 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
 
                   <button
                     type="button"
-                    onClick={handleTurnIntoWorkflow}
-                    className="flex items-center gap-1 bg-[var(--surface-2)] border border-[var(--hairline)] hover:bg-[var(--surface-3)] px-2.5 py-1.5 rounded-md text-[11px] text-[var(--ink-muted)] font-medium transition cursor-pointer"
-                    title={t("generateWorkflowFromChat")}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleTogglePlanMode();
+                    }}
+                    className={`plan-mode-toggle flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-medium transition cursor-pointer ${
+                      isPlanMode
+                        ? "plan-mode-toggle-active border-[var(--primary)] bg-[var(--primary-tint)] text-[var(--primary)]"
+                        : "border-[var(--hairline)] bg-[var(--surface-2)] text-[var(--ink-muted)] hover:bg-[var(--surface-3)]"
+                    }`}
+                    title={
+                      isPlanMode
+                        ? t("switchToChatMode")
+                        : t("switchToPlanMode")
+                    }
+                    aria-pressed={isPlanMode}
+                    aria-label={
+                      isPlanMode
+                        ? t("switchToChatMode")
+                        : t("switchToPlanMode")
+                    }
                   >
-                    <span>{t("updatePlan")}</span>
+                    <GitBranch className="h-3 w-3" />
+                    <span>{t("planMode")}</span>
                   </button>
                 </div>
 
                 {/* Right controls: session members, voice icon, and send action */}
                 <div className="flex items-center gap-2">
-                  <div className="relative">
+                  {isPlanMode ? (
+                    <div
+                      className="flex max-w-[180px] items-center gap-1.5 rounded-md border border-[var(--hairline)] bg-[var(--surface-2)] px-2 py-1 font-mono text-[11px] font-medium text-[var(--ink-muted)]"
+                      title={t("fixedMainAgentMention", {
+                        agent: planModeMainAgentName,
+                      })}
+                      aria-label={t("fixedMainAgentMention", {
+                        agent: planModeMainAgentName,
+                      })}
+                    >
+                      <span className="truncate">{planModeMainAgentName}</span>
+                      <Lock className="h-3 w-3 shrink-0 opacity-70" />
+                    </div>
+                  ) : (
+                    <div className="relative">
                     <button
                       type="button"
                       onClick={(e) => {
@@ -1270,16 +1447,23 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
                             {t("noSessionMembers")}
                           </div>
                         ) : (
-                          members.map((member) => (
+                          members.map((member, index) => (
                             <button
                               key={member.id}
                               type="button"
+                              aria-selected={index === activeMemberPickerIndex}
+                              onMouseEnter={() =>
+                                setActiveMemberPickerIndex(index)
+                              }
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleQuickAddClick(member.name);
-                                setIsMemberPickerOpen(false);
+                                handleQuickAddClick(member);
                               }}
-                              className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-[var(--surface-2)] cursor-pointer"
+                              className={`w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-left cursor-pointer ${
+                                index === activeMemberPickerIndex
+                                  ? "bg-[var(--surface-2)]"
+                                  : "hover:bg-[var(--surface-2)]"
+                              }`}
                             >
                               <span className="h-5 w-5 rounded-full bg-[var(--mono-bg)] border border-[var(--mono-border)] flex items-center justify-center text-[8px] font-mono font-semibold text-[var(--ink-muted)]">
                                 {member.avatar}
@@ -1298,6 +1482,7 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
                       </div>
                     )}
                   </div>
+                  )}
 
                   <button
                     type="button"
@@ -1365,68 +1550,76 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
               <div className="mb-2 pr-10 text-[14px] font-semibold text-[var(--ink)]">
                 {t("sessionMembers")}
               </div>
-              <div className="flex h-9 min-w-0 items-start gap-1.5">
+              <div className="flex h-10 min-w-0 items-center gap-1.5">
                 <ScrollArea
                   ref={memberRailRef}
                   orientation="horizontal"
                   scrollbar={isMemberRailExpanded ? "styled" : "hidden"}
-                  className={`flex h-9 flex-1 items-start gap-1.5 ${
-                    isMemberRailExpanded ? "pb-1" : ""
+                  className={`flex min-w-0 flex-1 gap-1.5 overflow-hidden px-1 ${
+                    isMemberRailExpanded
+                      ? "h-12 -mb-2 items-start pb-2 pt-1.5"
+                      : "h-10 items-center"
                   }`}
                 >
-                  {displayedSidebarMembers.map((member) => (
-                    <div
-                      key={member.id}
-                      className={`group/member flex h-7 w-7 shrink-0 items-center overflow-hidden rounded-full border border-[var(--hairline)] bg-[var(--surface-1)] text-left ${
-                        isMemberRailExpanded
-                          ? ""
-                          : "transition-[width,background-color,border-color] duration-200 hover:w-32 hover:border-[var(--hairline-strong)] hover:bg-[var(--surface-3)] focus-visible:w-32 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)]"
-                      }`}
-                      title={member.name}
-                    >
-                      <SessionMemberAvatar member={member} />
-                      {!isMemberRailExpanded && (
-                        <span className="ml-1.5 min-w-0 max-w-0 truncate pr-2 font-mono text-[10px] font-semibold text-[var(--ink)] opacity-0 transition-[max-width,opacity] duration-200 group-hover/member:max-w-20 group-hover/member:opacity-100 group-focus-visible/member:max-w-20 group-focus-visible/member:opacity-100">
-                          {member.name}
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                  {hasSidebarMemberOverflow && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setIsMemberRailExpanded((current) => !current)
-                      }
-                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[var(--hairline)] bg-[var(--surface-1)] font-mono text-[11px] font-semibold text-[var(--ink-subtle)] transition hover:border-[var(--hairline-strong)] hover:bg-[var(--surface-3)] hover:text-[var(--ink)]"
-                      title={
-                        isMemberRailExpanded
-                          ? t("memberRail.collapse")
-                          : t("memberRail.expand")
-                      }
-                      aria-label={
-                        isMemberRailExpanded
-                          ? t("memberRail.collapse")
-                          : t("memberRail.expand")
-                      }
-                    >
-                      {isMemberRailExpanded ? (
-                        <ChevronsLeft className="h-3.5 w-3.5" />
-                      ) : (
-                        "..."
-                      )}
-                    </button>
-                  )}
+                  {displayedSidebarMembers.map((member) => {
+                    const isSelected = selectedSidebarMemberId === member.id;
+                    return (
+                      <button
+                        key={member.id}
+                        type="button"
+                        onClick={() =>
+                          setSelectedSidebarMemberId((current) =>
+                            current === member.id ? null : member.id,
+                          )
+                        }
+                        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border bg-[var(--surface-1)] text-left transition-[background-color,border-color,box-shadow] hover:border-[var(--hairline-strong)] hover:bg-[var(--surface-3)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)] ${
+                          isSelected
+                            ? "border-[var(--primary-focus)] ring-2 ring-[var(--primary-focus)]/55"
+                            : "border-[var(--hairline)]"
+                        }`}
+                        title={member.name}
+                        aria-label={member.name}
+                        aria-pressed={isSelected}
+                      >
+                        <SessionMemberAvatar member={member} />
+                      </button>
+                    );
+                  })}
+                </ScrollArea>
+                {hasSidebarMemberOverflow && (
                   <button
                     type="button"
-                    onClick={() => showToast(t("toast.memberInviteReady"))}
-                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[var(--hairline)] bg-[var(--surface-1)] text-[var(--ink-subtle)] transition hover:border-[var(--hairline-strong)] hover:bg-[var(--surface-3)] hover:text-[var(--ink)]"
-                    title={t("inviteMember")}
-                    aria-label={t("inviteMember")}
+                    onClick={() =>
+                      setIsMemberRailExpanded((current) => !current)
+                    }
+                    className="flex h-7 w-5 shrink-0 items-center justify-center text-[var(--ink-tertiary)] transition hover:text-[var(--ink)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)]"
+                    title={
+                      isMemberRailExpanded
+                        ? t("memberRail.collapse")
+                        : t("memberRail.expand")
+                    }
+                    aria-label={
+                      isMemberRailExpanded
+                        ? t("memberRail.collapse")
+                        : t("memberRail.expand")
+                    }
                   >
-                    <Plus className="h-3.5 w-3.5" />
+                    {isMemberRailExpanded ? (
+                      <ChevronsLeft className="h-3.5 w-3.5" />
+                    ) : (
+                      <ChevronsRight className="h-3.5 w-3.5" />
+                    )}
                   </button>
-                </ScrollArea>
+                )}
+                <button
+                  type="button"
+                  onClick={() => showToast(t("toast.memberInviteReady"))}
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[var(--hairline)] bg-[var(--surface-1)] text-[var(--ink-subtle)] transition hover:border-[var(--hairline-strong)] hover:bg-[var(--surface-3)] hover:text-[var(--ink)]"
+                  title={t("inviteMember")}
+                  aria-label={t("inviteMember")}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
               </div>
             </div>
             <div className="flex h-10 shrink-0 items-center justify-between px-3">

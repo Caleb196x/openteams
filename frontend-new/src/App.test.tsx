@@ -189,6 +189,16 @@ check(
   source,
 );
 check(
+  "workflow session creation routes the first prompt through the main agent",
+  source.includes("chatSessionsApi") &&
+    source.includes("let workflowLeadAgentId: string | null = null") &&
+    source.includes("workflowLeadAgentId = workflowProjectAgent?.agent_id ?? null") &&
+    source.includes("meta.chat_input_mode = 'workflow'") &&
+    source.includes("lead_agent_id: workflowLeadAgentId") &&
+    source.includes("chatMessagesApi.send(backendSession.id"),
+  source,
+);
+check(
   "desktop sidebar keeps ProjectSidebar inside desktop-only aside",
   source.includes("hidden md:block"),
 );

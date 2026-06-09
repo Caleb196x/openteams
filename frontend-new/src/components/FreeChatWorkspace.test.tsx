@@ -54,7 +54,17 @@ const composerAttachmentIndex = source.indexOf(
   'className="mb-2 flex flex-wrap gap-2"',
 );
 const composerInputIndex = source.indexOf(
-  'className="relative rounded-md border border-[var(--hairline-strong)]',
+  'className={`relative rounded-md border bg-[var(--surface-1)]',
+);
+const memberRailIndex = source.indexOf("ref={memberRailRef}");
+const memberRailCloseIndex = source.indexOf("</ScrollArea>", memberRailIndex);
+const memberRailSource =
+  memberRailIndex >= 0 && memberRailCloseIndex > memberRailIndex
+    ? source.slice(memberRailIndex, memberRailCloseIndex)
+    : "";
+const memberInviteIndex = source.indexOf(
+  'title={t("inviteMember")}',
+  memberRailIndex,
 );
 
 check(
@@ -82,6 +92,48 @@ check(
     !source.includes("grid-rows-[minmax(0,1fr)_16rem]") &&
     !source.includes("xl:grid-cols-[minmax(0,1fr)_6px_var"),
   source,
+);
+check(
+  "keeps the member invite action fixed outside the avatar rail and uses click filtering",
+  memberRailIndex >= 0 &&
+    memberRailCloseIndex > memberRailIndex &&
+    memberInviteIndex > memberRailCloseIndex &&
+    source.includes(
+      "railWidth <= 0) {\n    return 0;\n  }",
+    ) &&
+    source.includes(
+      "className={`flex min-w-0 flex-1 gap-1.5 overflow-hidden px-1",
+    ) &&
+    source.includes("h-12 -mb-2 items-start pb-2 pt-1.5") &&
+    source.includes("h-10 items-center") &&
+    source.includes("ChevronsRight") &&
+    !memberRailSource.includes('"..."') &&
+    source.includes("selectedSidebarMemberId") &&
+    source.includes("const selectedSidebarMember =") &&
+    source.includes("const displayedMessages = selectedSidebarMember") &&
+    source.includes("message.sender === selectedSidebarMember.name") &&
+    source.includes("const extractMentionHandles = (text: string): string[]") &&
+    source.includes("const memberMentionHandles = new Set(") &&
+    source.includes("const matchedMemberMentions = extractMentionHandles(") &&
+    source.includes("memberMentionHandles.has(mention)") &&
+    source.includes(
+      "return selectedSidebarMember.id === sidebarMembers[0]?.id",
+    ) &&
+    source.includes(
+      "selectedSidebarMember.name.toLowerCase()",
+    ) &&
+    source.includes("{displayedMessages.map((msg) => (") &&
+    source.includes("aria-pressed={isSelected}") &&
+    source.includes("title={member.name}") &&
+    source.includes(
+      "border-[var(--primary-focus)] ring-2 ring-[var(--primary-focus)]/55",
+    ) &&
+    !source.includes("hoveredSidebarMemberId") &&
+    !source.includes("setHoveredSidebarMemberId") &&
+    !source.includes("hover:w-32") &&
+    !source.includes("group-hover/member:max-w-20") &&
+    !source.includes("SIDEBAR_MEMBER_COLLAPSED_MIN_VISIBLE"),
+  { memberRailIndex, memberRailCloseIndex, memberInviteIndex, source },
 );
 check(
   "delegates agent message rendering to an isolated component",
@@ -221,8 +273,9 @@ check(
     source.includes("message.dismissQuote") &&
     source.includes("summarizeMessage") &&
     source.includes("content: text") &&
-    source.includes("sendMessage(") &&
-    source.includes("quotedMessage ? { quotedMessage } : undefined") &&
+    source.includes("sendMessage(trimmedInput, {") &&
+    source.includes("chatInputMode,") &&
+    source.includes("...(quotedMessage ? { quotedMessage } : {})") &&
     source.includes("msg.quotedMessage") &&
     !source.includes("> ${quotedMessage.sender}:"),
   source,
@@ -249,10 +302,30 @@ check(
   { composerQuoteIndex, composerAttachmentIndex, composerInputIndex },
 );
 check(
+  "free-chat mention picker opens on @ and captures keyboard selection",
+  source.includes("activeMemberPickerIndex") &&
+    source.includes("const handleInputChange = (") &&
+    source.includes('nextValue[cursor - 1] === "@"') &&
+    source.includes("setIsMemberPickerOpen(true)") &&
+    source.includes('e.key === "ArrowDown"') &&
+    source.includes('e.key === "ArrowUp"') &&
+    source.includes('e.key === "Enter" && !e.shiftKey') &&
+    source.includes("insertMemberMention(member)") &&
+    source.includes("aria-selected={index === activeMemberPickerIndex}") &&
+    source.includes("onChange={handleInputChange}") &&
+    source.indexOf("insertMemberMention(member)") <
+      source.indexOf("void handleSend()"),
+  source,
+);
+check(
   "attachment send uses backend multipart upload with quote reference id",
   source.includes(
     "chatMessagesApi.uploadAttachment(activeSessionId, attachedFiles",
   ) &&
+    source.includes("chatInputMode,") &&
+    source.includes("ensureWorkflowRouteToMainAgent") &&
+    source.includes('if (chatInputMode === "workflow")') &&
+    source.includes("await ensureWorkflowRouteToMainAgent()") &&
     source.includes("content: trimmedInput || undefined") &&
     source.includes("referenceMessageId: quotedMessage?.id") &&
     source.includes("await refreshMessages()") &&
@@ -260,8 +333,27 @@ check(
     apiSource.includes('form.append("content", options.content)') &&
     apiSource.includes(
       'form.append("reference_message_id", options.referenceMessageId)',
-    ),
+    ) &&
+    apiSource.includes('form.append("chat_input_mode", "workflow")'),
   { source, apiSource },
+);
+check(
+  "plan mode toggle highlights and locks the main agent mention",
+  source.includes("handleTogglePlanMode") &&
+    source.includes("setChatInputMode") &&
+    source.includes("mainAgentName,") &&
+    source.includes('const planModeMainAgentName = mainAgentName ?? members[0]?.name ?? "@agent"') &&
+    source.includes("rounded-full border px-2 py-1 text-[10px]") &&
+    source.includes('<GitBranch className="h-3 w-3" />') &&
+    source.includes("planModePlaceholder") &&
+    source.includes("plan-mode-toggle-active") &&
+    source.includes("plan-mode-input-active") &&
+    source.includes("fixedMainAgentMention") &&
+    source.includes("border-[var(--hairline)] bg-[var(--surface-2)] px-2 py-1") &&
+    source.includes('<span className="truncate">{planModeMainAgentName}</span>') &&
+    source.includes("<Lock") &&
+    !source.includes('<AtSign className="h-3.5 w-3.5 shrink-0" />'),
+  source,
 );
 check(
   "renders backend file and image attachments from message meta",

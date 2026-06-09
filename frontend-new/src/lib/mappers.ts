@@ -24,6 +24,8 @@ import type {
   ProviderInfo,
   Session,
   CliConfig,
+  WorkflowCardMessageType,
+  WorkflowPlanGenerationMeta,
 } from '@/types';
 import type { ProjectMemberWithRuntime } from '../../../shared/types';
 
@@ -100,6 +102,38 @@ const runIdFromMeta = (meta: JsonValue | undefined): string | undefined => {
   const obj = jsonObject(meta);
   const runId = obj?.run_id;
   return typeof runId === 'string' ? runId : undefined;
+};
+
+const workflowCardTypeFromMeta = (
+  meta: JsonValue | undefined,
+): WorkflowCardMessageType | undefined => {
+  const obj = jsonObject(meta);
+  const cardType = obj?.card_type;
+  return cardType === 'workflow_execution' ||
+    cardType === 'workflow_plan' ||
+    cardType === 'workflow_plan_generation'
+    ? cardType
+    : undefined;
+};
+
+const workflowPlanGenerationFromMeta = (
+  meta: JsonValue | undefined,
+): WorkflowPlanGenerationMeta | undefined => {
+  const obj = jsonObject(meta);
+  if (obj?.card_type !== 'workflow_plan_generation') return undefined;
+  const raw = jsonObject(obj.workflow_plan_generation);
+  if (!raw) return undefined;
+  return {
+    status: typeof raw.status === 'string' ? raw.status : undefined,
+    plan_goal:
+      typeof raw.plan_goal === 'string' ? raw.plan_goal : undefined,
+    retryable:
+      typeof raw.retryable === 'boolean' ? raw.retryable : undefined,
+    retry_endpoint:
+      typeof raw.retry_endpoint === 'string' ? raw.retry_endpoint : undefined,
+    error_message:
+      typeof raw.error_message === 'string' ? raw.error_message : null,
+  };
 };
 
 const sessionAgentIdFromMeta = (
@@ -195,8 +229,11 @@ export const mapMessage = (
     model = m ?? undefined;
   }
 
+  const workflowCardType = workflowCardTypeFromMeta(backend.meta);
+
   return {
     id: backend.id,
+    sessionId: backend.session_id,
     avatar,
     sender,
     time: formatRelativeTime(backend.created_at, opts.now),
@@ -207,6 +244,13 @@ export const mapMessage = (
     attachments: attachmentsFromMeta(backend.meta),
     runId: runIdFromMeta(backend.meta),
     sessionAgentId: sessionAgentIdFromMeta(backend.meta),
+    workflowCard: workflowCardType
+      ? {
+          messageId: backend.id,
+          cardType: workflowCardType,
+          planGeneration: workflowPlanGenerationFromMeta(backend.meta),
+        }
+      : undefined,
   };
 };
 

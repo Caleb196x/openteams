@@ -1840,6 +1840,7 @@
 
   .new-design .chat-session-members-list {
     background: transparent !important;
+    scrollbar-gutter: stable;
   }
 
   .new-design .chat-session-page .overflow-y-auto::-webkit-scrollbar,
