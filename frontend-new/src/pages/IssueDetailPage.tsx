@@ -1587,7 +1587,7 @@ function IssueDetailHeader({
           </button>
 
           {menuOpen && (
-            <div className="absolute left-full top-full z-50 ml-2 mt-2">
+            <div className="absolute left-full top-full z-50 ml-2 mt-2 -translate-x-[30px]">
               <div
                 role="menu"
                 className="w-[226px] rounded-[8px] border border-[#34363a] bg-[#1b1b1c] p-2 text-[15px] shadow-[0_24px_70px_rgba(0,0,0,0.46),inset_0_1px_0_rgba(255,255,255,0.04)]"
@@ -1648,17 +1648,12 @@ function IssueDetailHeader({
         <ConfirmationDialog
           title={tr('issue.detail.actions.confirmDelete', 'Confirm delete')}
           description={
-            <>
-              <span>
-                {tr(
-                  'issue.detail.actions.deleteWarning',
-                  'This removes the issue from this project.',
-                )}
-              </span>
-              <span className="mt-2 block truncate font-semibold text-[var(--ink)]">
-                {issue.title}
-              </span>
-            </>
+            <span>
+              {tr(
+                'issue.detail.actions.deleteWarning',
+                'This removes the issue from this project.',
+              )}
+            </span>
           }
           confirmLabel={
             deleting
