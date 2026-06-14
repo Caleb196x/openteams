@@ -279,6 +279,10 @@ const resizeChatTextarea = (textarea: HTMLTextAreaElement | null) => {
   textarea.style.height = `${target}px`;
 };
 
+// Module-level cache that preserves unsent composer text per session,
+// surviving FreeChatWorkspace unmount/remount when switching tabs.
+const sessionDraftCache = new Map<string, string>();
+
 const getVisibleSidebarMemberCount = (
   memberCount: number,
   railWidth: number,
@@ -711,6 +715,8 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
   } = useWorkspace();
 
   const [inputText, setInputText] = useState("");
+  const inputTextRef = useRef(inputText);
+  inputTextRef.current = inputText;
   const [isMemberPickerOpen, setIsMemberPickerOpen] = useState(false);
   const [activeMemberPickerIndex, setActiveMemberPickerIndex] = useState(0);
   const [isRelatedFilesOpen, setIsRelatedFilesOpen] = useState(true);
@@ -1016,6 +1022,23 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
     setAttachedFiles([]);
     setSelectedSidebarMemberId(null);
     setStoppingSessionAgentIds(new Set());
+  }, [activeSessionId]);
+
+  // Preserve unsent composer text per session across tab switches and
+  // component unmount/remount. The cleanup saves the latest draft before
+  // the session changes or the component unmounts; the effect restores the
+  // cached draft (if any) for the active session.
+  useEffect(() => {
+    const cachedDraft = activeSessionId
+      ? sessionDraftCache.get(activeSessionId)
+      : undefined;
+    setInputText(cachedDraft ?? "");
+
+    return () => {
+      if (activeSessionId) {
+        sessionDraftCache.set(activeSessionId, inputTextRef.current);
+      }
+    };
   }, [activeSessionId]);
 
   const reloadRelatedFiles = useCallback(() => {

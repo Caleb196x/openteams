@@ -229,6 +229,28 @@ const findPendingAgentPlaceholderIndex = (
   return -1;
 };
 
+// A session agent runs at most one run at a time. When a new run starts (or
+// its first activity line arrives), drop any prior running placeholder for a
+// *different* run of the same agent so a stale one — e.g. left over from a
+// just-stopped run that refreshMessages re-hydrated — cannot coexist with the
+// new run and produce duplicate "executing" placeholders.
+const evictStaleRunPlaceholders = (
+  messages: Message[],
+  sessionAgentId: string | undefined,
+  runId: string,
+): Message[] => {
+  if (!sessionAgentId) return messages;
+  return messages.filter(
+    (message) =>
+      !(
+        message.isAgentRunning &&
+        message.sessionAgentId === sessionAgentId &&
+        Boolean(message.runId) &&
+        message.runId !== runId
+      ),
+  );
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -1443,17 +1465,24 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
         activityLines: [line],
         activityLoadState: 'idle',
       };
-      const pendingIndex = findPendingAgentPlaceholderIndex(
+      // Evict any stale running placeholder for a different run of the same
+      // agent before placing the new one (see evictStaleRunPlaceholders).
+      const pruned = evictStaleRunPlaceholders(
         current,
+        line.session_agent_id,
+        line.run_id,
+      );
+      const pendingIndex = findPendingAgentPlaceholderIndex(
+        pruned,
         line.session_agent_id,
       );
       if (pendingIndex >= 0) {
-        const next = current.map((message, index) =>
+        const next = pruned.map((message, index) =>
           index === pendingIndex ? placeholder : message,
         );
         return { ...prev, [line.session_id]: next };
       }
-      return { ...prev, [line.session_id]: [...current, placeholder] };
+      return { ...prev, [line.session_id]: [...pruned, placeholder] };
     });
   }, []);
 
@@ -1481,17 +1510,24 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
           activityLines: [],
           activityLoadState: 'idle',
         };
-        const pendingIndex = findPendingAgentPlaceholderIndex(
+        // Evict any stale running placeholder for a different run of the same
+        // agent before placing the new one (see evictStaleRunPlaceholders).
+        const pruned = evictStaleRunPlaceholders(
           current,
+          event.session_agent_id,
+          event.run_id,
+        );
+        const pendingIndex = findPendingAgentPlaceholderIndex(
+          pruned,
           event.session_agent_id,
         );
         if (pendingIndex >= 0) {
-          const next = current.map((message, index) =>
+          const next = pruned.map((message, index) =>
             index === pendingIndex ? placeholder : message,
           );
           return { ...prev, [event.session_id]: next };
         }
-        return { ...prev, [event.session_id]: [...current, placeholder] };
+        return { ...prev, [event.session_id]: [...pruned, placeholder] };
       });
     },
     [],

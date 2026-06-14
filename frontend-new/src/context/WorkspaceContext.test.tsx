@@ -132,6 +132,21 @@ check(
   source,
 );
 check(
+  'a new run evicts stale running placeholders for the same agent session',
+  source.includes('evictStaleRunPlaceholders') &&
+    source.includes('message.runId !== runId') &&
+    source.includes('Boolean(message.runId)') &&
+    source.includes('message.sessionAgentId === sessionAgentId') &&
+    /evictStaleRunPlaceholders\(\s*current,\s*event\.session_agent_id/.test(
+      source,
+    ) &&
+    /evictStaleRunPlaceholders\(\s*current,\s*line\.session_agent_id/.test(
+      source,
+    ) &&
+    source.includes('[...pruned, placeholder]'),
+  source,
+);
+check(
   'quoted messages are sent through backend reference meta instead of message content',
   source.includes('options: SendMessageOptions = {}') &&
     source.includes('quotedMessage: options.quotedMessage') &&
