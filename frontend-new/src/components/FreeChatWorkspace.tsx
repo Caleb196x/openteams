@@ -40,6 +40,11 @@ import {
   projectWorkItemsApi,
 } from "@/lib/api";
 import {
+  CHAT_INPUT_PREFILL_EVENT,
+  consumeChatInputPrefill,
+  type ChatInputPrefillDetail,
+} from "@/lib/chatInputPrefill";
+import {
   ISSUE_NAVIGATION_EVENT,
   type IssueNavigationTarget,
 } from "@/lib/issueNavigation";
@@ -1067,6 +1072,62 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
   useEffect(() => {
     reloadLinkedWorkItems();
   }, [reloadLinkedWorkItems]);
+
+  const applyChatInputPrefill = useCallback(
+    (detail: ChatInputPrefillDetail) => {
+      if (!detail || detail.sessionId !== activeSessionId) return false;
+
+      setInputText(detail.text);
+      setQuotedMessage(null);
+      setAttachedFiles([]);
+      setIsMemberPickerOpen(false);
+      setActiveMemberPickerIndex(0);
+
+      const focusComposer = () => {
+        if (detail.mode) {
+          setChatInputMode(detail.mode);
+        }
+        inputRef.current?.focus();
+        inputRef.current?.setSelectionRange(
+          detail.text.length,
+          detail.text.length,
+        );
+        resizeChatTextarea(inputRef.current);
+      };
+
+      if (typeof window.requestAnimationFrame === "function") {
+        window.requestAnimationFrame(focusComposer);
+      } else {
+        focusComposer();
+      }
+
+      return true;
+    },
+    [activeSessionId, setChatInputMode],
+  );
+
+  useEffect(() => {
+    const pending = consumeChatInputPrefill(activeSessionId);
+    if (pending) {
+      applyChatInputPrefill(pending);
+    }
+  }, [activeSessionId, applyChatInputPrefill]);
+
+  useEffect(() => {
+    const handleChatInputPrefill = (event: Event) => {
+      applyChatInputPrefill(
+        (event as CustomEvent<ChatInputPrefillDetail>).detail,
+      );
+    };
+
+    window.addEventListener(CHAT_INPUT_PREFILL_EVENT, handleChatInputPrefill);
+    return () => {
+      window.removeEventListener(
+        CHAT_INPUT_PREFILL_EVENT,
+        handleChatInputPrefill,
+      );
+    };
+  }, [applyChatInputPrefill]);
 
   useEffect(() => {
     resizeChatTextarea(inputRef.current);

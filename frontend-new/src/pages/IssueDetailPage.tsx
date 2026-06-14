@@ -42,11 +42,18 @@ import {
   NotificationToast,
   type NotificationToastTone,
 } from '@/components/NotificationToast';
+import { useWorkspace } from '@/context/WorkspaceContext';
 import { projectApi, projectGithubApi, projectWorkItemsApi } from '@/lib/api';
+import {
+  notifyChatInputPrefill,
+  type ChatInputPrefillMode,
+} from '@/lib/chatInputPrefill';
 import {
   clearPendingIssueStatusSync,
   getPendingIssueStatusSync,
 } from '@/lib/pendingIssueStatusSync';
+import { notifyLinkedWorkItemsChanged } from '@/lib/linkedWorkItemsEvents';
+import { mapSession } from '@/lib/mappers';
 import type {
   BackendChatSession,
   GitHubAccount,
@@ -200,9 +207,59 @@ const remoteProviderIcons: Record<RemoteProviderId, RemoteProviderIconConfig> =
 const ISSUE_ID_BASE_FONT_SIZE_PX = 16;
 const ISSUE_ID_MIN_FONT_SIZE_PX = 1;
 const ISSUE_ID_AVERAGE_CHAR_WIDTH_EM = 0.6;
+const ISSUE_SESSION_TITLE_MAX_LENGTH = 60;
+const WORKFLOW_MODE_LABEL_KEYS = new Set([
+  'feature',
+  'enhancement',
+  'improvement',
+]);
 
 const cn = (...classes: Array<string | false | undefined>) =>
   classes.filter(Boolean).join(' ');
+
+function truncateIssueSessionTitle(title: string) {
+  const normalized = title.trim().replace(/\s+/g, ' ');
+  if (!normalized) return 'Issue session';
+
+  const chars = Array.from(normalized);
+  if (chars.length <= ISSUE_SESSION_TITLE_MAX_LENGTH) return normalized;
+
+  return `${chars.slice(0, ISSUE_SESSION_TITLE_MAX_LENGTH - 3).join('')}...`;
+}
+
+function issuePromptLabel(
+  labels: string[],
+  issueType: ProjectWorkItem['type'],
+) {
+  const cleanLabels = labels.map((label) => label.trim()).filter(Boolean);
+  return cleanLabels.length > 0
+    ? cleanLabels.join(', ')
+    : labelDisplayName(issueType);
+}
+
+function buildIssueSessionPrompt({
+  label,
+  title,
+  description,
+}: {
+  label: string;
+  title: string;
+  description: string;
+}) {
+  return [
+    `当前事项是${label}`,
+    `issue标题：${title.trim()}`,
+    `issue描述：${description.trim()}`,
+  ].join('\n');
+}
+
+function shouldUseWorkflowModeForIssue(
+  labels: string[],
+  issueType: ProjectWorkItem['type'],
+) {
+  if (issueType === 'feature') return true;
+  return labels.some((label) => WORKFLOW_MODE_LABEL_KEYS.has(labelKey(label)));
+}
 
 export function IssueDetailPage({
   projectId,
@@ -221,6 +278,8 @@ export function IssueDetailPage({
   onOpenIntegrations,
   tr,
 }: IssueDetailPageProps) {
+  const { projects, setSessions, setActiveSessionId, refreshSessions } =
+    useWorkspace();
   const [detail, setDetail] = useState<ProjectWorkItemDetailResponse | null>(
     null,
   );
@@ -256,6 +315,12 @@ export function IssueDetailPage({
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const detailRequestIdRef = useRef(0);
   const pendingStatusSyncAttemptRef = useRef<string | null>(null);
+  const projectWorkspacePath = useMemo(
+    () =>
+      projects.find((project) => project.id === projectId)
+        ?.default_workspace_path ?? null,
+    [projectId, projects],
+  );
 
   const loadDetail = useCallback(async () => {
     if (!projectId || !issue.workItemId) {
@@ -965,8 +1030,65 @@ export function IssueDetailPage({
     });
   };
 
-  const handleCreateSession = () => {
-    onAction('Create session from issue detail is coming soon');
+  const handleCreateSession = async () => {
+    await runAction('create-session', async () => {
+      const labelsForPrompt =
+        issueLabels.length > 0 ? issueLabels : labelDraftToList(labelDraft);
+      const prompt = buildIssueSessionPrompt({
+        label: issuePromptLabel(labelsForPrompt, current.type),
+        title: issueTitle,
+        description: issueBodyText,
+      });
+      const useWorkflowMode = shouldUseWorkflowModeForIssue(
+        labelsForPrompt,
+        current.type,
+      );
+      const mode: ChatInputPrefillMode | undefined = useWorkflowMode
+        ? 'workflow'
+        : undefined;
+      const createdSession = await projectApi.createSession(projectId, {
+        title: truncateIssueSessionTitle(issueTitle),
+        workspace_path: projectWorkspacePath,
+      });
+
+      await linkSession(createdSession.id);
+
+      setProjectSessions((sessions) => [
+        createdSession,
+        ...sessions.filter((session) => session.id !== createdSession.id),
+      ]);
+      setSessions((sessions) => [
+        mapSession(createdSession, { activeSessionId: createdSession.id }),
+        ...sessions
+          .filter((session) => session.id !== createdSession.id)
+          .map((session) => ({ ...session, active: false })),
+      ]);
+      setActiveSessionId(createdSession.id);
+      setOpenPropertyMenu(null);
+      setSessionQuery('');
+
+      notifyLinkedWorkItemsChanged({
+        projectId,
+        sessionId: createdSession.id,
+        workItemId: current.id,
+      });
+      window.dispatchEvent(
+        new CustomEvent('openteams:navigate-session', {
+          detail: createdSession.id,
+        }),
+      );
+      notifyChatInputPrefill({
+        sessionId: createdSession.id,
+        text: prompt,
+        ...(mode ? { mode } : {}),
+      });
+      void refreshSessions().catch(() => undefined);
+      onAction(
+        mode === 'workflow'
+          ? 'Session created and workflow prompt prepared'
+          : 'Session created and prompt prepared',
+      );
+    });
   };
 
   const handleUnlinkSession = async (linkId: string) => {
@@ -1419,7 +1541,8 @@ export function IssueDetailPage({
                   menuRef={sessionMenuRef}
                   disabled={
                     sessionsLoading ||
-                    Boolean(action?.startsWith('assign-session-'))
+                    Boolean(action?.startsWith('assign-session-')) ||
+                    action === 'create-session'
                   }
                   loading={sessionsLoading}
                   open={openPropertyMenu === 'session'}
@@ -1438,14 +1561,23 @@ export function IssueDetailPage({
                 {linkedSessionLinks.length === 0 && (
                   <button
                     type="button"
-                    className="inline-flex h-7 max-w-full items-center gap-1.5 rounded-full bg-[var(--primary)] px-2.5 text-[12px] font-bold leading-none text-[var(--on-primary)] transition hover:bg-[var(--primary-hover)] active:scale-[0.98]"
-                    onClick={handleCreateSession}
+                    disabled={action === 'create-session'}
+                    className="inline-flex h-7 max-w-full items-center gap-1.5 rounded-full bg-[var(--primary)] px-2.5 text-[12px] font-bold leading-none text-[var(--on-primary)] transition hover:bg-[var(--primary-hover)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70 disabled:active:scale-100"
+                    onClick={() => void handleCreateSession()}
                   >
-                    <Plus
-                      aria-hidden="true"
-                      className="h-[14px] w-[14px] shrink-0"
-                      strokeWidth={2.4}
-                    />
+                    {action === 'create-session' ? (
+                      <RefreshCw
+                        aria-hidden="true"
+                        className="h-[14px] w-[14px] shrink-0 animate-spin"
+                        strokeWidth={2.4}
+                      />
+                    ) : (
+                      <Plus
+                        aria-hidden="true"
+                        className="h-[14px] w-[14px] shrink-0"
+                        strokeWidth={2.4}
+                      />
+                    )}
                     <span className="min-w-0 truncate">Create session</span>
                   </button>
                 )}

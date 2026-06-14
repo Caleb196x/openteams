@@ -47,6 +47,10 @@ const apiSource = readFileSync(
   new URL("../lib/api.ts", import.meta.url),
   "utf8",
 );
+const chatInputPrefillSource = readFileSync(
+  new URL("../lib/chatInputPrefill.ts", import.meta.url),
+  "utf8",
+);
 const activityPanelIndex = messageContentSource.indexOf("<AgentActivityPanel");
 const markdownIndex = messageContentSource.indexOf("<AgentMarkdown");
 const composerQuoteIndex = source.indexOf("{quotedMessage && (");
@@ -107,6 +111,17 @@ check(
     source.includes("reloadRelatedFiles") &&
     source.includes("resetWorkspaceChanges"),
   source,
+);
+check(
+  "consumes pending chat input prefill events for newly opened sessions",
+  source.includes("CHAT_INPUT_PREFILL_EVENT") &&
+    source.includes("consumeChatInputPrefill(activeSessionId)") &&
+    source.includes("applyChatInputPrefill") &&
+    source.includes("setChatInputMode(detail.mode)") &&
+    source.includes("setInputText(detail.text)") &&
+    chatInputPrefillSource.includes("window.sessionStorage.setItem") &&
+    chatInputPrefillSource.includes("openteams:chat-input-prefill"),
+  { source, chatInputPrefillSource },
 );
 check(
   "opens files when a related file has no inline diff",

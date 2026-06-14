@@ -122,17 +122,24 @@ check(
 );
 
 check(
-  'issue detail project panel links sessions from a label-style dropdown',
+  'issue detail project panel links and creates sessions from issue context',
   issueDetailSource.includes('function SessionDropdown') &&
     issueDetailSource.includes("from '@/components/CommandSelectMenu'") &&
     issueDetailSource.includes('placeholder="Link session..."') &&
     commandSelectMenuSource.includes('max-h-[220px]') &&
     issueDetailSource.includes('options={filteredSessionOptions}') &&
     issueDetailSource.includes('linkedSessionLinks.length === 0 &&') &&
-    issueDetailSource.includes(
+    issueDetailSource.includes('projectApi.createSession(projectId') &&
+    issueDetailSource.includes('linkSession(createdSession.id)') &&
+    issueDetailSource.includes('buildIssueSessionPrompt') &&
+    issueDetailSource.includes('shouldUseWorkflowModeForIssue') &&
+    issueDetailSource.includes('workspace_path: projectWorkspacePath') &&
+    issueDetailSource.includes('notifyChatInputPrefill') &&
+    issueDetailSource.includes('notifyLinkedWorkItemsChanged') &&
+    issueDetailSource.includes("'openteams:navigate-session'") &&
+    !issueDetailSource.includes(
       'Create session from issue detail is coming soon',
     ) &&
-    !issueDetailSource.includes('projectApi.createSession(projectId') &&
     !issueDetailSource.includes('<select'),
   issueDetailSource,
 );
