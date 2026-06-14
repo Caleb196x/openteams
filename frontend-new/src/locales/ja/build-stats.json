@@ -44,5 +44,14 @@
   "buildStats.tokens": "トークン",
   "buildStats.totalTokens": "合計トークン",
   "buildStats.view.bar": "バー",
-  "buildStats.view.list": "リスト"
+  "buildStats.view.list": "リスト",
+  "buildStats.workflowSteps.agent": "エージェント",
+  "buildStats.workflowSteps.back": "セッション",
+  "buildStats.workflowSteps.breakdown": "入力 / 出力",
+  "buildStats.workflowSteps.cost": "コスト",
+  "buildStats.workflowSteps.empty": "このセッションにはまだ workflow step のトークン使用量がありません。",
+  "buildStats.workflowSteps.runs": "実行回数",
+  "buildStats.workflowSteps.step": "ステップ",
+  "buildStats.workflowSteps.tokens": "トークン",
+  "buildStats.workflowSteps.total": "合計"
 }

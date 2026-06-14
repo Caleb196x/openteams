@@ -128,6 +128,7 @@
   "recentSessions": "Sessions récentes",
   "recommendedTeamSaaS": "Équipe SaaS recommandée",
   "relatedFiles.hide": "Masquer les fichiers liés",
+  "relatedFiles.loading": "Chargement des changements...",
   "relatedFiles.noChangedFiles": "Aucun fichier modifié dans cette session.",
   "relatedFiles.noDiffOpenFile": "Aucun diff disponible. Ouverture du fichier.",
   "relatedFiles.openDiff": "Ouvrir le diff de {path}",

@@ -128,6 +128,7 @@
   "recentSessions": "최근 생성 회의",
   "recommendedTeamSaaS": "SaaS 추천 주축 직책 부서",
   "relatedFiles.hide": "관련 파일 숨기기",
+  "relatedFiles.loading": "변경 사항 로드 중...",
   "relatedFiles.noChangedFiles": "이 세션에는 변경된 파일이 없습니다.",
   "relatedFiles.noDiffOpenFile": "사용 가능한 diff가 없습니다. 파일을 엽니다.",
   "relatedFiles.openDiff": "{path}의 diff 열기",

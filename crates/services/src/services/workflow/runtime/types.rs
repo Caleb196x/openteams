@@ -186,6 +186,13 @@ pub struct WorkflowStepRunResult {
     pub outputs: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct WorkflowAgentRunOutput {
+    pub output: String,
+    pub run_id: Option<Uuid>,
+    pub token_usage: Option<TokenUsageInfo>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SummaryPayload {
     pub summary: String,

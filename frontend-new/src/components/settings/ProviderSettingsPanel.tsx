@@ -99,6 +99,31 @@ function sanitizeConfig(config: CliConfig): CliConfig {
   return next;
 }
 
+function builtInProviderSnapshot(
+  config: CliConfig,
+  provider: BuiltInProviderId,
+) {
+  if (provider === 'ollama') {
+    return {
+      endpoint: trimToNull(config.provider.ollama?.endpoint),
+    };
+  }
+
+  return sanitizeCredentials(config.provider[provider]);
+}
+
+function isBuiltInProviderConfigDirty(
+  config: CliConfig,
+  savedConfig: CliConfig | null,
+  provider: BuiltInProviderId,
+) {
+  if (!savedConfig) return false;
+  return (
+    JSON.stringify(builtInProviderSnapshot(config, provider)) !==
+    JSON.stringify(builtInProviderSnapshot(savedConfig, provider))
+  );
+}
+
 function StatusMessage({ status }: { status: StatusState }) {
   if (!status) return null;
   const className =
@@ -141,6 +166,7 @@ function ProviderIcon({ providerId }: { providerId: string }) {
 export function ProviderSettingsPanel() {
   const { t, providersAsync, refreshProviders, showToast } = useWorkspace();
   const [config, setConfig] = useState<CliConfig | null>(null);
+  const [savedConfig, setSavedConfig] = useState<CliConfig | null>(null);
   const [providerInfos, setProviderInfos] = useState<ProviderInfo[]>([]);
   const [customProviders, setCustomProviders] = useState<CustomProviderEntry[]>(
     [],
@@ -207,6 +233,7 @@ export function ProviderSettingsPanel() {
           cliConfigApi.listCustomProviders(),
         ]);
       setConfig(nextConfig);
+      setSavedConfig(cloneConfig(nextConfig));
       setProviderInfos(nextProviders);
       setCustomProviders(nextCustomProviders);
       setSelectedId(nextSelectedId ?? null);
@@ -239,6 +266,12 @@ export function ProviderSettingsPanel() {
     setStatus(null);
   };
 
+  const discardConfigChanges = () => {
+    if (!savedConfig) return;
+    setConfig(cloneConfig(savedConfig));
+    setStatus(null);
+  };
+
   const saveConfig = async (providerId: string) => {
     if (!config) return;
     setBusyAction('save');
@@ -253,20 +286,30 @@ export function ProviderSettingsPanel() {
           : defaultProviderId,
       });
       setConfig(saved);
+      setSavedConfig(cloneConfig(saved));
+      const successMessage = copy(
+        'settings.providers.saved',
+        'Provider configuration saved.',
+      );
       setStatus({
-        message: copy('settings.providers.saved', 'Provider configuration saved.'),
+        message: successMessage,
         tone: 'success',
       });
-      showToast(copy('settings.providers.saved', 'Provider configuration saved.'));
+      showToast(successMessage, 'success');
       await loadData(providerId);
     } catch (error) {
-      setStatus({
-        message: getErrorMessage(
-          error,
-          copy('settings.providers.saveFailed', 'Failed to save provider configuration.'),
+      const errorMessage = getErrorMessage(
+        error,
+        copy(
+          'settings.providers.saveFailed',
+          'Failed to save provider configuration.',
         ),
+      );
+      setStatus({
+        message: errorMessage,
         tone: 'error',
       });
+      showToast(errorMessage, 'error');
     } finally {
       setBusyAction(null);
     }
@@ -312,6 +355,11 @@ export function ProviderSettingsPanel() {
     (provider) => provider.configured,
   ).length;
   const hasConfiguredProvider = configuredProviderCount > 0;
+  const selectedBuiltInDirty =
+    !!config &&
+    selectedId != null &&
+    isBuiltInProvider(selectedId) &&
+    isBuiltInProviderConfigDirty(config, savedConfig, selectedId);
 
   return (
     <div className="provider-settings-panel h-full min-h-0 space-y-4">
@@ -483,9 +531,11 @@ export function ProviderSettingsPanel() {
                 busyAction={busyAction}
                 config={config}
                 isBusy={isBusy}
+                isDirty={selectedBuiltInDirty}
                 provider={selectedId}
                 status={status}
                 setConfig={updateConfig}
+                onDiscard={discardConfigChanges}
                 onSave={() => saveConfig(selectedId)}
                 copy={copy}
               />

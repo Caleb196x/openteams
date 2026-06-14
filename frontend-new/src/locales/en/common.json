@@ -131,6 +131,7 @@
   "recentSessions": "Recent sessions",
   "recommendedTeamSaaS": "Recommended team for SaaS",
   "relatedFiles.hide": "Hide related files",
+  "relatedFiles.loading": "Loading changes...",
   "relatedFiles.noChangedFiles": "No changed files in this session.",
   "relatedFiles.noDiffOpenFile": "No diff is available. Opening file instead.",
   "relatedFiles.openDiff": "Open diff for {path}",

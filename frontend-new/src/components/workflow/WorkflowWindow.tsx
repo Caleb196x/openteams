@@ -23,8 +23,14 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { WorkflowCardData } from '@/lib/api';
+import type { WorkflowStepTokenEntry } from '@/types';
 import { chatApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import {
+  formatCompactNumber,
+  formatNumber,
+  formatPrice,
+} from '@/lib/buildStatsUtils';
 import { ChatMarkdown } from '@/components/ui-new/primitives/conversation/ChatMarkdown';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { getWorkflowTranscriptRefetchInterval } from '@/lib/workflowRequestPolicy';
@@ -90,6 +96,101 @@ type WorkflowRuntimeMessage = {
 };
 
 type ExecutionRecordTab = 'DETAILS' | 'LOGS';
+
+function WorkflowStepTokenUsageStrip({
+  usage,
+  loading,
+}: {
+  usage: WorkflowStepTokenEntry | null;
+  loading: boolean;
+}) {
+  const { t } = useTranslation('chat');
+
+  if (loading) {
+    return (
+      <div className="mb-8 flex gap-2">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <div
+            key={index}
+            className="h-11 w-24 animate-pulse rounded-md bg-[var(--surface-3)]"
+          />
+        ))}
+      </div>
+    );
+  }
+
+  if (!usage) {
+    return (
+      <div className="mb-8 text-[12px] text-[#8A8F98]">
+        {t('workflow.inspector.tokenUsageUnavailable', {
+          defaultValue: 'Token usage is not available for this step yet.',
+        })}
+      </div>
+    );
+  }
+
+  const metrics = [
+    {
+      label: t('workflow.inspector.tokenTotal', { defaultValue: 'Tokens' }),
+      value: formatNumber(usage.total_tokens),
+    },
+    {
+      label: t('workflow.inspector.tokenInput', { defaultValue: 'Input' }),
+      value: formatCompactNumber(usage.input_tokens),
+    },
+    {
+      label: t('workflow.inspector.tokenOutput', { defaultValue: 'Output' }),
+      value: formatCompactNumber(usage.output_tokens),
+    },
+    {
+      label: t('workflow.inspector.tokenCache', { defaultValue: 'Cache' }),
+      value: formatCompactNumber(usage.cache_read_tokens),
+    },
+    {
+      label: t('workflow.inspector.tokenReasoning', {
+        defaultValue: 'Reasoning',
+      }),
+      value: formatCompactNumber(usage.reasoning_output_tokens),
+    },
+    {
+      label: t('workflow.inspector.tokenCost', { defaultValue: 'Cost' }),
+      value: formatPrice(usage.estimated_cost),
+    },
+  ];
+
+  return (
+    <div className="mb-8">
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-[#8A8F98]">
+        {usage.model_name || usage.model_id ? (
+          <span>{usage.model_name || usage.model_id}</span>
+        ) : null}
+        {usage.run_count > 1 ? (
+          <span>
+            {t('workflow.inspector.tokenRuns', {
+              count: usage.run_count,
+              defaultValue: '{{count}} runs',
+            })}
+          </span>
+        ) : null}
+      </div>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
+        {metrics.map((metric) => (
+          <div
+            key={metric.label}
+            className="rounded-md border border-[var(--hairline)] bg-[var(--surface-1)] px-2.5 py-2"
+          >
+            <div className="text-[10px] font-medium uppercase text-[#8A8F98]">
+              {metric.label}
+            </div>
+            <div className="mt-0.5 font-mono text-[12px] font-semibold text-[#F3F6FB]">
+              {metric.value}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 type WorkflowTranscriptSummaryPayload = {
   summary?: string;
@@ -711,6 +812,8 @@ function InspectorCard({
   pendingActionId,
   transcriptEntries,
   isLoadingTranscript,
+  tokenUsage,
+  isLoadingTokenUsage,
   activeTab,
   onActiveTabChange,
 }: {
@@ -730,6 +833,8 @@ function InspectorCard({
   pendingActionId?: string | null;
   transcriptEntries: WorkflowTranscriptEntry[];
   isLoadingTranscript: boolean;
+  tokenUsage: WorkflowStepTokenEntry | null;
+  isLoadingTokenUsage: boolean;
   activeTab: ExecutionRecordTab;
   onActiveTabChange: (tab: ExecutionRecordTab) => void;
 }) {
@@ -929,6 +1034,11 @@ function InspectorCard({
                 </>
               )}
             </div>
+
+            <WorkflowStepTokenUsageStrip
+              usage={tokenUsage}
+              loading={isLoadingTokenUsage}
+            />
 
             <div className="mt-0">
               <h3 className="text-[11px] font-medium text-[#8A8F98] uppercase tracking-[0.05em] mb-2">
@@ -1921,6 +2031,20 @@ export function WorkflowWindow({
     }),
   });
 
+  const {
+    data: activeStepTokenUsageData,
+    isLoading: isLoadingActiveStepTokenUsage,
+  } = useQuery({
+    queryKey: ['workflowStepTokenUsage', sessionId, activeStep?.id],
+    queryFn: () => {
+      if (!sessionId || !activeStep?.id) return { usage: null };
+      return chatApi.getWorkflowStepTokenUsage(sessionId, activeStep.id);
+    },
+    enabled: !!sessionId && !!activeStep?.id && !isPreview && isOpen,
+    staleTime: 30_000,
+    gcTime: 5 * 60 * 1000,
+  });
+
   const activeStepFallbackTranscript = useMemo(() => {
     if (!activeStep) return [];
     return transcriptWithLocalInputs.filter(
@@ -2579,6 +2703,8 @@ export function WorkflowWindow({
                   isLoadingActiveStepTranscript &&
                   visibleActiveTranscript.length === 0
                 }
+                tokenUsage={activeStepTokenUsageData?.usage ?? null}
+                isLoadingTokenUsage={isLoadingActiveStepTokenUsage}
                 activeTab={executionRecordTab}
                 onActiveTabChange={setExecutionRecordTab}
               />

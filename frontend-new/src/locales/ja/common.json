@@ -128,6 +128,7 @@
   "recentSessions": "直近のセッション",
   "recommendedTeamSaaS": "SaaS開発向け推奨布陣",
   "relatedFiles.hide": "関連ファイルを非表示",
+  "relatedFiles.loading": "変更を読み込み中...",
   "relatedFiles.noChangedFiles": "このセッションに変更ファイルはありません。",
   "relatedFiles.noDiffOpenFile": "利用できる差分がありません。ファイルを開きます。",
   "relatedFiles.openDiff": "{path}の差分を開く",

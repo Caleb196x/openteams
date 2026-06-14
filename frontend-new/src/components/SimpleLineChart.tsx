@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { formatChartDate, formatNumber } from '@/lib/buildStatsUtils';
 
 export interface SimpleLineChartSeries<T> {
@@ -21,6 +21,7 @@ export interface SimpleLineChartProps<T extends { date: string }> {
   loading: boolean;
   emptyLabel: string;
   height?: number;
+  fillHeight?: boolean;
   formatValue?: (value: number) => string;
   tooltipRows?: (datum: T) => SimpleLineChartTooltipRow[];
   onDatumClick?: (datum: T) => void;
@@ -41,6 +42,7 @@ export function SimpleLineChart<T extends { date: string }>({
   loading,
   emptyLabel,
   height = 220,
+  fillHeight = false,
   formatValue = formatNumber,
   tooltipRows,
   onDatumClick,
@@ -48,6 +50,11 @@ export function SimpleLineChart<T extends { date: string }>({
   pointAriaLabel,
 }: SimpleLineChartProps<T>) {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const frameRef = useRef<HTMLDivElement | null>(null);
+  const [measuredSize, setMeasuredSize] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
   const chartData = Array.isArray(data) ? data : [];
   const chartSeries = Array.isArray(series) ? series : [];
   const numberValue = (value: unknown): number =>
@@ -64,10 +71,36 @@ export function SimpleLineChart<T extends { date: string }>({
     }
   };
 
+  useEffect(() => {
+    if (!fillHeight || !frameRef.current) return;
+
+    const element = frameRef.current;
+    const updateSize = () => {
+      const rect = element.getBoundingClientRect();
+      setMeasuredSize({
+        width: rect.width > 0 ? Math.round(rect.width) : 720,
+        height: rect.height > 0 ? Math.round(rect.height) : height,
+      });
+    };
+
+    updateSize();
+    if (typeof ResizeObserver === 'undefined') return;
+
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [fillHeight, height]);
+
+  const chartWidth = fillHeight ? (measuredSize?.width ?? 720) : 720;
+  const chartHeight = fillHeight ? (measuredSize?.height ?? height) : height;
+
   if (loading) {
     return (
       <div
-        className="h-[220px] w-full animate-pulse rounded bg-[var(--surface-2)]"
+        className={`w-full animate-pulse rounded bg-[var(--surface-2)] ${
+          fillHeight ? 'h-full min-h-0' : ''
+        }`}
+        style={fillHeight ? undefined : { height }}
         role="status"
         aria-label={loadingLabel}
       />
@@ -76,15 +109,22 @@ export function SimpleLineChart<T extends { date: string }>({
 
   if (chartData.length === 0 || chartSeries.length === 0) {
     return (
-      <div className="flex h-[220px] items-center justify-center rounded border border-[var(--hairline)] bg-[var(--surface-2)] text-xs text-[var(--ink-subtle)]">
+      <div
+        className={`flex items-center justify-center rounded border border-[var(--hairline)] bg-[var(--surface-2)] text-xs text-[var(--ink-subtle)] ${
+          fillHeight ? 'h-full min-h-0' : ''
+        }`}
+        style={fillHeight ? undefined : { height }}
+      >
         {emptyLabel}
       </div>
     );
   }
 
-  const width = 720;
+  const width = Math.max(320, chartWidth);
+  const effectiveHeight = Math.max(120, chartHeight);
   const innerWidth = width - chartPadding.left - chartPadding.right;
-  const innerHeight = height - chartPadding.top - chartPadding.bottom;
+  const innerHeight =
+    effectiveHeight - chartPadding.top - chartPadding.bottom;
   const values = chartData.flatMap((datum) =>
     chartSeries.map((item) => Math.max(0, seriesValue(item, datum))),
   );
@@ -131,12 +171,14 @@ export function SimpleLineChart<T extends { date: string }>({
       : Math.max(8, activeMaxY - tooltipHeight - 12);
 
   return (
-    <div className="w-full">
-      <div className="mb-3 flex flex-wrap items-center gap-3">
+    <div
+      className={fillHeight ? 'flex h-full min-h-0 w-full flex-col' : 'w-full'}
+    >
+      <div className="mb-2 flex shrink-0 flex-wrap items-center gap-2">
         {chartSeries.map((item) => (
           <span
             key={item.id}
-            className="inline-flex items-center gap-1.5 text-[12px] font-medium text-[var(--ink-muted)]"
+            className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[var(--ink-muted)]"
           >
             <span
               className="h-2 w-2 rounded-full"
@@ -146,34 +188,36 @@ export function SimpleLineChart<T extends { date: string }>({
           </span>
         ))}
       </div>
-      <svg
-        viewBox={`0 0 ${width} ${height}`}
-        className="h-[220px] w-full overflow-visible"
-        role="img"
-      >
-        {yTicks.map((tick) => {
-          const y = yFor(tick);
-          return (
-            <g key={tick}>
-              <line
-                x1={chartPadding.left}
-                x2={width - chartPadding.right}
-                y1={y}
-                y2={y}
-                stroke="var(--hairline)"
-                strokeDasharray={tick === 0 ? undefined : '4 5'}
-              />
-              <text
-                x={chartPadding.left - 8}
-                y={y + 4}
-                textAnchor="end"
-                className="fill-[var(--ink-tertiary)] text-[10px]"
-              >
-                {formatValue(tick)}
-              </text>
-            </g>
-          );
-        })}
+      <div ref={frameRef} className={fillHeight ? 'min-h-0 flex-1' : ''}>
+        <svg
+          viewBox={`0 0 ${width} ${effectiveHeight}`}
+          className={`w-full overflow-visible ${fillHeight ? 'h-full' : ''}`}
+          style={fillHeight ? undefined : { height: effectiveHeight }}
+          role="img"
+        >
+          {yTicks.map((tick) => {
+            const y = yFor(tick);
+            return (
+              <g key={tick}>
+                <line
+                  x1={chartPadding.left}
+                  x2={width - chartPadding.right}
+                  y1={y}
+                  y2={y}
+                  stroke="var(--hairline)"
+                  strokeDasharray={tick === 0 ? undefined : '4 5'}
+                />
+                <text
+                  x={chartPadding.left - 8}
+                  y={y + 4}
+                  textAnchor="end"
+                  className="fill-[var(--ink-tertiary)] text-[10px]"
+                >
+                  {formatValue(tick)}
+                </text>
+              </g>
+            );
+          })}
 
         {chartSeries.map((item) => {
           const points = chartData
@@ -248,7 +292,7 @@ export function SimpleLineChart<T extends { date: string }>({
               x1={xFor(activeIndex)}
               x2={xFor(activeIndex)}
               y1={chartPadding.top}
-              y2={height - chartPadding.bottom}
+              y2={effectiveHeight - chartPadding.bottom}
               stroke="var(--ink-tertiary)"
               strokeDasharray="3 4"
               opacity={0.7}
@@ -311,14 +355,15 @@ export function SimpleLineChart<T extends { date: string }>({
           <text
             key={index}
             x={xFor(index)}
-            y={height - 8}
+            y={effectiveHeight - 8}
             textAnchor="middle"
             className="fill-[var(--ink-tertiary)] text-[10px]"
           >
             {formatChartDate(chartData[index]?.date ?? '')}
           </text>
         ))}
-      </svg>
+        </svg>
+      </div>
     </div>
   );
 }

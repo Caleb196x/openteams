@@ -164,7 +164,7 @@ check(
 check('renders issue linker control', html.includes('LINK_ISSUE'), html);
 check(
   'issue linker uses plan-mode button text sizing',
-  source.includes('px-2 py-1 text-[10px] font-medium') &&
+  source.includes('px-2 py-1 text-[12px] font-medium') &&
     source.includes('className="h-3 w-3 shrink-0"'),
   source,
 );
@@ -179,9 +179,9 @@ check(
 check(
   'issue menu option rows leave room for descenders',
   source.includes('flex min-h-12 w-full') &&
-    source.includes('text-[14px] font-bold leading-normal') &&
+    source.includes('text-[12px] font-bold leading-normal') &&
     source.includes('truncate leading-snug') &&
-    source.includes('text-[12px] font-semibold leading-normal'),
+    source.includes('text-[10px] font-semibold leading-normal'),
   source,
 );
 check(

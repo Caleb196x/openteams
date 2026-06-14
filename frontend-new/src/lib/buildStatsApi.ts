@@ -12,6 +12,7 @@ import type {
   ModelPricingResponse,
   SessionTokensResponse,
   UpdateModelPricingRequest,
+  WorkflowStepTokensResponse,
 } from "@/types";
 import { handleApiResponse, makeRequest, qs } from "./apiCore";
 
@@ -37,6 +38,19 @@ export const buildStatsApi = {
       `/api/build-stats/session-tokens${qs({ project_id: projectId })}`,
     );
     return handleApiResponse<SessionTokensResponse>(r);
+  },
+
+  getSessionWorkflowStepTokens: async (
+    projectId: string,
+    sessionId: string,
+  ): Promise<WorkflowStepTokensResponse> => {
+    const r = await makeRequest(
+      `/api/build-stats/session-workflow-step-tokens${qs({
+        project_id: projectId,
+        session_id: sessionId,
+      })}`,
+    );
+    return handleApiResponse<WorkflowStepTokensResponse>(r);
   },
 
   getActivity: async (

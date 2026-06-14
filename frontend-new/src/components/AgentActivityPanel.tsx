@@ -214,7 +214,10 @@ const useAutoFollowScroll = (scrollSignal: string) => {
 // LineItem — Linear-style minimal row
 // ---------------------------------------------------------------------------
 
-const ToolLineItem: React.FC<{ line: AgentActivityDisplayRow }> = ({ line }) => {
+const ToolLineItem: React.FC<{
+  line: AgentActivityDisplayRow;
+  errorLabel: string;
+}> = ({ line, errorLabel }) => {
   const ToolIcon = line.toolKind ? toolIconByKind[line.toolKind] : Wrench;
   const isError =
     line.toolStatus === "failed" ||
@@ -224,7 +227,9 @@ const ToolLineItem: React.FC<{ line: AgentActivityDisplayRow }> = ({ line }) => 
   return (
     <div className="wf-log-task-row">
       <span className="wf-log-task-status">
-        {isError && <XIcon className="wf-log-error-x-icon" aria-label="error" />}
+        {isError && (
+          <XIcon className="wf-log-error-x-icon" aria-label={errorLabel} />
+        )}
       </span>
       <span className="wf-log-task-tool-icon">
         <ToolIcon className="w-3 h-3" />
@@ -239,13 +244,18 @@ const ToolLineItem: React.FC<{ line: AgentActivityDisplayRow }> = ({ line }) => 
   );
 };
 
-const ContentLineItem: React.FC<{ line: AgentActivityDisplayRow }> = ({ line }) => {
+const ContentLineItem: React.FC<{
+  line: AgentActivityDisplayRow;
+  errorLabel: string;
+}> = ({ line, errorLabel }) => {
   const isError = line.line_type === "error";
 
   return (
     <div className="wf-log-task-row wf-log-task-row--content">
       <span className="wf-log-task-status">
-        {isError && <XIcon className="wf-log-error-x-icon" aria-label="error" />}
+        {isError && (
+          <XIcon className="wf-log-error-x-icon" aria-label={errorLabel} />
+        )}
       </span>
       <span className={`wf-log-task-content-text ${isError ? "wf-log-task-content-text--error" : ""}`}>
         {renderSimpleBoldMarkdown(line.content)}
@@ -316,9 +326,17 @@ export const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
           <div className="wf-log-group-tasks">
             {visibleRows.map((line) =>
               isToolCallLine(line) ? (
-                <ToolLineItem key={line.row_id} line={line} />
+                <ToolLineItem
+                  key={line.row_id}
+                  line={line}
+                  errorLabel={labels.error}
+                />
               ) : (
-                <ContentLineItem key={line.row_id} line={line} />
+                <ContentLineItem
+                  key={line.row_id}
+                  line={line}
+                  errorLabel={labels.error}
+                />
               ),
             )}
           </div>

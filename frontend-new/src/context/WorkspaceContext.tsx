@@ -97,6 +97,13 @@ interface SendMessageOptions {
   quotedMessage?: QuotedMessageReference;
 }
 
+export type ToastTone = 'info' | 'success' | 'warning' | 'error';
+
+export type WorkspaceToast = {
+  message: string;
+  tone: ToastTone;
+};
+
 export type WorkflowRuntimeLine = {
   id: string;
   executionId: string;
@@ -570,8 +577,8 @@ interface WorkspaceContextProps {
   t: (key: string, replacements?: Record<string, string | number>) => string;
 
   // Toast notifications
-  toast: string | null;
-  showToast: (msg: string) => void;
+  toast: WorkspaceToast | null;
+  showToast: (msg: string, tone?: ToastTone) => void;
 
   // Settings active section
   activeSettingsTab: string;
@@ -722,7 +729,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
     useState<boolean>(false);
 
   // Toast
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<WorkspaceToast | null>(null);
 
   // Cache the latest activeSessionId so async callbacks see the live value.
   const activeSessionIdRef = useRef(activeSessionId);
@@ -750,8 +757,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
         DEFAULT_CHAT_INPUT_MODE)
       : DEFAULT_CHAT_INPUT_MODE;
 
-  const showToast = (msg: string) => {
-    setToast(msg);
+  const showToast = (msg: string, tone: ToastTone = 'info') => {
+    setToast({ message: msg, tone });
     setTimeout(() => {
       setToast(null);
     }, toastDurationMsRef.current);

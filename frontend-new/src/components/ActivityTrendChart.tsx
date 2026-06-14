@@ -6,12 +6,16 @@ export interface ActivityTrendChartProps {
   data: ActivityDataPoint[];
   loading: boolean;
   t: (key: string, replacements?: Record<string, string | number>) => string;
+  height?: number;
+  fillHeight?: boolean;
 }
 
 export function ActivityTrendChart({
   data,
   loading,
   t,
+  height,
+  fillHeight,
 }: ActivityTrendChartProps) {
   const label = (
     key: string,
@@ -38,6 +42,8 @@ export function ActivityTrendChart({
         'buildStats.empty.noActivityData',
         'No build activity data',
       )}
+      height={height}
+      fillHeight={fillHeight}
       pointAriaLabel={(date, series) =>
         label('buildStats.chart.point', '{date} {series} chart point', {
           date,

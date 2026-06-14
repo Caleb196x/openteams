@@ -308,9 +308,15 @@ export enum ChatRunLogState { live = "live", tail = "tail", pruned = "pruned" }
 
 export enum ChatRunArtifactState { full = "full", stub = "stub", pruned = "pruned" }
 
-export type ChatRunRetentionSummary = { kind: string | null, finished_at: string | null, error_summary: string | null, error_type: string | null, assistant_excerpt: string | null, total_tokens: number | null, log_bytes_total: bigint | null, log_bytes_persisted: bigint | null, live_bytes_dropped: bigint | null, log_truncated: boolean | null, log_capture_degraded: boolean | null, pruned_at: string | null, prune_reason: string | null, };
+export type ChatRunRetentionSummary = { kind: string | null, finished_at: string | null, error_summary: string | null, error_type: string | null, assistant_excerpt: string | null, total_tokens: number | null, token_usage: TokenUsageInfo | null, workflow_execution_id: string | null, workflow_agent_session_id: string | null, workflow_step_id: string | null, workflow_step_key: string | null, log_bytes_total: bigint | null, log_bytes_persisted: bigint | null, live_bytes_dropped: bigint | null, log_truncated: boolean | null, log_capture_degraded: boolean | null, pruned_at: string | null, prune_reason: string | null, };
 
 export type ChatRunRetentionInfo = { run_id: string, session_agent_id: string, created_at: string, log_state: ChatRunLogState, artifact_state: ChatRunArtifactState, log_truncated: boolean, log_capture_degraded: boolean, pruned_at: string | null, prune_reason: string | null, retention_summary: ChatRunRetentionSummary | null, };
+
+export type WorkflowStepTokenEntry = { session_id: string, session_title: string, workflow_execution_id: string, workflow_step_id: string, workflow_step_key: string, workflow_step_title: string, agent_name: string | null, latest_run_id: string | null, run_count: bigint, input_tokens: bigint, output_tokens: bigint, cache_read_tokens: bigint, reasoning_output_tokens: bigint, total_tokens: bigint, estimated_cost: number, model_id: string | null, model_name: string | null, };
+
+export type WorkflowStepTokensResponse = { steps: Array<WorkflowStepTokenEntry>, };
+
+export type WorkflowStepTokenUsageResponse = { usage: WorkflowStepTokenEntry | null, };
 
 export type ChatWorkItem = { id: string, session_id: string, run_id: string, session_agent_id: string, agent_id: string, item_type: ChatWorkItemType, content: string, created_at: string, };
 

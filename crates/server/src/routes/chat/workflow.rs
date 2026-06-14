@@ -28,6 +28,7 @@ use db::models::{
 use deployment::Deployment;
 use serde::{Deserialize, Serialize};
 use services::services::{
+    build_stats::token_cost_stats::TokenCostStatsService,
     chat, config,
     workflow::{
         workflow_analytics,
@@ -45,7 +46,11 @@ use ts_rs::TS;
 use utils::{assets::config_path, response::ApiResponse};
 use uuid::Uuid;
 
-use crate::{DeploymentImpl, error::ApiError};
+use crate::{
+    DeploymentImpl,
+    error::ApiError,
+    routes::build_stats::{WorkflowStepTokenEntry, WorkflowStepTokenUsageResponse},
+};
 
 #[derive(Debug, Deserialize, TS)]
 pub struct GeneratePlanAndRunRequest {
@@ -771,6 +776,26 @@ pub async fn get_step_transcripts(
     let mut scoped_query = query;
     scoped_query.step_id = Some(step_id);
     list_transcript_response(pool, &session, execution.id, scoped_query).await
+}
+
+pub async fn get_step_token_usage(
+    Extension(session): Extension<ChatSession>,
+    State(deployment): State<DeploymentImpl>,
+    axum::extract::Path((_session_id, step_id)): axum::extract::Path<(Uuid, Uuid)>,
+) -> Result<ResponseJson<ApiResponse<WorkflowStepTokenUsageResponse>>, ApiError> {
+    let pool = &deployment.db().pool;
+    let (_step, _execution) = load_step_for_session(pool, &session, step_id).await?;
+    let project_id = session.project_id.ok_or_else(|| {
+        ApiError::BadRequest("Session is not associated with a project.".to_string())
+    })?;
+    let usage = TokenCostStatsService::new()
+        .workflow_step_token_usage(pool, project_id, &step_id.to_string())
+        .await?
+        .map(WorkflowStepTokenEntry::from);
+
+    Ok(ResponseJson(ApiResponse::success(
+        WorkflowStepTokenUsageResponse { usage },
+    )))
 }
 
 pub async fn submit_step_input(

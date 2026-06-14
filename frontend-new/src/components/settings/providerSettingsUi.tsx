@@ -1,4 +1,5 @@
 import React from 'react';
+import { Loader2, RotateCcw, Save } from 'lucide-react';
 
 export const inputClassName =
   'provider-input h-8 w-full rounded-[5px] border-0 bg-transparent px-2.5 text-[13px] text-[var(--ink)] outline-none placeholder:text-[var(--ink-tertiary)] focus:ring-0 disabled:cursor-not-allowed disabled:opacity-60';
@@ -37,5 +38,50 @@ export function Field({
         ) : null}
       </span>
     </label>
+  );
+}
+
+export function ProviderSaveBar({
+  disabled,
+  isSaving,
+  onDiscard,
+  onSave,
+  discardLabel,
+  saveLabel,
+  savingLabel,
+}: {
+  disabled: boolean;
+  isSaving: boolean;
+  onDiscard: () => void;
+  onSave: () => void;
+  discardLabel: string;
+  saveLabel: string;
+  savingLabel: string;
+}) {
+  return (
+    <div className="provider-save-bar">
+      <button
+        type="button"
+        className="provider-save-bar-button provider-save-bar-discard-button"
+        onClick={onDiscard}
+        disabled={disabled}
+      >
+        <RotateCcw className="h-3.5 w-3.5" />
+        {discardLabel}
+      </button>
+      <button
+        type="button"
+        className="provider-save-bar-button"
+        onClick={onSave}
+        disabled={disabled}
+      >
+        {isSaving ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Save className="h-3.5 w-3.5" />
+        )}
+        {isSaving ? savingLabel : saveLabel}
+      </button>
+    </div>
   );
 }

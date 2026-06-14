@@ -607,7 +607,7 @@ impl ChatRunner {
             .map(str::to_string)
     }
 
-    pub(super) fn parse_token_usage_from_stdout_line(line: &str) -> Option<TokenUsageInfo> {
+    pub(crate) fn parse_token_usage_from_stdout_line(line: &str) -> Option<TokenUsageInfo> {
         let value: serde_json::Value = serde_json::from_str(line).ok()?;
         let value_obj = value.as_object()?;
 
@@ -743,7 +743,7 @@ impl ChatRunner {
         })
     }
 
-    pub(super) fn update_token_usage_from_stdout_chunk(
+    pub(crate) fn update_token_usage_from_stdout_chunk(
         stdout_line_buffer: &mut String,
         last_token_usage: &mut Option<TokenUsageInfo>,
         chunk: &str,
@@ -767,7 +767,7 @@ impl ChatRunner {
         }
     }
 
-    pub(super) fn flush_token_usage_buffer(
+    pub(crate) fn flush_token_usage_buffer(
         stdout_line_buffer: &mut String,
         last_token_usage: &mut Option<TokenUsageInfo>,
     ) {
@@ -1692,6 +1692,11 @@ impl ChatRunner {
                                 Some(latest_assistant.chars().take(2048).collect())
                             },
                             total_tokens: Some(token_usage.total_tokens),
+                            token_usage: Some(token_usage.clone()),
+                            workflow_execution_id: None,
+                            workflow_agent_session_id: None,
+                            workflow_step_id: None,
+                            workflow_step_key: None,
                             log_bytes_total: Some(spool_snapshot.total_bytes),
                             log_bytes_persisted: Some(spool_snapshot.persisted_bytes),
                             live_bytes_dropped: Some(spool_snapshot.dropped_bytes),
@@ -2368,6 +2373,11 @@ impl ChatRunner {
             error_type,
             assistant_excerpt: output_content.map(|content| content.chars().take(2048).collect()),
             total_tokens,
+            token_usage: None,
+            workflow_execution_id: None,
+            workflow_agent_session_id: None,
+            workflow_step_id: None,
+            workflow_step_key: None,
             log_bytes_total,
             log_bytes_persisted,
             live_bytes_dropped,

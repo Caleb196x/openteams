@@ -1659,6 +1659,34 @@ export interface SessionTokensResponse {
   sessions: SessionCostEntry[];
 }
 
+export interface WorkflowStepTokenEntry {
+  session_id: string;
+  session_title: string;
+  workflow_execution_id: string;
+  workflow_step_id: string;
+  workflow_step_key: string;
+  workflow_step_title: string;
+  agent_name?: string | null;
+  latest_run_id?: string | null;
+  run_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  reasoning_output_tokens: number;
+  total_tokens: number;
+  estimated_cost: number;
+  model_id?: string | null;
+  model_name?: string | null;
+}
+
+export interface WorkflowStepTokensResponse {
+  steps: WorkflowStepTokenEntry[];
+}
+
+export interface WorkflowStepTokenUsageResponse {
+  usage: WorkflowStepTokenEntry | null;
+}
+
 export interface ActivityResponse {
   days: ActivityDataPoint[];
 }

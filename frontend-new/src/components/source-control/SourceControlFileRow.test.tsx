@@ -23,13 +23,13 @@ const source = readFileSync(
   new URL("./SourceControlFileRow.tsx", import.meta.url),
   "utf8",
 );
-const warningRenderCount = source.match(/<FileWarningIndicator file={file} \/>/g)
-  ?.length ?? 0;
+const warningRenderCount =
+  source.match(/<FileWarningIndicator file={file} t={t} \/>/g)?.length ?? 0;
 const actionOverlayIndex = source.indexOf(
   "group-hover/source-file:pointer-events-auto",
 );
 const hoverWarningIndex = source.indexOf(
-  "<FileWarningIndicator file={file} />",
+  "<FileWarningIndicator file={file} t={t} />",
   actionOverlayIndex,
 );
 

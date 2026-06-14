@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { ConfirmationDialog } from "@/components/ConfirmationDialog";
 import { ScrollArea } from "@/components/ScrollArea";
+import { useWorkspace } from "@/context/WorkspaceContext";
 import { useSessionSourceControl } from "@/hooks/useSessionSourceControl";
 import { deliveryApi } from "@/lib/api";
 import type {
@@ -21,9 +22,11 @@ import {
   buildSourceControlViewModel,
   sourceControlHasSharedFiles,
   sourceControlVisiblePaths,
+  translateSourceControl,
   type SourceControlBatchAction,
   type SourceControlPanelViewModel,
   type SourceControlSectionViewModel,
+  type SourceControlTranslator,
 } from "./sourceControlViewModel";
 
 interface SessionSourceControlPanelProps {
@@ -57,8 +60,12 @@ interface SessionCommitSummary {
 const actionErrorMessage = (err: unknown) =>
   err instanceof Error ? err.message : String(err);
 
-const describePaths = (files: SourceControlFile[]) =>
-  files.length === 1 ? files[0].path : `${files.length} files`;
+const describePaths = (files: SourceControlFile[], t: SourceControlTranslator) =>
+  files.length === 1
+    ? files[0].path
+    : translateSourceControl(t, "sourceControl.pathCount", "{count} files", {
+        count: files.length,
+      });
 
 const findSection = (
   viewModel: SourceControlPanelViewModel,
@@ -85,7 +92,7 @@ const parseRecordMetadata = (
 };
 
 const firstCommitLine = (message: string) =>
-  message.split(/\r?\n/)[0]?.trim() || "Commit";
+  message.split(/\r?\n/)[0]?.trim() || "";
 
 const mergeCommitSummaries = (
   commits: SessionCommitSummary[],
@@ -152,10 +159,14 @@ function SessionCommitList({
   commits,
   expanded,
   onToggle,
+  title,
+  commitFallback,
 }: {
   commits: SessionCommitSummary[];
   expanded: boolean;
   onToggle: () => void;
+  title: string;
+  commitFallback: string;
 }) {
   if (commits.length === 0) return null;
 
@@ -172,7 +183,7 @@ function SessionCommitList({
             expanded ? "rotate-90" : ""
           }`}
         />
-        <span className="min-w-0 flex-1 truncate">Session commits</span>
+        <span className="min-w-0 flex-1 truncate">{title}</span>
         <span className="font-mono text-[10px] text-[var(--ink-tertiary)]">
           {commits.length}
         </span>
@@ -189,7 +200,7 @@ function SessionCommitList({
                 {commit.sha.slice(0, 5)}
               </span>
               <span className="min-w-0 flex-1 truncate text-[var(--ink-subtle)]">
-                {commit.message}
+                {commit.message || commitFallback}
               </span>
             </div>
           ))}
@@ -209,6 +220,7 @@ export const SessionSourceControlPanel: React.FC<
   linkedWorkItemIds = [],
   onOpenDiff,
 }) => {
+  const { t } = useWorkspace();
   const {
     status,
     loading,
@@ -230,9 +242,19 @@ export const SessionSourceControlPanel: React.FC<
     useState<SourceControlConfirmDialogState | null>(null);
 
   const viewModel = useMemo(
-    () => buildSourceControlViewModel(status),
-    [status],
+    () => buildSourceControlViewModel(status, t),
+    [status, t],
   );
+  const tr = (
+    key: string,
+    fallback: string,
+    replacements?: Record<string, string | number>,
+  ) => translateSourceControl(t, key, fallback, replacements);
+  const title = tr("sourceControl.title", "File Changes");
+  const refreshLabel = tr("sourceControl.refresh", "Refresh source control");
+  const stageLabel = tr("sourceControl.action.stage", "Stage");
+  const discardLabel = tr("sourceControl.action.discard", "Discard");
+  const commitLabel = tr("sourceControl.action.commit", "Commit");
 
   useEffect(() => {
     if (!enabled || !projectId || !sessionId) {
@@ -314,9 +336,15 @@ export const SessionSourceControlPanel: React.FC<
   ): Promise<boolean | null> => {
     if (!sourceControlHasSharedFiles(files)) return false;
     const confirmed = await requestConfirm({
-      title: `${actionLabel} shared files?`,
-      description:
+      title: tr(
+        "sourceControl.confirm.sharedTitle",
+        "{action} shared files?",
+        { action: actionLabel },
+      ),
+      description: tr(
+        "sourceControl.confirm.sharedDescription",
         "This operation includes files touched by another active session. Continue only if you intend to override that shared protection.",
+      ),
       confirmLabel: actionLabel,
       tone: "warning",
     });
@@ -326,7 +354,7 @@ export const SessionSourceControlPanel: React.FC<
   const handleStageFiles = (files: SourceControlFile[]) => {
     if (files.length === 0) return;
     void (async () => {
-      const forceShared = await getSharedForce(files, "Stage");
+      const forceShared = await getSharedForce(files, stageLabel);
       if (forceShared === null) return;
       const paths = sourceControlVisiblePaths(files);
       await runOperation(`stage:${paths.join("|")}`, () =>
@@ -356,15 +384,17 @@ export const SessionSourceControlPanel: React.FC<
     if (files.length === 0) return;
     void (async () => {
       const discardConfirmed = await requestConfirm({
-        title: "Discard changes?",
-        description: `Discard changes for ${describePaths(
-          files,
-        )}? This cannot be undone.`,
-        confirmLabel: "Discard",
+        title: tr("sourceControl.confirm.discardTitle", "Discard changes?"),
+        description: tr(
+          "sourceControl.confirm.discardDescription",
+          "Discard changes for {paths}? This cannot be undone.",
+          { paths: describePaths(files, t) },
+        ),
+        confirmLabel: discardLabel,
         tone: "danger",
       });
       if (!discardConfirmed) return;
-      const forceShared = await getSharedForce(files, "Discard");
+      const forceShared = await getSharedForce(files, discardLabel);
       if (forceShared === null) return;
       const paths = sourceControlVisiblePaths(files);
       await runOperation(`discard:${paths.join("|")}`, () =>
@@ -407,7 +437,7 @@ export const SessionSourceControlPanel: React.FC<
     const stagedSection = findSection(viewModel, "staged");
     const stagedFiles = stagedSection?.files ?? [];
     void (async () => {
-      const forceShared = await getSharedForce(stagedFiles, "Commit");
+      const forceShared = await getSharedForce(stagedFiles, commitLabel);
       if (forceShared === null) return;
 
       await runOperation("commit", async () => {
@@ -435,11 +465,11 @@ export const SessionSourceControlPanel: React.FC<
     return (
       <div className="flex min-h-0 flex-1 flex-col px-3 py-3">
         <div className="mb-2 flex items-center gap-2 text-[14px] font-semibold text-[var(--ink)]">
-          Files Changes
+          {title}
         </div>
         <div className="flex items-center gap-2 rounded-md bg-[var(--surface-1)] px-3 py-3 text-[13px] text-[var(--ink-tertiary)]">
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          Loading source-control status...
+          {tr("sourceControl.loading", "Loading source-control status...")}
         </div>
       </div>
     );
@@ -450,14 +480,14 @@ export const SessionSourceControlPanel: React.FC<
       <div className="flex min-h-0 flex-1 flex-col px-3 py-3">
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-[14px] font-semibold text-[var(--ink)]">
-            Files Changes
+            {title}
           </h2>
           <button
             type="button"
             onClick={() => void refresh()}
             className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--ink-tertiary)] transition hover:bg-[var(--surface-3)] hover:text-[var(--ink)]"
-            title="Refresh source control"
-            aria-label="Refresh source control"
+            title={refreshLabel}
+            aria-label={refreshLabel}
           >
             <RefreshCw className="h-3.5 w-3.5" />
           </button>
@@ -475,7 +505,7 @@ export const SessionSourceControlPanel: React.FC<
       <div className="flex h-10 shrink-0 items-center justify-between px-3">
         <div className="flex min-w-0 items-center gap-2">
           <h2 className="truncate text-[14px] font-semibold text-[var(--ink)]">
-            Files Changes
+            {title}
           </h2>
           {viewModel.branch && (
             <span
@@ -491,8 +521,8 @@ export const SessionSourceControlPanel: React.FC<
           onClick={() => void refresh()}
           disabled={loading || Boolean(pendingAction)}
           className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--ink-tertiary)] transition hover:bg-[var(--surface-3)] hover:text-[var(--ink)] disabled:cursor-not-allowed disabled:opacity-40"
-          title="Refresh source control"
-          aria-label="Refresh source control"
+          title={refreshLabel}
+          aria-label={refreshLabel}
         >
           <RefreshCw
             aria-hidden="true"
@@ -514,7 +544,10 @@ export const SessionSourceControlPanel: React.FC<
             )}
             {viewModel.externalStagedPaths.length > 0 && (
               <div className="rounded-md bg-[var(--surface-1)] px-3 py-2 text-[12px] text-rose-500">
-                External staged files:{" "}
+                {tr(
+                  "sourceControl.externalStagedFiles",
+                  "External staged files:",
+                )}{" "}
                 <span className="font-mono">
                   {viewModel.externalStagedPaths.join(", ")}
                 </span>
@@ -533,6 +566,8 @@ export const SessionSourceControlPanel: React.FC<
             commits={sessionCommits}
             expanded={commitListExpanded}
             onToggle={() => setCommitListExpanded((expanded) => !expanded)}
+            title={tr("sourceControl.sessionCommits", "Session commits")}
+            commitFallback={tr("sourceControl.commit.fallback", "Commit")}
           />
           {viewModel.sections.map((section) => (
             <section key={section.id} className="space-y-1">
@@ -569,6 +604,7 @@ export const SessionSourceControlPanel: React.FC<
                       area={section.area}
                       viewModel={viewModel}
                       pending={Boolean(pendingAction)}
+                      t={t}
                       onOpenDiff={handleOpenDiff}
                       onStage={(target) => handleStageFiles([target])}
                       onUnstage={(target) => handleUnstageFiles([target])}
@@ -588,7 +624,7 @@ export const SessionSourceControlPanel: React.FC<
           onChange={(event) => setCommitMessage(event.target.value)}
           rows={2}
           className="mb-2 min-h-14 w-full resize-none rounded-md border border-[var(--hairline)] bg-[var(--surface-1)] px-2 py-1.5 text-[13px] text-[var(--ink)] outline-none placeholder:text-[var(--ink-tertiary)] focus:border-[var(--primary)]"
-          placeholder="commit message"
+          placeholder={tr("sourceControl.commitPlaceholder", "commit message")}
         />
         <button
           type="button"
@@ -601,11 +637,20 @@ export const SessionSourceControlPanel: React.FC<
           className="flex h-8 w-full items-center justify-center rounded-md bg-[var(--primary)] px-3 text-[13px] font-medium text-white transition hover:opacity-95 disabled:cursor-not-allowed disabled:bg-[var(--surface-3)] disabled:text-[var(--ink-tertiary)] disabled:opacity-80"
           title={
             !commitMessage.trim()
-              ? "Enter a commit message"
-              : (viewModel.commitDisabledReason ?? "Commit staged changes")
+              ? tr(
+                  "sourceControl.commit.enterMessage",
+                  "Enter a commit message",
+                )
+              : (viewModel.commitDisabledReason ??
+                tr(
+                  "sourceControl.commit.stagedChanges",
+                  "Commit staged changes",
+                ))
           }
         >
-          {pendingAction === "commit" ? "Committing..." : "Commit"}
+          {pendingAction === "commit"
+            ? tr("sourceControl.commit.committing", "Committing...")
+            : commitLabel}
         </button>
       </div>
       </div>
@@ -614,8 +659,8 @@ export const SessionSourceControlPanel: React.FC<
           title={confirmDialog.title}
           description={confirmDialog.description}
           confirmLabel={confirmDialog.confirmLabel}
-          cancelLabel="Cancel"
-          escLabel="Esc to cancel"
+          cancelLabel={t("cancel")}
+          escLabel={t("escToCancel")}
           tone={confirmDialog.tone}
           idPrefix="source-control-confirm"
           onCancel={() => closeConfirmDialog(false)}

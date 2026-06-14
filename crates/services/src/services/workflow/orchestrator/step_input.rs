@@ -393,6 +393,7 @@ impl WorkflowOrchestrator {
                 &running_step,
                 workflow_session,
                 protocol_message,
+                None,
             )
             .await?;
             let execution = match outcome {

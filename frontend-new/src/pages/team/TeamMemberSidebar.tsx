@@ -61,7 +61,7 @@ function MemberRunStateBadge({
   return (
     <span
       className={cx(
-        "inline-flex h-[18px] items-center gap-1 rounded-full border px-1.5 font-mono text-[10px] font-semibold tracking-tight uppercase",
+        "inline-flex h-[18px] shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-1.5 font-mono text-[10px] font-semibold tracking-tight uppercase",
         state === "idle" &&
           "border-[var(--hairline)] bg-[var(--surface-3)] text-[var(--ink-tertiary)]",
         state === "running" &&

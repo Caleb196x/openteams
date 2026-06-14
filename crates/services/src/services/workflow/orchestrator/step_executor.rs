@@ -31,7 +31,7 @@ use super::{
         chat_runner::ChatRunner,
         workflow_analytics,
         workflow_runtime::{
-            self, SummaryPayload, WORKFLOW_PROTOCOL_PARSE_MAX_RETRIES,
+            self, SummaryPayload, WORKFLOW_PROTOCOL_PARSE_MAX_RETRIES, WorkflowAgentRunOutput,
             WorkflowReviewProtocolMessage, WorkflowRevisionFeedbackSource, WorkflowRuntimeError,
             WorkflowStepProtocolMessage, WorkflowStepRunResult,
             build_lead_review_prompt_with_schema, build_step_execution_prompt_with_schema,
@@ -213,6 +213,20 @@ pub(super) struct PersistedWorkerAttempt {
     pub(super) result: WorkflowStepRunResult,
 }
 
+fn workflow_step_run_result_from_agent_output(
+    agent_output: &WorkflowAgentRunOutput,
+    summary: String,
+    content: String,
+    outputs: Vec<String>,
+) -> WorkflowStepRunResult {
+    WorkflowStepRunResult {
+        run_id: agent_output.run_id.unwrap_or_else(Uuid::new_v4),
+        summary,
+        content,
+        outputs,
+    }
+}
+
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub(super) struct PendingRevisionFeedback {
@@ -258,7 +272,7 @@ impl WorkflowOrchestrator {
         prompt: &str,
         step: &WorkflowStep,
         first_run_is_follow_up: bool,
-    ) -> Result<(WorkflowStepProtocolMessage, String), OrchestratorError> {
+    ) -> Result<(WorkflowStepProtocolMessage, WorkflowAgentRunOutput), OrchestratorError> {
         let mut attempt = 0;
         let mut run_as_follow_up = first_run_is_follow_up;
         let mut prompt_to_send = prompt.to_string();
@@ -277,7 +291,7 @@ impl WorkflowOrchestrator {
                 workflow_session.clone()
             };
 
-            let raw_output = if run_as_follow_up {
+            let agent_output = if run_as_follow_up {
                 run_workflow_step_agent_follow_up(
                     db,
                     chat_runner,
@@ -302,12 +316,13 @@ impl WorkflowOrchestrator {
                 )
                 .await?
             };
+            let raw_output = &agent_output.output;
 
-            match Self::parse_step_output_message(step.execution_id, step, &raw_output) {
-                Ok(message) => return Ok((message, raw_output)),
+            match Self::parse_step_output_message(step.execution_id, step, raw_output) {
+                Ok(message) => return Ok((message, agent_output)),
                 Err(err)
                     if attempt < WORKFLOW_PROTOCOL_PARSE_MAX_RETRIES
-                        && should_retry_workflow_protocol_parse_failure(&raw_output) =>
+                        && should_retry_workflow_protocol_parse_failure(raw_output) =>
                 {
                     tracing::warn!(
                         step_id = %step.id,
@@ -323,7 +338,7 @@ impl WorkflowOrchestrator {
                         &schema,
                         &err.to_string(),
                         prompt,
-                        &raw_output,
+                        raw_output,
                     );
                     attempt += 1;
                     run_as_follow_up = true;
@@ -364,7 +379,7 @@ impl WorkflowOrchestrator {
                 workflow_session.clone()
             };
 
-            let raw_output = if run_as_follow_up {
+            let agent_output = if run_as_follow_up {
                 run_workflow_step_agent_follow_up(
                     db,
                     chat_runner,
@@ -389,6 +404,7 @@ impl WorkflowOrchestrator {
                 )
                 .await?
             };
+            let raw_output = agent_output.output;
 
             match parse_review_protocol_output(execution.id, &step.step_key, &raw_output) {
                 Ok(message) => return Ok((message, raw_output)),
@@ -1159,7 +1175,7 @@ Read this file before writing the final result. Do not rely on the workflow plan
                                     &agent_skill_names,
                                 );
 
-                                let (protocol_message, _raw_output) =
+                                let (protocol_message, agent_output) =
                                     match Self::run_step_agent_protocol_with_retry(
                                         db,
                                         pool,
@@ -1212,12 +1228,12 @@ Read this file before writing the final result. Do not rely on the workflow plan
                                         ..
                                     } => {
                                         active_step = running_revision_step;
-                                        current_result = WorkflowStepRunResult {
-                                            run_id: Uuid::new_v4(),
+                                        current_result = workflow_step_run_result_from_agent_output(
+                                            &agent_output,
                                             summary,
                                             content,
                                             outputs,
-                                        };
+                                        );
                                         skip_lead_review_for_current_attempt = true;
                                         continue;
                                     }
@@ -1229,6 +1245,7 @@ Read this file before writing the final result. Do not rely on the workflow plan
                                             &running_revision_step,
                                             workflow_session,
                                             other,
+                                            agent_output.run_id,
                                         )
                                         .await;
                                     }
@@ -1324,7 +1341,7 @@ Read this file before writing the final result. Do not rely on the workflow plan
                         &agent_skill_names,
                     );
 
-                    let (protocol_message, _raw_output) =
+                    let (protocol_message, agent_output) =
                         match Self::run_step_agent_protocol_with_retry(
                             db,
                             pool,
@@ -1377,12 +1394,12 @@ Read this file before writing the final result. Do not rely on the workflow plan
                             ..
                         } => {
                             active_step = running_revision_step;
-                            current_result = WorkflowStepRunResult {
-                                run_id: Uuid::new_v4(),
+                            current_result = workflow_step_run_result_from_agent_output(
+                                &agent_output,
                                 summary,
                                 content,
                                 outputs,
-                            };
+                            );
                             skip_lead_review_for_current_attempt = false;
                         }
                         other => {
@@ -1393,6 +1410,7 @@ Read this file before writing the final result. Do not rely on the workflow plan
                                 &running_revision_step,
                                 workflow_session,
                                 other,
+                                agent_output.run_id,
                             )
                             .await;
                         }
@@ -1409,6 +1427,7 @@ Read this file before writing the final result. Do not rely on the workflow plan
         running_step: &WorkflowStep,
         workflow_session: &WorkflowAgentSession,
         protocol_message: WorkflowStepProtocolMessage,
+        run_id_hint: Option<Uuid>,
     ) -> Result<StepOutcome, OrchestratorError> {
         match protocol_message {
             WorkflowStepProtocolMessage::ApprovalRequest {
@@ -1554,7 +1573,7 @@ Read this file before writing the final result. Do not rely on the workflow plan
                 ..
             } => {
                 let execution_result = WorkflowStepRunResult {
-                    run_id: Uuid::new_v4(),
+                    run_id: run_id_hint.unwrap_or_else(Uuid::new_v4),
                     summary,
                     content,
                     outputs,
@@ -1835,7 +1854,7 @@ Before modifying files, you MUST use the `using-git-workspace` skill to create a
             running_step
         };
 
-        let protocol_message = match Self::run_step_agent_protocol_with_retry(
+        let (protocol_message, agent_output) = match Self::run_step_agent_protocol_with_retry(
             db,
             pool,
             chat_runner,
@@ -1849,13 +1868,13 @@ Before modifying files, you MUST use the `using-git-workspace` skill to create a
         )
         .await
         {
-            Ok((message, raw_output)) => {
+            Ok((message, agent_output)) => {
                 tracing::debug!(
                     "Raw output from step {}: {}",
                     running_step.title,
-                    raw_output
+                    agent_output.output
                 );
-                message
+                (message, agent_output)
             }
             Err(OrchestratorError::Runtime(WorkflowRuntimeError::Interrupted(reason))) => {
                 Self::cleanup_result_dependency_context_file(
@@ -1962,12 +1981,12 @@ Before modifying files, you MUST use the `using-git-workspace` skill to create a
                     plan,
                     current_steps,
                     edges,
-                    WorkflowStepRunResult {
-                        run_id: Uuid::new_v4(),
+                    workflow_step_run_result_from_agent_output(
+                        &agent_output,
                         summary,
                         content,
                         outputs,
-                    },
+                    ),
                     skip_initial_lead_review,
                 )
                 .await
@@ -1980,6 +1999,7 @@ Before modifying files, you MUST use the `using-git-workspace` skill to create a
                     &running_step,
                     workflow_session,
                     other,
+                    agent_output.run_id,
                 )
                 .await
             }

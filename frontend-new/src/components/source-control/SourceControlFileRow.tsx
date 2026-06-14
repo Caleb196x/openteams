@@ -72,8 +72,10 @@ import type { SourceControlDiffArea, SourceControlFile } from "@/types";
 import {
   getFileActionDisabledReason,
   sourceControlStatusLabel,
+  translateSourceControl,
   type SourceControlFileAction,
   type SourceControlPanelViewModel,
+  type SourceControlTranslator,
 } from "./sourceControlViewModel";
 
 interface SourceControlFileRowProps {
@@ -81,6 +83,7 @@ interface SourceControlFileRowProps {
   area: SourceControlDiffArea;
   viewModel: SourceControlPanelViewModel;
   pending: boolean;
+  t: SourceControlTranslator;
   onOpenDiff: (file: SourceControlFile, area: SourceControlDiffArea) => void;
   onStage: (file: SourceControlFile) => void;
   onUnstage: (file: SourceControlFile) => void;
@@ -311,11 +314,22 @@ function SourceControlIconButton({
   );
 }
 
-function FileWarningIndicator({ file }: { file: SourceControlFile }) {
+function FileWarningIndicator({
+  file,
+  t,
+}: {
+  file: SourceControlFile;
+  t: SourceControlTranslator;
+}) {
   if (!file.shared && !file.blocked_reason) return null;
 
   const title =
-    file.blocked_reason ?? "Shared with another active session";
+    file.blocked_reason ??
+    translateSourceControl(
+      t,
+      "sourceControl.sharedWithAnotherSession",
+      "Shared with another active session",
+    );
 
   return (
     <span
@@ -334,9 +348,23 @@ const disabledTitle = (
   baseTitle: string,
   reason: string | null,
   pending: boolean,
+  t: SourceControlTranslator,
 ) => {
-  if (pending) return "Source-control operation is running";
-  if (reason) return `${baseTitle}: ${reason}`;
+  if (pending) {
+    return translateSourceControl(
+      t,
+      "sourceControl.operationRunning",
+      "Source-control operation is running",
+    );
+  }
+  if (reason) {
+    return translateSourceControl(
+      t,
+      "sourceControl.disabledTitle",
+      "{action}: {reason}",
+      { action: baseTitle, reason },
+    );
+  }
   return baseTitle;
 };
 
@@ -345,6 +373,7 @@ export const SourceControlFileRow: React.FC<SourceControlFileRowProps> = ({
   area,
   viewModel,
   pending,
+  t,
   onOpenDiff,
   onStage,
   onUnstage,
@@ -354,21 +383,39 @@ export const SourceControlFileRow: React.FC<SourceControlFileRowProps> = ({
     viewModel,
     file,
     "stage",
+    t,
   );
   const unstageDisabledReason = getFileActionDisabledReason(
     viewModel,
     file,
     "unstage",
+    t,
   );
   const discardDisabledReason = getFileActionDisabledReason(
     viewModel,
     file,
     "discard",
+    t,
   );
   const isActionDisabled = (
     _action: SourceControlFileAction,
     reason: string | null,
   ) => pending || Boolean(reason);
+  const stageLabel = translateSourceControl(
+    t,
+    "sourceControl.action.stage",
+    "Stage",
+  );
+  const discardLabel = translateSourceControl(
+    t,
+    "sourceControl.action.discard",
+    "Discard",
+  );
+  const unstageLabel = translateSourceControl(
+    t,
+    "sourceControl.action.unstage",
+    "Unstage",
+  );
 
   return (
     <div
@@ -380,7 +427,12 @@ export const SourceControlFileRow: React.FC<SourceControlFileRowProps> = ({
           type="button"
           onClick={() => onOpenDiff(file, area)}
           className="flex min-w-0 flex-1 items-center gap-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)]"
-          aria-label={`Open diff for ${file.path}`}
+          aria-label={translateSourceControl(
+            t,
+            "sourceControl.openDiffFor",
+            "Open diff for {path}",
+            { path: file.path },
+          )}
         >
           <SourceControlFileTypeIcon path={file.path} />
           <span className="min-w-0 flex-1 truncate font-mono text-[13px] text-[var(--ink)]">
@@ -390,7 +442,7 @@ export const SourceControlFileRow: React.FC<SourceControlFileRowProps> = ({
       </div>
 
       <div className="flex w-10 shrink-0 items-center justify-end gap-1 transition-opacity group-hover/source-file:opacity-0 group-focus-within/source-file:opacity-0">
-        <FileWarningIndicator file={file} />
+        <FileWarningIndicator file={file} t={t} />
         <span
           className={`w-4 text-right font-mono text-[12px] font-semibold ${
             statusTone[file.status]
@@ -404,7 +456,7 @@ export const SourceControlFileRow: React.FC<SourceControlFileRowProps> = ({
         {area === "changes" ? (
           <>
             <SourceControlIconButton
-              title={disabledTitle("Stage", stageDisabledReason, pending)}
+              title={disabledTitle(stageLabel, stageDisabledReason, pending, t)}
               disabled={isActionDisabled("stage", stageDisabledReason)}
               onClick={(event) => {
                 event.stopPropagation();
@@ -414,7 +466,12 @@ export const SourceControlFileRow: React.FC<SourceControlFileRowProps> = ({
               <Plus className="h-3.5 w-3.5" />
             </SourceControlIconButton>
             <SourceControlIconButton
-              title={disabledTitle("Discard", discardDisabledReason, pending)}
+              title={disabledTitle(
+                discardLabel,
+                discardDisabledReason,
+                pending,
+                t,
+              )}
               disabled={isActionDisabled("discard", discardDisabledReason)}
               onClick={(event) => {
                 event.stopPropagation();
@@ -426,7 +483,12 @@ export const SourceControlFileRow: React.FC<SourceControlFileRowProps> = ({
           </>
         ) : (
           <SourceControlIconButton
-            title={disabledTitle("Unstage", unstageDisabledReason, pending)}
+            title={disabledTitle(
+              unstageLabel,
+              unstageDisabledReason,
+              pending,
+              t,
+            )}
             disabled={isActionDisabled("unstage", unstageDisabledReason)}
             onClick={(event) => {
               event.stopPropagation();
@@ -436,7 +498,7 @@ export const SourceControlFileRow: React.FC<SourceControlFileRowProps> = ({
             <Minus className="h-3.5 w-3.5" />
           </SourceControlIconButton>
         )}
-        <FileWarningIndicator file={file} />
+        <FileWarningIndicator file={file} t={t} />
       </div>
     </div>
   );

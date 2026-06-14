@@ -5,6 +5,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { ArrowLeft } from 'lucide-react';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { buildStatsApi } from '@/lib/buildStatsApi';
 import type {
@@ -12,16 +13,18 @@ import type {
   DailyTokenDataPoint,
   ModelUsageRow,
   SessionCostEntry,
+  WorkflowStepTokenEntry,
 } from '@/types';
 import { TimeRangeFilter } from '@/components/TimeRangeFilter';
 import { DailyTokenChart } from '@/components/DailyTokenChart';
-import { SessionCostList, type SessionCostViewMode } from '@/components/SessionCostList';
+import { SessionCostList } from '@/components/SessionCostList';
 import { ModelPricingTable } from '@/components/ModelPricingTable';
 import { ActivityTrendChart } from '@/components/ActivityTrendChart';
 import {
   formatCompactNumber,
   formatNumber,
   formatPrice,
+  truncateTitle,
 } from '@/lib/buildStatsUtils';
 import { notifyBuildStatsPricingUpdated } from '@/lib/buildStatsEvents';
 
@@ -36,6 +39,9 @@ const asNumber = (value: unknown): number =>
     : typeof value === 'string' && value.trim() !== ''
       ? Number(value) || 0
       : 0;
+
+const asOptionalString = (value: unknown): string | null =>
+  value === null || value === undefined ? null : String(value);
 
 const normalizeDailyTokenDays = (value: unknown): DailyTokenDataPoint[] =>
   asArray(value as DailyTokenDataPoint[]).map((item) => {
@@ -79,6 +85,61 @@ const normalizeActivityDays = (value: unknown): ActivityDataPoint[] =>
       features_delivered: asNumber(
         raw.features_delivered ?? raw.featuresDelivered,
       ),
+    };
+  });
+
+const normalizeWorkflowStepTokens = (value: unknown): WorkflowStepTokenEntry[] =>
+  asArray(value as WorkflowStepTokenEntry[]).map((item) => {
+    const raw = item as WorkflowStepTokenEntry & {
+      sessionId?: unknown;
+      sessionTitle?: unknown;
+      workflowExecutionId?: unknown;
+      workflowStepId?: unknown;
+      workflowStepKey?: unknown;
+      workflowStepTitle?: unknown;
+      agentName?: unknown;
+      latestRunId?: unknown;
+      runCount?: unknown;
+      inputTokens?: unknown;
+      outputTokens?: unknown;
+      cacheReadTokens?: unknown;
+      reasoningOutputTokens?: unknown;
+      totalTokens?: unknown;
+      estimatedCost?: unknown;
+      modelId?: unknown;
+      modelName?: unknown;
+    };
+    const inputTokens = asNumber(raw.input_tokens ?? raw.inputTokens);
+    const outputTokens = asNumber(raw.output_tokens ?? raw.outputTokens);
+    const cacheReadTokens = asNumber(
+      raw.cache_read_tokens ?? raw.cacheReadTokens,
+    );
+    const totalTokens = asNumber(raw.total_tokens ?? raw.totalTokens);
+    return {
+      session_id: String(raw.session_id ?? raw.sessionId ?? ''),
+      session_title: String(raw.session_title ?? raw.sessionTitle ?? ''),
+      workflow_execution_id: String(
+        raw.workflow_execution_id ?? raw.workflowExecutionId ?? '',
+      ),
+      workflow_step_id: String(raw.workflow_step_id ?? raw.workflowStepId ?? ''),
+      workflow_step_key: String(raw.workflow_step_key ?? raw.workflowStepKey ?? ''),
+      workflow_step_title: String(
+        raw.workflow_step_title ?? raw.workflowStepTitle ?? '',
+      ),
+      agent_name: asOptionalString(raw.agent_name ?? raw.agentName),
+      latest_run_id: asOptionalString(raw.latest_run_id ?? raw.latestRunId),
+      run_count: asNumber(raw.run_count ?? raw.runCount),
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      cache_read_tokens: cacheReadTokens,
+      reasoning_output_tokens: asNumber(
+        raw.reasoning_output_tokens ?? raw.reasoningOutputTokens,
+      ),
+      total_tokens:
+        totalTokens > 0 ? totalTokens : inputTokens + outputTokens,
+      estimated_cost: asNumber(raw.estimated_cost ?? raw.estimatedCost),
+      model_id: asOptionalString(raw.model_id ?? raw.modelId),
+      model_name: asOptionalString(raw.model_name ?? raw.modelName),
     };
   });
 
@@ -337,8 +398,8 @@ export function BuildStatsPage() {
   const [selectedTokenDate, setSelectedTokenDate] = useState<string | null>(
     null,
   );
-  const [sessionViewMode, setSessionViewMode] =
-    useState<SessionCostViewMode>('bar');
+  const [selectedSession, setSelectedSession] =
+    useState<SessionCostEntry | null>(null);
 
   const [dailyTokens, setDailyTokens] = useState<DailyTokenDataPoint[]>([]);
   const [dailyTokensLoading, setDailyTokensLoading] = useState(true);
@@ -347,6 +408,14 @@ export function BuildStatsPage() {
   const [sessions, setSessions] = useState<SessionCostEntry[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(true);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
+  const [workflowStepTokens, setWorkflowStepTokens] = useState<
+    WorkflowStepTokenEntry[]
+  >([]);
+  const [workflowStepTokensLoading, setWorkflowStepTokensLoading] =
+    useState(false);
+  const [workflowStepTokensError, setWorkflowStepTokensError] = useState<
+    string | null
+  >(null);
 
   const [activityDays, setActivityDays] = useState<ActivityDataPoint[]>([]);
   const [activityLoading, setActivityLoading] = useState(true);
@@ -444,6 +513,36 @@ export function BuildStatsPage() {
     }
   }, [selectedProjectId, t]);
 
+  const fetchWorkflowStepTokens = useCallback(async () => {
+    if (!selectedSession) {
+      setWorkflowStepTokens([]);
+      setWorkflowStepTokensLoading(false);
+      setWorkflowStepTokensError(null);
+      return;
+    }
+    if (!selectedProjectId) {
+      setWorkflowStepTokens([]);
+      setWorkflowStepTokensLoading(false);
+      setWorkflowStepTokensError(null);
+      return;
+    }
+
+    setWorkflowStepTokensLoading(true);
+    setWorkflowStepTokensError(null);
+    try {
+      const res = await buildStatsApi.getSessionWorkflowStepTokens(
+        selectedProjectId,
+        selectedSession.session_id,
+      );
+      setWorkflowStepTokens(normalizeWorkflowStepTokens(res?.steps));
+    } catch {
+      setWorkflowStepTokens([]);
+      setWorkflowStepTokensError(t('buildStats.error.fetchFailed'));
+    } finally {
+      setWorkflowStepTokensLoading(false);
+    }
+  }, [selectedProjectId, selectedSession, t]);
+
   const fetchModels = useCallback(async () => {
     if (!selectedProjectId) {
       setModels(mockModels);
@@ -498,8 +597,29 @@ export function BuildStatsPage() {
   }, [fetchSessions]);
 
   useEffect(() => {
+    void fetchWorkflowStepTokens();
+  }, [fetchWorkflowStepTokens]);
+
+  useEffect(() => {
     void fetchModels();
   }, [fetchModels]);
+
+  useEffect(() => {
+    setSelectedSession(null);
+    setWorkflowStepTokens([]);
+    setWorkflowStepTokensError(null);
+  }, [selectedProjectId]);
+
+  useEffect(() => {
+    if (
+      selectedSession &&
+      !sessions.some((session) => session.session_id === selectedSession.session_id)
+    ) {
+      setSelectedSession(null);
+      setWorkflowStepTokens([]);
+      setWorkflowStepTokensError(null);
+    }
+  }, [selectedSession, sessions]);
 
   useEffect(() => {
     if (
@@ -531,13 +651,13 @@ export function BuildStatsPage() {
   }, [activityDays, dailyTokens, modelCostModels]);
 
   return (
-    <div className="h-full w-full overflow-y-auto bg-[var(--surface-2)] p-4 md:p-5">
-      <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+    <div className="flex h-full w-full flex-col overflow-hidden bg-[var(--surface-2)] p-3 md:p-4">
+      <div className="mb-3 flex shrink-0 flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <h1 className="text-lg font-bold tracking-tight text-[var(--ink)]">
             {t('buildStats.title')}
           </h1>
-          <p className="mt-1 text-[13px] text-[var(--ink-subtle)]">
+          <p className="mt-0.5 text-[13px] text-[var(--ink-subtle)]">
             {text(
               'buildStats.subtitle',
               'Token usage, delivery activity, session cost, and model spend for the current project.',
@@ -547,7 +667,7 @@ export function BuildStatsPage() {
         <TimeRangeFilter value={timeRange} onChange={setTimeRange} t={text} />
       </div>
 
-      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="mb-3 grid shrink-0 grid-cols-2 gap-2 lg:grid-cols-4">
         <MetricTile
           label={text('buildStats.totalTokens', 'Total tokens')}
           value={formatCompactNumber(totals.tokenTotal)}
@@ -566,7 +686,7 @@ export function BuildStatsPage() {
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[repeat(4,minmax(0,1fr))] gap-3 lg:grid-cols-2 lg:grid-rows-[repeat(2,minmax(0,1fr))]">
         <Panel
           title={t('buildStats.dailyTokens')}
           error={dailyTokensError}
@@ -578,6 +698,7 @@ export function BuildStatsPage() {
             loading={dailyTokensLoading}
             onDateSelect={setSelectedTokenDate}
             t={t}
+            fillHeight
           />
         </Panel>
 
@@ -587,7 +708,12 @@ export function BuildStatsPage() {
           onRetry={() => void fetchActivity()}
           retryLabel={t('buildStats.error.retry')}
         >
-          <ActivityTrendChart data={activityDays} loading={activityLoading} t={t} />
+          <ActivityTrendChart
+            data={activityDays}
+            loading={activityLoading}
+            t={t}
+            fillHeight
+          />
         </Panel>
 
         <Panel
@@ -595,34 +721,27 @@ export function BuildStatsPage() {
           error={sessionsError}
           onRetry={() => void fetchSessions()}
           retryLabel={t('buildStats.error.retry')}
-          action={
-            <div className="inline-flex overflow-hidden rounded-sm border border-[var(--hairline)]">
-              {(['list', 'bar'] as const).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  aria-pressed={sessionViewMode === mode}
-                  onClick={() => setSessionViewMode(mode)}
-                  className={`px-2.5 py-1 text-[12px] font-medium transition ${
-                    sessionViewMode === mode
-                      ? 'bg-[var(--surface-3)] text-[var(--ink)]'
-                      : 'text-[var(--ink-subtle)] hover:text-[var(--ink)]'
-                  }`}
-                >
-                  {mode === 'list'
-                    ? text('buildStats.view.list', 'List')
-                    : text('buildStats.view.bar', 'Bar')}
-                </button>
-              ))}
-            </div>
-          }
         >
-          <SessionCostList
-            sessions={sessions}
-            loading={sessionsLoading}
-            mode={sessionViewMode}
-            t={t}
-          />
+          {selectedSession ? (
+            <WorkflowStepTokenDrilldown
+              session={selectedSession}
+              steps={workflowStepTokens}
+              loading={workflowStepTokensLoading}
+              error={workflowStepTokensError}
+              onBack={() => setSelectedSession(null)}
+              onRetry={() => void fetchWorkflowStepTokens()}
+              t={text}
+            />
+          ) : (
+            <SessionCostList
+              sessions={sessions}
+              loading={sessionsLoading}
+              mode="bar"
+              selectedSessionId={null}
+              onSessionSelect={setSelectedSession}
+              t={t}
+            />
+          )}
         </Panel>
 
         <Panel
@@ -659,13 +778,176 @@ export function BuildStatsPage() {
   );
 }
 
+function WorkflowStepTokenDrilldown({
+  session,
+  steps,
+  loading,
+  error,
+  onBack,
+  onRetry,
+  t,
+}: {
+  session: SessionCostEntry;
+  steps: WorkflowStepTokenEntry[];
+  loading: boolean;
+  error: string | null;
+  onBack: () => void;
+  onRetry: () => void;
+  t: (key: string, fallback: string) => string;
+}) {
+  const totals = steps.reduce(
+    (sum, step) => ({
+      tokens: sum.tokens + asNumber(step.total_tokens),
+      cost: sum.cost + asNumber(step.estimated_cost),
+      runs: sum.runs + asNumber(step.run_count),
+    }),
+    { tokens: 0, cost: 0, runs: 0 },
+  );
+
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-2">
+      <div className="flex shrink-0 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <button
+            type="button"
+            onClick={onBack}
+            className="mb-1 inline-flex items-center gap-1 text-[12px] font-medium text-[var(--ink-subtle)] transition hover:text-[var(--ink)]"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
+            {t('buildStats.workflowSteps.back', 'Sessions')}
+          </button>
+          <p className="truncate text-[13px] font-medium text-[var(--ink)]">
+            {session.title || session.session_id}
+          </p>
+        </div>
+        <div className="grid shrink-0 grid-cols-3 gap-2 text-right">
+          <MetricPill
+            label={t('buildStats.workflowSteps.tokens', 'Tokens')}
+            value={formatCompactNumber(totals.tokens)}
+          />
+          <MetricPill
+            label={t('buildStats.workflowSteps.runs', 'Runs')}
+            value={formatNumber(totals.runs)}
+          />
+          <MetricPill
+            label={t('buildStats.workflowSteps.cost', 'Cost')}
+            value={formatPrice(totals.cost)}
+          />
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="min-h-0 flex-1 space-y-2 overflow-hidden">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div
+              key={index}
+              className="h-8 animate-pulse rounded bg-[var(--surface-2)]"
+            />
+          ))}
+        </div>
+      ) : error ? (
+        <div className="flex items-center justify-between gap-3 rounded border border-[var(--hairline)] bg-[var(--surface-1)] px-3 py-2 text-[12px] text-[var(--ink-subtle)]">
+          <span>{error}</span>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="font-medium text-[var(--primary)] hover:underline"
+          >
+            {t('buildStats.error.retry', 'Retry')}
+          </button>
+        </div>
+      ) : steps.length === 0 ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center rounded border border-[var(--hairline)] bg-[var(--surface-1)] px-3 text-center text-[12px] text-[var(--ink-subtle)]">
+          {t(
+            'buildStats.workflowSteps.empty',
+            'No workflow step token usage for this session yet.',
+          )}
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto rounded border border-[var(--hairline)]">
+          <table className="w-full border-collapse text-left text-[12px]">
+            <thead className="sticky top-0 bg-[var(--surface-1)] text-[var(--ink-tertiary)]">
+              <tr className="border-b border-[var(--hairline)]">
+                <th className="px-3 py-1.5 font-medium">
+                  {t('buildStats.workflowSteps.step', 'Step')}
+                </th>
+                <th className="px-3 py-1.5 font-medium">
+                  {t('buildStats.workflowSteps.agent', 'Agent')}
+                </th>
+                <th className="px-3 py-1.5 text-right font-medium">
+                  {t('buildStats.workflowSteps.total', 'Total')}
+                </th>
+                <th className="px-3 py-1.5 text-right font-medium">
+                  {t('buildStats.workflowSteps.breakdown', 'In / Out')}
+                </th>
+                <th className="px-3 py-1.5 text-right font-medium">
+                  {t('buildStats.workflowSteps.cost', 'Cost')}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {steps.map((step) => (
+                <tr
+                  key={step.workflow_step_id}
+                  className="border-b border-[var(--hairline)] last:border-b-0"
+                >
+                  <td className="max-w-[220px] px-3 py-1.5">
+                    <div
+                      className="truncate font-medium text-[var(--ink)]"
+                      title={step.workflow_step_title}
+                    >
+                      {truncateTitle(
+                        step.workflow_step_title || step.workflow_step_key,
+                        44,
+                      )}
+                    </div>
+                    <div className="font-mono text-[11px] text-[var(--ink-tertiary)]">
+                      {step.workflow_step_key}
+                    </div>
+                  </td>
+                  <td className="px-3 py-1.5 text-[var(--ink-muted)]">
+                    {step.agent_name || step.model_name || '-'}
+                  </td>
+                  <td className="px-3 py-1.5 text-right font-mono text-[var(--ink)]">
+                    {formatNumber(asNumber(step.total_tokens))}
+                  </td>
+                  <td className="px-3 py-1.5 text-right font-mono text-[var(--ink-muted)]">
+                    {formatCompactNumber(asNumber(step.input_tokens))} /{' '}
+                    {formatCompactNumber(asNumber(step.output_tokens))}
+                  </td>
+                  <td className="px-3 py-1.5 text-right font-mono text-[var(--ink)]">
+                    {formatPrice(asNumber(step.estimated_cost))}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MetricPill({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-[10px] uppercase text-[var(--ink-tertiary)]">
+        {label}
+      </div>
+      <div className="font-mono text-[12px] font-semibold text-[var(--ink)]">
+        {value}
+      </div>
+    </div>
+  );
+}
+
 function MetricTile({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-[var(--hairline)] bg-[var(--surface-1)] px-3 py-2.5">
-      <p className="text-[12px] font-medium text-[var(--ink-tertiary)]">
+    <div className="rounded-md border border-[var(--hairline)] bg-[var(--surface-1)] px-3 py-2">
+      <p className="text-[11px] font-medium text-[var(--ink-tertiary)]">
         {label}
       </p>
-      <p className="mt-0.5 font-mono text-lg font-semibold text-[var(--ink)]">
+      <p className="mt-0.5 font-mono text-base font-semibold text-[var(--ink)]">
         {value}
       </p>
     </div>
@@ -688,14 +970,14 @@ function Panel({
   action?: React.ReactNode;
 }) {
   return (
-    <section className="rounded-md border border-[var(--hairline)] bg-[var(--surface-1)] p-4">
-      <div className="mb-4 flex items-center justify-between gap-3">
+    <section className="flex min-h-0 flex-col overflow-hidden rounded-md border border-[var(--hairline)] bg-[var(--surface-1)] p-3">
+      <div className="mb-2 flex shrink-0 items-center justify-between gap-3">
         <h2 className="text-[13px] font-medium text-[var(--ink)]">{title}</h2>
         {action}
       </div>
-      {children}
+      <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
       {error && onRetry && (
-        <div className="mt-3 flex items-center gap-2 text-[12px] text-[var(--ink-subtle)]">
+        <div className="mt-2 flex shrink-0 items-center gap-2 text-[12px] text-[var(--ink-subtle)]">
           <span>{error}</span>
           <button
             type="button"

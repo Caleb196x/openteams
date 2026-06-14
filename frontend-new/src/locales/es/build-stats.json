@@ -44,5 +44,14 @@
   "buildStats.tokens": "tokens",
   "buildStats.totalTokens": "Tokens totales",
   "buildStats.view.bar": "Barras",
-  "buildStats.view.list": "Lista"
+  "buildStats.view.list": "Lista",
+  "buildStats.workflowSteps.agent": "Agente",
+  "buildStats.workflowSteps.back": "Sesiones",
+  "buildStats.workflowSteps.breakdown": "Entrada / salida",
+  "buildStats.workflowSteps.cost": "Coste",
+  "buildStats.workflowSteps.empty": "Esta sesión aún no tiene uso de tokens por paso de workflow.",
+  "buildStats.workflowSteps.runs": "Ejecuciones",
+  "buildStats.workflowSteps.step": "Paso",
+  "buildStats.workflowSteps.tokens": "Tokens",
+  "buildStats.workflowSteps.total": "Total"
 }

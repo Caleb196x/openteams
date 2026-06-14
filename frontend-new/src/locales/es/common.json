@@ -128,6 +128,7 @@
   "recentSessions": "Sesiones de debate",
   "recommendedTeamSaaS": "Equipo SaaS ideal propuesto",
   "relatedFiles.hide": "Ocultar archivos relacionados",
+  "relatedFiles.loading": "Cargando cambios...",
   "relatedFiles.noChangedFiles": "No hay archivos modificados en esta sesión.",
   "relatedFiles.noDiffOpenFile": "No hay diff disponible. Abriendo archivo.",
   "relatedFiles.openDiff": "Abrir diff de {path}",

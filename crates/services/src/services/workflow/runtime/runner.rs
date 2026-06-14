@@ -97,6 +97,7 @@ async fn finish_workflow_runtime_run_record(
     workspace_path: &PathBuf,
     record: Option<&WorkflowRuntimeRunRecord>,
     assistant_output: &str,
+    token_usage: Option<&TokenUsageInfo>,
     error_summary: Option<&str>,
 ) -> Result<(), WorkflowRuntimeError> {
     let Some(record) = record else {
@@ -134,6 +135,9 @@ async fn finish_workflow_runtime_run_record(
             "summary": error_summary,
         });
     }
+    if let Some(token_usage) = token_usage {
+        meta["token_usage"] = serde_json::to_value(token_usage)?;
+    }
 
     fs::write(&record.meta_path, serde_json::to_string_pretty(&meta)?).await?;
 
@@ -144,7 +148,12 @@ async fn finish_workflow_runtime_run_record(
         error_type: error_summary.map(|_| "workflow_runtime_error".to_string()),
         assistant_excerpt: (!assistant_output.is_empty())
             .then(|| assistant_output.chars().take(2048).collect()),
-        total_tokens: None,
+        total_tokens: token_usage.map(|usage| usage.total_tokens),
+        token_usage: token_usage.cloned(),
+        workflow_execution_id: Some(record.execution_id),
+        workflow_agent_session_id: record.workflow_agent_session_id,
+        workflow_step_id: Some(record.step_id),
+        workflow_step_key: Some(record.step_key.clone()),
         log_bytes_total: None,
         log_bytes_persisted: None,
         live_bytes_dropped: None,
@@ -189,6 +198,7 @@ pub async fn run_workflow_agent_prompt(
         None,
     )
     .await
+    .map(|run| run.output)
 }
 
 pub async fn run_workflow_step_agent_prompt(
@@ -200,7 +210,7 @@ pub async fn run_workflow_step_agent_prompt(
     workflow_session: Option<&WorkflowAgentSession>,
     prompt: &str,
     step: &WorkflowStep,
-) -> Result<String, WorkflowRuntimeError> {
+) -> Result<WorkflowAgentRunOutput, WorkflowRuntimeError> {
     run_workflow_agent_prompt_inner(
         db,
         session,
@@ -259,6 +269,7 @@ pub async fn run_workflow_agent_follow_up(
         None,
     )
     .await
+    .map(|run| run.output)
 }
 
 pub async fn run_workflow_step_agent_follow_up(
@@ -270,7 +281,7 @@ pub async fn run_workflow_step_agent_follow_up(
     workflow_session: &WorkflowAgentSession,
     prompt: &str,
     step: &WorkflowStep,
-) -> Result<String, WorkflowRuntimeError> {
+) -> Result<WorkflowAgentRunOutput, WorkflowRuntimeError> {
     let resume_session_id = workflow_session
         .agent_session_id
         .as_deref()
@@ -318,7 +329,7 @@ async fn run_workflow_agent_prompt_inner(
     resume_session_id: Option<&str>,
     reset_to_message_id: Option<&str>,
     stream_context: Option<WorkflowRuntimeStreamContext>,
-) -> Result<String, WorkflowRuntimeError> {
+) -> Result<WorkflowAgentRunOutput, WorkflowRuntimeError> {
     let workspace_path = resolve_workspace_path(session, agent, session_agent);
     fs::create_dir_all(&workspace_path).await?;
     save_debug_workflow_prompt(
@@ -452,6 +463,7 @@ async fn run_workflow_agent_prompt_inner(
                     &workspace_path,
                     runtime_run_record.as_ref(),
                     &latest_assistant,
+                    None,
                     Some(&message),
                 )
                 .await?;
@@ -478,6 +490,7 @@ async fn run_workflow_agent_prompt_inner(
                         &workspace_path,
                         runtime_run_record.as_ref(),
                         &latest_assistant,
+                        None,
                         Some(&message),
                     )
                     .await?;
@@ -512,6 +525,7 @@ async fn run_workflow_agent_prompt_inner(
             &workspace_path,
             runtime_run_record.as_ref(),
             &latest_assistant,
+            None,
             Some(&message),
         )
         .await?;
@@ -531,6 +545,7 @@ async fn run_workflow_agent_prompt_inner(
             &workspace_path,
             runtime_run_record.as_ref(),
             &latest_assistant,
+            None,
             Some(&message),
         )
         .await?;
@@ -557,6 +572,7 @@ async fn run_workflow_agent_prompt_inner(
                 &workspace_path,
                 runtime_run_record.as_ref(),
                 &latest_assistant,
+                None,
                 Some(&message),
             )
             .await?;
@@ -574,6 +590,7 @@ async fn run_workflow_agent_prompt_inner(
             &workspace_path,
             runtime_run_record.as_ref(),
             &latest_assistant,
+            None,
             Some(&message),
         )
         .await?;
@@ -607,11 +624,13 @@ async fn run_workflow_agent_prompt_inner(
             &workspace_path,
             runtime_run_record.as_ref(),
             "",
+            None,
             Some(&message),
         )
         .await?;
         return Err(WorkflowRuntimeError::Validation(message));
     };
+    let token_usage = extract_latest_token_usage_from_history(&history);
     finish_workflow_runtime_run_record(
         db,
         session,
@@ -620,10 +639,15 @@ async fn run_workflow_agent_prompt_inner(
         &workspace_path,
         runtime_run_record.as_ref(),
         &latest_assistant,
+        token_usage.as_ref(),
         None,
     )
     .await?;
-    Ok(latest_assistant)
+    Ok(WorkflowAgentRunOutput {
+        output: latest_assistant,
+        run_id: runtime_run_record.as_ref().map(|record| record.run_id),
+        token_usage,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1217,6 +1241,31 @@ fn extract_latest_assistant_from_history(history: &[LogMsg]) -> Option<String> {
         .max_by_key(|(index, _)| *index)
         .map(|(_, content)| content.trim().to_string())
         .filter(|content| !content.is_empty())
+}
+
+fn extract_latest_token_usage_from_history(history: &[LogMsg]) -> Option<TokenUsageInfo> {
+    let mut last_token_usage: Option<TokenUsageInfo> = None;
+    let mut stdout_line_buffer = String::new();
+
+    for message in history {
+        match message {
+            LogMsg::Stdout(chunk) => ChatRunner::update_token_usage_from_stdout_chunk(
+                &mut stdout_line_buffer,
+                &mut last_token_usage,
+                chunk,
+            ),
+            LogMsg::JsonPatch(patch) => {
+                if let Some((_, entry)) = extract_normalized_entry_from_patch(patch)
+                    && let NormalizedEntryType::TokenUsageInfo(usage) = entry.entry_type
+                {
+                    last_token_usage = Some(usage);
+                }
+            }
+            _ => {}
+        }
+    }
+    ChatRunner::flush_token_usage_buffer(&mut stdout_line_buffer, &mut last_token_usage);
+    last_token_usage.filter(|usage| !usage.is_estimated)
 }
 
 pub async fn run_workflow_retention_janitor(

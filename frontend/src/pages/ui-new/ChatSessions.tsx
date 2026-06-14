@@ -1,5 +1,6 @@
 import {
   type ChangeEvent,
+  type WheelEvent,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -450,6 +451,8 @@ const COLLAPSED_LEFT_SIDEBAR_WIDTH = 52;
 const MESSAGE_SEARCH_HIGHLIGHT_NAME = 'chat-session-search-highlight';
 const MAX_MESSAGE_SEARCH_HIGHLIGHT_RANGES = 4000;
 const MESSAGE_SEARCH_DEBOUNCE_MS = 120;
+const MESSAGE_SCROLL_NEW_MESSAGE_THRESHOLD_PX = 100;
+const MESSAGE_SCROLL_BOTTOM_THRESHOLD_PX = 8;
 const UNTITLED_SESSION_TITLES = new Set([
   'untitled session',
   'unnamed session',
@@ -2632,6 +2635,7 @@ export function ChatSessions() {
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
   const [hasNewMessages, setHasNewMessages] = useState(false);
   const isUserScrolledUpRef = useRef(false);
+  const autoFollowMessagesRef = useRef(true);
   const prevLastTimelineEntryKeyRef = useRef<string | null>(null);
   const scrollMessagesToBottom = useCallback(
     (behavior: ScrollBehavior = 'auto') => {
@@ -2645,6 +2649,33 @@ export function ChatSessions() {
         behavior,
         block: 'end',
       });
+    },
+    []
+  );
+  const syncMessageScrollState = useCallback((container: HTMLDivElement) => {
+    const { scrollTop, scrollHeight, clientHeight } = container;
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+    const isAtBottom = distanceFromBottom <= MESSAGE_SCROLL_BOTTOM_THRESHOLD_PX;
+    const scrolledUp =
+      distanceFromBottom > MESSAGE_SCROLL_NEW_MESSAGE_THRESHOLD_PX;
+
+    autoFollowMessagesRef.current = isAtBottom;
+
+    const shouldTreatAsScrolledUp =
+      !autoFollowMessagesRef.current || scrolledUp;
+    isUserScrolledUpRef.current = shouldTreatAsScrolledUp;
+    setIsUserScrolledUp(shouldTreatAsScrolledUp);
+    if (!shouldTreatAsScrolledUp) {
+      setHasNewMessages(false);
+    }
+  }, []);
+  const handleMessagesWheel = useCallback(
+    (event: WheelEvent<HTMLDivElement>) => {
+      if (event.deltaY >= 0) return;
+
+      autoFollowMessagesRef.current = false;
+      isUserScrolledUpRef.current = true;
+      setIsUserScrolledUp(true);
     },
     []
   );
@@ -3918,19 +3949,12 @@ export function ChatSessions() {
     if (!container) return;
 
     const handleScroll = () => {
-      const { scrollTop, scrollHeight, clientHeight } = container;
-      const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-      const scrolledUp = distanceFromBottom > 100;
-      isUserScrolledUpRef.current = scrolledUp;
-      setIsUserScrolledUp(scrolledUp);
-      if (!scrolledUp) {
-        setHasNewMessages(false);
-      }
+      syncMessageScrollState(container);
     };
 
     container.addEventListener('scroll', handleScroll, { passive: true });
     return () => container.removeEventListener('scroll', handleScroll);
-  }, [activeSessionId]);
+  }, [activeSessionId, syncMessageScrollState]);
 
   // Auto-scroll (skip when user is viewing history; streaming/running changes are not "new messages")
   useLayoutEffect(() => {
@@ -3953,6 +3977,7 @@ export function ChatSessions() {
       setIsUserScrolledUp(false);
       setHasNewMessages(false);
       isUserScrolledUpRef.current = false;
+      autoFollowMessagesRef.current = true;
       scrollMessagesToBottom('auto');
       if (!isLoading || lastTimelineEntryKey) {
         pendingSessionBottomScrollRef.current = null;
@@ -3960,7 +3985,7 @@ export function ChatSessions() {
       return;
     }
 
-    if (isUserScrolledUpRef.current) {
+    if (!autoFollowMessagesRef.current || isUserScrolledUpRef.current) {
       // Only show "new messages" badge for actual new messages, not streaming/running updates
       if (isNewTimelineEntry) {
         setHasNewMessages(true);
@@ -6078,6 +6103,7 @@ export function ChatSessions() {
                 <div
                   ref={messagesContainerRef}
                   className="chat-session-messages flex-1 min-h-0 overflow-y-auto p-base pb-[40px] space-y-base"
+                  onWheel={handleMessagesWheel}
                 >
                   <div className="chat-session-message-column space-y-double">
                     {isLoading && (
@@ -6393,6 +6419,9 @@ export function ChatSessions() {
                             behavior: 'smooth',
                             block: 'end',
                           });
+                          autoFollowMessagesRef.current = true;
+                          isUserScrolledUpRef.current = false;
+                          setIsUserScrolledUp(false);
                           setHasNewMessages(false);
                         }}
                         className="flex items-center gap-1 rounded-full bg-white px-3 py-1 text-[10px] font-bold text-[#5094fb] shadow-md border border-[#e0e7ef] hover:bg-[#f5f8ff] transition-colors"

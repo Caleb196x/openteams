@@ -33,6 +33,27 @@ pub struct SessionTokenStats {
     pub estimated_cost: f64,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorkflowStepTokenStats {
+    pub session_id: String,
+    pub session_title: String,
+    pub workflow_execution_id: String,
+    pub workflow_step_id: String,
+    pub workflow_step_key: String,
+    pub workflow_step_title: String,
+    pub agent_name: Option<String>,
+    pub latest_run_id: Option<String>,
+    pub run_count: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub reasoning_output_tokens: i64,
+    pub total_tokens: i64,
+    pub estimated_cost: f64,
+    pub model_id: Option<String>,
+    pub model_name: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ModelUsageStats {
     pub model_id: String,
@@ -70,6 +91,20 @@ struct TokenMessageRow {
     runner_type: Option<String>,
     model_name: Option<String>,
     meta: Json<Value>,
+}
+
+#[derive(Debug, FromRow)]
+struct TokenWorkflowRunRow {
+    run_id: String,
+    date: String,
+    session_id: String,
+    title: Option<String>,
+    session_agent_id: String,
+    runner_type: Option<String>,
+    model_name: Option<String>,
+    agent_name: Option<String>,
+    step_title: Option<String>,
+    retention_summary_json: String,
 }
 
 #[derive(Debug, FromRow)]
@@ -128,6 +163,12 @@ struct TokenUsageCandidate {
     usage_scope: String,
     delta: Option<TokenBreakdown>,
     snapshot: Option<TokenBreakdown>,
+    run_id: Option<String>,
+    workflow_execution_id: Option<String>,
+    workflow_step_id: Option<String>,
+    workflow_step_key: Option<String>,
+    workflow_step_title: Option<String>,
+    agent_name: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -141,6 +182,18 @@ struct TokenUsageRecord {
     cache_read_tokens: i64,
     reasoning_output_tokens: i64,
     total_tokens: i64,
+}
+
+#[derive(Debug, Clone)]
+struct TokenUsageRecordWithMetadata {
+    order: usize,
+    record: TokenUsageRecord,
+    run_id: Option<String>,
+    workflow_execution_id: Option<String>,
+    workflow_step_id: Option<String>,
+    workflow_step_key: Option<String>,
+    workflow_step_title: Option<String>,
+    agent_name: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -325,6 +378,41 @@ impl TokenCostStatsService {
         Ok(totals)
     }
 
+    pub async fn session_workflow_step_tokens(
+        &self,
+        pool: &SqlitePool,
+        project_id: Uuid,
+        session_id: &str,
+    ) -> Result<Vec<WorkflowStepTokenStats>> {
+        let records = self
+            .load_real_usage_records_with_metadata(pool, project_id, None, None)
+            .await?;
+        let prices = self.load_effective_prices(pool, project_id).await?;
+        Ok(workflow_step_tokens_from_records(
+            records,
+            prices,
+            Some(session_id),
+            None,
+        ))
+    }
+
+    pub async fn workflow_step_token_usage(
+        &self,
+        pool: &SqlitePool,
+        project_id: Uuid,
+        step_id: &str,
+    ) -> Result<Option<WorkflowStepTokenStats>> {
+        let records = self
+            .load_real_usage_records_with_metadata(pool, project_id, None, None)
+            .await?;
+        let prices = self.load_effective_prices(pool, project_id).await?;
+        Ok(
+            workflow_step_tokens_from_records(records, prices, None, Some(step_id))
+                .into_iter()
+                .next(),
+        )
+    }
+
     async fn load_real_usage_records(
         &self,
         pool: &SqlitePool,
@@ -332,7 +420,22 @@ impl TokenCostStatsService {
         start_date: Option<NaiveDate>,
         end_date: Option<NaiveDate>,
     ) -> Result<Vec<TokenUsageRecord>> {
-        let rows = sqlx::query_as::<_, TokenMessageRow>(
+        Ok(self
+            .load_real_usage_records_with_metadata(pool, project_id, start_date, end_date)
+            .await?
+            .into_iter()
+            .map(|record| record.record)
+            .collect())
+    }
+
+    async fn load_real_usage_records_with_metadata(
+        &self,
+        pool: &SqlitePool,
+        project_id: Uuid,
+        start_date: Option<NaiveDate>,
+        end_date: Option<NaiveDate>,
+    ) -> Result<Vec<TokenUsageRecordWithMetadata>> {
+        let message_rows = sqlx::query_as::<_, TokenMessageRow>(
             r#"
             SELECT
                 CASE
@@ -369,7 +472,59 @@ impl TokenCostStatsService {
         .fetch_all(pool)
         .await?;
 
-        Ok(real_usage_records_from_rows(rows, start_date, end_date))
+        let workflow_rows = sqlx::query_as::<_, TokenWorkflowRunRow>(
+            r#"
+            SELECT
+                CASE
+                    WHEN typeof(cr.id) = 'blob' THEN lower(hex(cr.id))
+                    ELSE CAST(cr.id AS TEXT)
+                END AS run_id,
+                date(cr.created_at) AS date,
+                CASE
+                    WHEN typeof(cs.id) = 'blob' THEN lower(hex(cs.id))
+                    ELSE CAST(cs.id AS TEXT)
+                END AS session_id,
+                cs.title AS title,
+                CASE
+                    WHEN typeof(cr.session_agent_id) = 'blob' THEN lower(hex(cr.session_agent_id))
+                    ELSE CAST(cr.session_agent_id AS TEXT)
+                END AS session_agent_id,
+                ca.runner_type AS runner_type,
+                ca.model_name AS model_name,
+                ca.name AS agent_name,
+                ws.title AS step_title,
+                cr.retention_summary_json AS retention_summary_json
+            FROM chat_runs cr
+            JOIN chat_sessions cs ON cs.id = cr.session_id
+            JOIN chat_session_agents csa ON csa.id = cr.session_agent_id
+            LEFT JOIN chat_agents ca ON ca.id = csa.agent_id
+            LEFT JOIN chat_workflow_steps ws
+              ON (
+                replace(lower(CAST(ws.id AS TEXT)), '-', '') =
+                replace(lower(json_extract(cr.retention_summary_json, '$.workflow_step_id')), '-', '')
+                OR lower(hex(ws.id)) =
+                replace(lower(json_extract(cr.retention_summary_json, '$.workflow_step_id')), '-', '')
+              )
+            WHERE cr.retention_summary_json IS NOT NULL
+              AND json_extract(cr.retention_summary_json, '$.workflow_step_id') IS NOT NULL
+              AND json_extract(cr.retention_summary_json, '$.token_usage') IS NOT NULL
+              AND (
+                cs.project_id = ?1
+                OR replace(lower(CAST(cs.project_id AS TEXT)), '-', '') = lower(hex(?1))
+              )
+              AND (?2 IS NULL OR date(cr.created_at) <= ?2)
+            ORDER BY cr.created_at ASC, cr.id ASC
+            "#,
+        )
+        .bind(project_id)
+        .bind(end_date.map(|date| date.to_string()))
+        .fetch_all(pool)
+        .await?;
+
+        let candidates = usage_candidates_from_rows(message_rows, workflow_rows);
+        Ok(real_usage_records_from_candidates(
+            candidates, start_date, end_date,
+        ))
     }
 
     async fn load_effective_prices(
@@ -455,19 +610,51 @@ impl TokenCostStatsService {
     }
 }
 
+#[cfg(test)]
 fn real_usage_records_from_rows(
     rows: Vec<TokenMessageRow>,
     start_date: Option<NaiveDate>,
     end_date: Option<NaiveDate>,
 ) -> Vec<TokenUsageRecord> {
+    real_usage_records_from_candidates(
+        usage_candidates_from_rows(rows, Vec::new()),
+        start_date,
+        end_date,
+    )
+    .into_iter()
+    .map(|record| record.record)
+    .collect()
+}
+
+fn usage_candidates_from_rows(
+    message_rows: Vec<TokenMessageRow>,
+    workflow_rows: Vec<TokenWorkflowRunRow>,
+) -> Vec<TokenUsageCandidate> {
+    let mut candidates = Vec::new();
+    for (order, row) in message_rows.into_iter().enumerate() {
+        if let Some(candidate) = parse_message_usage_candidate(row, order) {
+            candidates.push(candidate);
+        }
+    }
+    let base_order = candidates.len();
+    for (index, row) in workflow_rows.into_iter().enumerate() {
+        if let Some(candidate) = parse_workflow_run_usage_candidate(row, base_order + index) {
+            candidates.push(candidate);
+        }
+    }
+    candidates
+}
+
+fn real_usage_records_from_candidates(
+    candidates: Vec<TokenUsageCandidate>,
+    start_date: Option<NaiveDate>,
+    end_date: Option<NaiveDate>,
+) -> Vec<TokenUsageRecordWithMetadata> {
     let start = start_date.map(|date| date.to_string());
     let end = end_date.map(|date| date.to_string());
     let mut deduped: HashMap<String, TokenUsageCandidate> = HashMap::new();
 
-    for (order, row) in rows.into_iter().enumerate() {
-        let Some(candidate) = parse_usage_candidate(row, order) else {
-            continue;
-        };
+    for candidate in candidates {
         let dedupe_key = candidate_dedupe_key(&candidate);
         deduped.insert(dedupe_key, candidate);
     }
@@ -506,10 +693,81 @@ fn real_usage_records_from_rows(
     records
 }
 
-fn parse_usage_candidate(row: TokenMessageRow, order: usize) -> Option<TokenUsageCandidate> {
+fn parse_message_usage_candidate(
+    row: TokenMessageRow,
+    order: usize,
+) -> Option<TokenUsageCandidate> {
     let meta = row.meta.0;
+    parse_usage_candidate(UsageCandidateInput {
+        order,
+        source_id: row.message_id,
+        date: row.date,
+        session_id: row.session_id,
+        title: row.title.unwrap_or_default(),
+        sender_id: row.sender_id.unwrap_or_else(|| "unknown".to_string()),
+        runner_type: row.runner_type,
+        model_name: row.model_name,
+        meta,
+        fallback_thread_id: None,
+        workflow_step_title: None,
+        agent_name: None,
+    })
+}
+
+fn parse_workflow_run_usage_candidate(
+    row: TokenWorkflowRunRow,
+    order: usize,
+) -> Option<TokenUsageCandidate> {
+    let summary: Value = serde_json::from_str(&row.retention_summary_json).ok()?;
+    let token_usage = summary.get("token_usage")?.clone();
+    let mut meta = serde_json::Map::new();
+    meta.insert("run_id".to_string(), Value::String(row.run_id.clone()));
+    meta.insert("token_usage".to_string(), token_usage);
+    for key in [
+        "workflow_execution_id",
+        "workflow_step_id",
+        "workflow_step_key",
+    ] {
+        if let Some(value) = summary.get(key).cloned() {
+            meta.insert(key.to_string(), value);
+        }
+    }
+
+    parse_usage_candidate(UsageCandidateInput {
+        order,
+        source_id: row.run_id.clone(),
+        date: row.date,
+        session_id: row.session_id,
+        title: row.title.unwrap_or_default(),
+        sender_id: row.session_agent_id.clone(),
+        runner_type: row.runner_type,
+        model_name: row.model_name,
+        meta: Value::Object(meta),
+        fallback_thread_id: Some(row.session_agent_id),
+        workflow_step_title: row.step_title,
+        agent_name: row.agent_name,
+    })
+}
+
+struct UsageCandidateInput {
+    order: usize,
+    source_id: String,
+    date: String,
+    session_id: String,
+    title: String,
+    sender_id: String,
+    runner_type: Option<String>,
+    model_name: Option<String>,
+    meta: Value,
+    fallback_thread_id: Option<String>,
+    workflow_step_title: Option<String>,
+    agent_name: Option<String>,
+}
+
+fn parse_usage_candidate(input: UsageCandidateInput) -> Option<TokenUsageCandidate> {
+    let meta = input.meta;
     let Some(token_usage) = meta.get("token_usage") else {
-        let _support = runtime_usage_support(row.runner_type.as_deref());
+        let _support = runtime_usage_support(input.runner_type.as_deref());
         return None;
     };
     if token_usage
@@ -522,14 +780,17 @@ fn parse_usage_candidate(row: TokenMessageRow, order: usize) -> Option<TokenUsag
 
     let usage_scope =
         string_value(token_usage, &["usage_scope"]).unwrap_or_else(|| "turn_delta".to_string());
-    let raw_model_id = runtime_model_value(token_usage, row.model_name);
-    let model_id = normalize_runtime_model_id(&raw_model_id, row.runner_type.as_deref());
+    let raw_model_id = runtime_model_value(token_usage, input.model_name);
+    let model_id = normalize_runtime_model_id(&raw_model_id, input.runner_type.as_deref());
     let runtime_thread_id = string_value(token_usage, &["runtime_thread_id"])
         .or_else(|| string_value(&meta, &["agent_session_id"]))
         .or_else(|| string_value(&meta, &["agent_message_id"]))
+        .or(input.fallback_thread_id)
         .unwrap_or_else(|| "unknown".to_string());
-    let sender_id = row.sender_id.unwrap_or_else(|| "unknown".to_string());
-    let thread_key = format!("{}:{sender_id}:{runtime_thread_id}", row.session_id);
+    let thread_key = format!(
+        "{}:{}:{runtime_thread_id}",
+        input.session_id, input.sender_id
+    );
 
     let nested_last = token_usage.get("last_token_usage");
     let nested_total = token_usage.get("total_token_usage");
@@ -545,18 +806,24 @@ fn parse_usage_candidate(row: TokenMessageRow, order: usize) -> Option<TokenUsag
     }
 
     Some(TokenUsageCandidate {
-        order,
+        order: input.order,
         dedupe_key: string_value(&meta, &["run_id"])
             .map(|run_id| format!("run:{run_id}"))
-            .unwrap_or_else(|| format!("message:{}", row.message_id)),
-        date: row.date,
-        session_id: row.session_id,
-        title: row.title.unwrap_or_default(),
+            .unwrap_or_else(|| format!("message:{}", input.source_id)),
+        date: input.date,
+        session_id: input.session_id,
+        title: input.title,
         thread_key,
         model_id,
         usage_scope,
         delta,
         snapshot,
+        run_id: string_value(&meta, &["run_id"]),
+        workflow_execution_id: string_value(&meta, &["workflow_execution_id"]),
+        workflow_step_id: string_value(&meta, &["workflow_step_id"]),
+        workflow_step_key: string_value(&meta, &["workflow_step_key"]),
+        workflow_step_title: input.workflow_step_title,
+        agent_name: input.agent_name,
     })
 }
 
@@ -567,17 +834,27 @@ fn candidate_dedupe_key(candidate: &TokenUsageCandidate) -> String {
 fn record_from_candidate(
     candidate: TokenUsageCandidate,
     breakdown: TokenBreakdown,
-) -> TokenUsageRecord {
-    TokenUsageRecord {
-        date: candidate.date,
-        session_id: candidate.session_id,
-        title: candidate.title,
-        model_id: candidate.model_id,
+) -> TokenUsageRecordWithMetadata {
+    let record = TokenUsageRecord {
+        date: candidate.date.clone(),
+        session_id: candidate.session_id.clone(),
+        title: candidate.title.clone(),
+        model_id: candidate.model_id.clone(),
         input_tokens: breakdown.input_tokens,
         output_tokens: breakdown.output_tokens,
         cache_read_tokens: breakdown.cache_read_tokens,
         reasoning_output_tokens: breakdown.reasoning_output_tokens,
         total_tokens: breakdown.total_tokens(),
+    };
+    TokenUsageRecordWithMetadata {
+        order: candidate.order,
+        record,
+        run_id: candidate.run_id,
+        workflow_execution_id: candidate.workflow_execution_id,
+        workflow_step_id: candidate.workflow_step_id,
+        workflow_step_key: candidate.workflow_step_key,
+        workflow_step_title: candidate.workflow_step_title,
+        agent_name: candidate.agent_name,
     }
 }
 
@@ -826,6 +1103,123 @@ fn estimated_cost_for_record(record: &TokenUsageRecord, price: &ResolvedUsagePri
         + (record.cache_read_tokens as f64 / 1_000_000.0) * price.cache_read_price_per_1m
 }
 
+#[derive(Default)]
+struct WorkflowStepAccumulator {
+    session_id: String,
+    session_title: String,
+    workflow_execution_id: String,
+    workflow_step_id: String,
+    workflow_step_key: String,
+    workflow_step_title: String,
+    agent_name: Option<String>,
+    latest_run_id: Option<String>,
+    latest_order: usize,
+    run_count: i64,
+    totals: TokenAccumulator,
+    model_id: Option<String>,
+    model_name: Option<String>,
+}
+
+fn workflow_step_tokens_from_records(
+    records: Vec<TokenUsageRecordWithMetadata>,
+    prices: HashMap<String, EffectivePrice>,
+    session_filter: Option<&str>,
+    step_filter: Option<&str>,
+) -> Vec<WorkflowStepTokenStats> {
+    let mut by_step: HashMap<String, WorkflowStepAccumulator> = HashMap::new();
+
+    for item in records {
+        let Some(step_id) = item.workflow_step_id.as_deref() else {
+            continue;
+        };
+        if session_filter
+            .is_some_and(|session_id| !stable_id_eq(&item.record.session_id, session_id))
+        {
+            continue;
+        }
+        if step_filter.is_some_and(|target_step_id| !stable_id_eq(step_id, target_step_id)) {
+            continue;
+        }
+
+        let resolved =
+            resolve_usage_price(&item.record, find_effective_price(&prices, &item.record));
+        let estimated_cost = estimated_cost_for_record(&item.record, &resolved);
+        let entry = by_step.entry(normalize_id_key(step_id)).or_insert_with(|| {
+            let step_key = item.workflow_step_key.clone().unwrap_or_default();
+            WorkflowStepAccumulator {
+                session_id: item.record.session_id.clone(),
+                session_title: item.record.title.clone(),
+                workflow_execution_id: item.workflow_execution_id.clone().unwrap_or_default(),
+                workflow_step_id: step_id.to_string(),
+                workflow_step_key: step_key.clone(),
+                workflow_step_title: item
+                    .workflow_step_title
+                    .clone()
+                    .filter(|title| !title.trim().is_empty())
+                    .unwrap_or_else(|| {
+                        if step_key.is_empty() {
+                            step_id.to_string()
+                        } else {
+                            step_key
+                        }
+                    }),
+                agent_name: item.agent_name.clone(),
+                ..WorkflowStepAccumulator::default()
+            }
+        });
+        entry.totals.add(&item.record, estimated_cost);
+        entry.run_count += 1;
+        if item.order >= entry.latest_order {
+            entry.latest_order = item.order;
+            entry.latest_run_id = item.run_id.clone();
+        }
+        match entry.model_id.as_deref() {
+            None => {
+                entry.model_id = Some(item.record.model_id.clone());
+                entry.model_name = Some(resolved.model_name);
+            }
+            Some(model_id) if model_id == item.record.model_id => {}
+            Some(_) => {
+                entry.model_id = Some("mixed".to_string());
+                entry.model_name = Some("Mixed models".to_string());
+            }
+        }
+    }
+
+    let mut rows: Vec<_> = by_step
+        .into_values()
+        .map(|entry| WorkflowStepTokenStats {
+            session_id: entry.session_id,
+            session_title: entry.session_title,
+            workflow_execution_id: entry.workflow_execution_id,
+            workflow_step_id: entry.workflow_step_id,
+            workflow_step_key: entry.workflow_step_key,
+            workflow_step_title: entry.workflow_step_title,
+            agent_name: entry.agent_name,
+            latest_run_id: entry.latest_run_id,
+            run_count: entry.run_count,
+            input_tokens: entry.totals.input_tokens,
+            output_tokens: entry.totals.output_tokens,
+            cache_read_tokens: entry.totals.cache_read_tokens,
+            reasoning_output_tokens: entry.totals.reasoning_output_tokens,
+            total_tokens: entry.totals.total_tokens,
+            estimated_cost: entry.totals.estimated_cost,
+            model_id: entry.model_id,
+            model_name: entry.model_name,
+        })
+        .collect();
+    rows.sort_by(|a, b| b.total_tokens.cmp(&a.total_tokens));
+    rows
+}
+
+fn normalize_id_key(value: &str) -> String {
+    value.replace('-', "").to_ascii_lowercase()
+}
+
+fn stable_id_eq(a: &str, b: &str) -> bool {
+    normalize_id_key(a) == normalize_id_key(b)
+}
+
 fn model_usage_from_records(
     records: Vec<TokenUsageRecord>,
     prices: HashMap<String, EffectivePrice>,
@@ -905,6 +1299,44 @@ mod tests {
         })
     }
 
+    fn workflow_run_row(
+        run_id: &str,
+        session_id: &str,
+        step_id: &str,
+        step_key: &str,
+        input_tokens: i64,
+        output_tokens: i64,
+        is_estimated: bool,
+    ) -> TokenWorkflowRunRow {
+        TokenWorkflowRunRow {
+            run_id: run_id.to_string(),
+            date: "2026-06-13".to_string(),
+            session_id: session_id.to_string(),
+            title: Some("Workflow session".to_string()),
+            session_agent_id: "session-agent-1".to_string(),
+            runner_type: Some("codex".to_string()),
+            model_name: Some("gpt-5-codex".to_string()),
+            agent_name: Some("Codex".to_string()),
+            step_title: Some("Implement feature".to_string()),
+            retention_summary_json: serde_json::json!({
+                "workflow_execution_id": "execution-1",
+                "workflow_step_id": step_id,
+                "workflow_step_key": step_key,
+                "token_usage": {
+                    "total_tokens": input_tokens + output_tokens,
+                    "model_context_window": 200000,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "cache_read_tokens": 100,
+                    "runtime_model_id": "gpt-5-codex",
+                    "usage_scope": "turn_delta",
+                    "is_estimated": is_estimated
+                }
+            })
+            .to_string(),
+        }
+    }
+
     #[test]
     fn filters_estimated_and_incomplete_records() {
         let records = real_usage_records_from_rows(
@@ -944,6 +1376,50 @@ mod tests {
         assert_eq!(records[0].input_tokens, 100);
         assert_eq!(records[0].output_tokens, 50);
         assert_eq!(records[0].total_tokens, 150);
+    }
+
+    #[test]
+    fn workflow_run_records_are_counted_and_grouped_by_step() {
+        let candidates = usage_candidates_from_rows(
+            Vec::new(),
+            vec![
+                workflow_run_row("run-1", "session-1", "step-1", "task_1", 120, 40, false),
+                workflow_run_row("run-2", "session-1", "step-1", "task_1", 80, 20, false),
+                workflow_run_row("run-3", "session-1", "step-1", "task_1", 999, 999, true),
+            ],
+        );
+        let records = real_usage_records_from_candidates(candidates, None, None);
+        assert_eq!(records.len(), 2);
+
+        let token_total: i64 = records
+            .iter()
+            .map(|record| record.record.total_tokens)
+            .sum();
+        assert_eq!(token_total, 260);
+
+        let mut prices = HashMap::new();
+        prices.insert(
+            "gpt-5-codex".to_string(),
+            EffectivePrice {
+                input_price_per_1m: 1.0,
+                output_price_per_1m: 2.0,
+                cache_read_price_per_1m: Some(0.1),
+                source: "test".to_string(),
+                cache_source: "test".to_string(),
+            },
+        );
+        let step_rows = workflow_step_tokens_from_records(records, prices, Some("session-1"), None);
+        assert_eq!(step_rows.len(), 1);
+        let step = &step_rows[0];
+        assert_eq!(step.workflow_step_id, "step-1");
+        assert_eq!(step.workflow_step_key, "task_1");
+        assert_eq!(step.workflow_step_title, "Implement feature");
+        assert_eq!(step.latest_run_id.as_deref(), Some("run-2"));
+        assert_eq!(step.run_count, 2);
+        assert_eq!(step.input_tokens, 200);
+        assert_eq!(step.output_tokens, 60);
+        assert_eq!(step.cache_read_tokens, 200);
+        assert_eq!(step.total_tokens, 260);
     }
 
     #[test]

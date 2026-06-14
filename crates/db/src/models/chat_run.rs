@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use executors::logs::TokenUsageInfo;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, QueryBuilder, Sqlite, SqlitePool, Type};
 use ts_rs::TS;
@@ -32,6 +33,11 @@ pub struct ChatRunRetentionSummary {
     pub error_type: Option<String>,
     pub assistant_excerpt: Option<String>,
     pub total_tokens: Option<u32>,
+    pub token_usage: Option<TokenUsageInfo>,
+    pub workflow_execution_id: Option<Uuid>,
+    pub workflow_agent_session_id: Option<Uuid>,
+    pub workflow_step_id: Option<Uuid>,
+    pub workflow_step_key: Option<String>,
     pub log_bytes_total: Option<u64>,
     pub log_bytes_persisted: Option<u64>,
     pub live_bytes_dropped: Option<u64>,

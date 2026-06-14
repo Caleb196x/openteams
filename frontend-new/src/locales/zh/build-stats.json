@@ -44,5 +44,14 @@
   "buildStats.tokens": "tokens",
   "buildStats.totalTokens": "Token 总量",
   "buildStats.view.bar": "条形",
-  "buildStats.view.list": "列表"
+  "buildStats.view.list": "列表",
+  "buildStats.workflowSteps.agent": "代理",
+  "buildStats.workflowSteps.back": "会话",
+  "buildStats.workflowSteps.breakdown": "输入 / 输出",
+  "buildStats.workflowSteps.cost": "成本",
+  "buildStats.workflowSteps.empty": "此会话还没有 workflow step token 用量。",
+  "buildStats.workflowSteps.runs": "运行次数",
+  "buildStats.workflowSteps.step": "步骤",
+  "buildStats.workflowSteps.tokens": "Token",
+  "buildStats.workflowSteps.total": "总量"
 }

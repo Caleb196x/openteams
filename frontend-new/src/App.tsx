@@ -1035,7 +1035,7 @@ function WorkspaceLayout() {
   return (
     <div className="h-full w-full flex bg-[var(--canvas)] text-[var(--ink)] font-sans antialiased overflow-hidden selection:bg-[var(--primary)] selection:text-white transition-colors duration-200">
       {toast && (
-        <NotificationToast message={toast} tone="info" />
+        <NotificationToast message={toast.message} tone={toast.tone} />
       )}
 
       {activeAppPage !== "tokens" && <DialogManager />}

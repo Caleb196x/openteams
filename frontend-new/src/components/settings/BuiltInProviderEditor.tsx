@@ -1,5 +1,4 @@
 import { useEffect } from 'react';
-import { Loader2, Save } from 'lucide-react';
 import type {
   BuiltInProviderId,
   CliConfig,
@@ -12,6 +11,7 @@ import {
 } from '@/lib/cliConfigTypes';
 import {
   Field,
+  ProviderSaveBar,
   technicalInputClassName,
 } from './providerSettingsUi';
 
@@ -82,6 +82,8 @@ export function BuiltInProviderEditor({
   config,
   copy,
   isBusy,
+  isDirty,
+  onDiscard,
   onSave,
   provider,
   status,
@@ -91,6 +93,8 @@ export function BuiltInProviderEditor({
   config: CliConfig;
   copy: (key: string, fallback: string) => string;
   isBusy: boolean;
+  isDirty: boolean;
+  onDiscard: () => void;
   onSave: () => void;
   provider: BuiltInProviderId;
   status: StatusState;
@@ -104,12 +108,12 @@ export function BuiltInProviderEditor({
         return;
       }
       event.preventDefault();
-      if (!isBusy) onSave();
+      if (!isBusy && isDirty) onSave();
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isBusy, onSave]);
+  }, [isBusy, isDirty, onSave]);
 
   return (
     <div className="provider-editor-shell">
@@ -121,22 +125,6 @@ export function BuiltInProviderEditor({
             <h4 className="text-sm font-semibold text-[var(--ink)]">
               {copy('settings.providers.custom.connection', 'Connection')}
             </h4>
-            <div className="provider-section-actions">
-              <button
-                type="button"
-                className="provider-header-icon-button provider-header-save-button"
-                onClick={onSave}
-                disabled={isBusy}
-                aria-label={copy('save', 'Save')}
-                title={copy('save', 'Save')}
-              >
-                {busyAction === 'save' ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Save className="h-3.5 w-3.5" />
-                )}
-              </button>
-            </div>
           </div>
 
           <div className="provider-property-list">
@@ -191,6 +179,17 @@ export function BuiltInProviderEditor({
           </div>
         </section>
       </div>
+      {isDirty ? (
+        <ProviderSaveBar
+          disabled={isBusy}
+          isSaving={busyAction === 'save'}
+          onDiscard={onDiscard}
+          onSave={onSave}
+          discardLabel={copy('settings.providers.discardChanges', '放弃')}
+          saveLabel={copy('settings.providers.saveChanges', 'Save changes')}
+          savingLabel={copy('settings.providers.saving', 'Saving...')}
+        />
+      ) : null}
     </div>
   );
 }

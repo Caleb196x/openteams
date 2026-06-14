@@ -97,6 +97,7 @@ import type {
   WorkflowIterationSummaryData,
   WorkflowPendingInputData,
   WorkflowPendingReviewData,
+  WorkflowStepTokenUsageResponse,
   WorkflowTranscriptEntry,
   WorkspaceChangesResponse,
 } from "@/types";
@@ -888,6 +889,18 @@ export const workflowApi = {
     );
     return handleApiResponse<WorkflowTranscriptEntry[]>(r);
   },
+  getStepTokenUsage: async (
+    sessionId: string,
+    stepId: string,
+  ): Promise<WorkflowStepTokenUsageResponse> => {
+    const r = await makeRequest(
+      `/api/chat/sessions/${encodeURIComponent(sessionId)}/workflow-steps/${encodeURIComponent(
+        stepId,
+      )}/token-usage`,
+      { method: "GET" },
+    );
+    return handleApiResponse<WorkflowStepTokenUsageResponse>(r);
+  },
   submitStepInput: async (
     sessionId: string,
     stepId: string,
@@ -1025,6 +1038,7 @@ export const chatApi = {
     );
     return entries.map(workflowTranscriptForOldUi);
   },
+  getWorkflowStepTokenUsage: workflowApi.getStepTokenUsage,
   submitWorkflowStepInput: workflowApi.submitStepInput,
   interruptWorkflowStep: workflowApi.interruptStepById,
   stopWorkflowStep: workflowApi.stopStep,

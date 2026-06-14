@@ -42,7 +42,7 @@ use executors::{
         StandardCodingAgentExecutor,
     },
     logs::{
-        ActionType, NormalizedEntry, NormalizedEntryType, ToolStatus,
+        ActionType, NormalizedEntry, NormalizedEntryType, TokenUsageInfo, ToolStatus,
         utils::patch::extract_normalized_entry_from_patch,
     },
 };

@@ -77,6 +77,10 @@ pub fn router(deployment: &DeploymentImpl) -> Router<DeploymentImpl> {
             get(workflow::get_step_transcripts),
         )
         .route(
+            "/workflow-steps/{step_id}/token-usage",
+            get(workflow::get_step_token_usage),
+        )
+        .route(
             "/workflow-steps/{step_id}/input",
             axum::routing::post(workflow::submit_step_input),
         )

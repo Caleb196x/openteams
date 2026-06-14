@@ -100,8 +100,8 @@ export function ModelPricingTable({
 
   if (loading) {
     return (
-      <div className="space-y-3">
-        {Array.from({ length: 5 }).map((_, i) => (
+      <div className="h-full min-h-0 space-y-2 overflow-hidden">
+        {Array.from({ length: 4 }).map((_, i) => (
           <div key={i} className="space-y-1.5">
             <div className="h-3 w-24 animate-pulse rounded bg-[var(--surface-2)]" />
             <div className="h-4 animate-pulse rounded bg-[var(--surface-2)]" />
@@ -113,7 +113,7 @@ export function ModelPricingTable({
 
   if (error) {
     return (
-      <div className="rounded-md border border-[var(--hairline)] bg-[var(--surface-1)] py-8 text-center">
+      <div className="flex h-full min-h-0 flex-col items-center justify-center rounded-md border border-[var(--hairline)] bg-[var(--surface-1)] px-3 text-center">
         <p className="mb-2 text-[12px] text-[var(--ink-subtle)]">{error}</p>
         <button
           type="button"
@@ -128,7 +128,7 @@ export function ModelPricingTable({
 
   if (models.length === 0) {
     return (
-      <div className="rounded-md border border-[var(--hairline)] bg-[var(--surface-1)] py-8 text-center text-[12px] text-[var(--ink-subtle)]">
+      <div className="flex h-full min-h-0 items-center justify-center rounded-md border border-[var(--hairline)] bg-[var(--surface-1)] px-3 text-center text-[12px] text-[var(--ink-subtle)]">
         {label('buildStats.empty.noModels', 'No model usage data')}
       </div>
     );
@@ -142,7 +142,7 @@ export function ModelPricingTable({
   const perMillionLabel = label('buildStats.perMillion', 'per 1M');
 
   return (
-    <div className="max-h-[420px] space-y-3 overflow-y-auto pr-1 ot-scroll-area-styled">
+    <div className="h-full min-h-0 space-y-2 overflow-y-auto pr-1 ot-scroll-area-styled">
       {models.map((model, index) => {
         const total = numVal(model.total_tokens);
         const input = numVal(model.input_tokens);
@@ -195,7 +195,7 @@ export function ModelPricingTable({
             </div>
 
             {/* Sub-detail row */}
-            <div className="mt-0.5 flex items-center gap-3 text-[12px] font-mono text-[var(--ink-tertiary)]">
+            <div className="mt-0.5 flex items-center gap-3 text-[11px] font-mono text-[var(--ink-tertiary)]">
               <span>
                 {inputShortLabel} {formatCompactNumber(input)} /{' '}
                 {outputShortLabel} {formatCompactNumber(output)}
@@ -211,7 +211,7 @@ export function ModelPricingTable({
               </span>
             </div>
             {projectId && (
-              <div className="mt-1.5">
+              <div className="mt-1">
                 {isEditing ? (
                   <div className="space-y-1.5 rounded-sm border border-[var(--hairline)] bg-[var(--surface-2)] p-2">
                     <div className="grid grid-cols-3 gap-2">
@@ -230,7 +230,7 @@ export function ModelPricingTable({
                               input: event.target.value,
                             }))
                           }
-                          className="w-full rounded-sm border border-[var(--hairline)] bg-[var(--surface-1)] px-2 py-1 font-mono text-[12px] text-[var(--ink)] outline-none focus:border-[var(--primary)]"
+                          className="build-stats-price-input w-full rounded-sm border border-[var(--hairline)] bg-[var(--surface-1)] px-2 py-1 font-mono text-[12px] text-[var(--ink)] outline-none focus:border-[var(--primary)]"
                         />
                       </label>
                       <label className="space-y-1 text-[11px] text-[var(--ink-tertiary)]">
@@ -248,7 +248,7 @@ export function ModelPricingTable({
                               output: event.target.value,
                             }))
                           }
-                          className="w-full rounded-sm border border-[var(--hairline)] bg-[var(--surface-1)] px-2 py-1 font-mono text-[12px] text-[var(--ink)] outline-none focus:border-[var(--primary)]"
+                          className="build-stats-price-input w-full rounded-sm border border-[var(--hairline)] bg-[var(--surface-1)] px-2 py-1 font-mono text-[12px] text-[var(--ink)] outline-none focus:border-[var(--primary)]"
                         />
                       </label>
                       <label className="space-y-1 text-[11px] text-[var(--ink-tertiary)]">
@@ -269,7 +269,7 @@ export function ModelPricingTable({
                               cacheRead: event.target.value,
                             }))
                           }
-                          className="w-full rounded-sm border border-[var(--hairline)] bg-[var(--surface-1)] px-2 py-1 font-mono text-[12px] text-[var(--ink)] outline-none focus:border-[var(--primary)]"
+                          className="build-stats-price-input w-full rounded-sm border border-[var(--hairline)] bg-[var(--surface-1)] px-2 py-1 font-mono text-[12px] text-[var(--ink)] outline-none focus:border-[var(--primary)]"
                         />
                       </label>
                     </div>

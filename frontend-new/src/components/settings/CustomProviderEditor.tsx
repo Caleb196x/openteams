@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Loader2, Plus, RefreshCw, Save, Trash2 } from 'lucide-react';
+import { Loader2, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { ConfirmationDialog } from '@/components/ConfirmationDialog';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { cliConfigApi } from '@/lib/cliConfigApi';
 import { CustomProviderConnectionSection } from './CustomProviderConnectionSection';
 import { CustomProviderModelCard } from './CustomProviderModelCard';
-import { secondaryButtonClassName } from './providerSettingsUi';
+import {
+  ProviderSaveBar,
+  secondaryButtonClassName,
+} from './providerSettingsUi';
 import type {
   CustomModelConfig,
   CustomProviderEntry,
@@ -250,6 +253,7 @@ export function CustomProviderEditor({
   const [formState, setFormState] = useState(() =>
     createFormState(initialProvider),
   );
+  const [savedFormState, setSavedFormState] = useState<FormState | null>(null);
   const [status, setStatus] = useState<StatusState>(null);
   const [modelTestStatus, setModelTestStatus] =
     useState<ModelTestStatusState>(null);
@@ -263,7 +267,9 @@ export function CustomProviderEditor({
   };
 
   useEffect(() => {
-    setFormState(createFormState(initialProvider));
+    const nextFormState = createFormState(initialProvider);
+    setFormState(nextFormState);
+    setSavedFormState(nextFormState);
     setStatus(null);
     setModelTestStatus(null);
     setBusyAction(null);
@@ -278,6 +284,9 @@ export function CustomProviderEditor({
       ),
     [formState.models],
   );
+  const isDirty =
+    savedFormState != null &&
+    JSON.stringify(formState) !== JSON.stringify(savedFormState);
 
   const updateForm = (updater: (current: FormState) => FormState) => {
     setFormState((current) => updater(current));
@@ -428,18 +437,25 @@ export function CustomProviderEditor({
         ),
         tone: 'success',
       });
+      showToast(
+        copy('settings.providers.custom.saved', 'Custom provider saved.'),
+        'success',
+      );
+      setSavedFormState(formState);
       await onSaved(saved.id);
     } catch (error) {
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : copy(
+              'settings.providers.custom.saveFailed',
+              'Failed to save custom provider.',
+            );
       setStatus({
-        message:
-          error instanceof Error
-            ? error.message
-            : copy(
-                'settings.providers.custom.saveFailed',
-                'Failed to save custom provider.',
-              ),
+        message: errorMessage,
         tone: 'error',
       });
+      showToast(errorMessage, 'error');
     } finally {
       setBusyAction(null);
     }
@@ -492,6 +508,12 @@ export function CustomProviderEditor({
 
   const isBusy = busyAction != null;
   const canDelete = mode === 'edit' && initialProvider != null;
+  const handleDiscard = () => {
+    if (!savedFormState) return;
+    setFormState(savedFormState);
+    setStatus(null);
+    setModelTestStatus(null);
+  };
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -499,43 +521,25 @@ export function CustomProviderEditor({
         return;
       }
       event.preventDefault();
-      if (!isBusy) void handleSave();
+      if (!isBusy && isDirty) void handleSave();
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isBusy, handleSave]);
+  }, [isBusy, isDirty, handleSave]);
 
-  const connectionActions = (
-    <>
-      {canDelete ? (
-        <button
-          type="button"
-          className="provider-header-icon-button provider-header-delete-button"
-          onClick={() => setConfirmingDelete(true)}
-          disabled={isBusy}
-          aria-label={copy('delete', 'Delete')}
-          title={copy('delete', 'Delete')}
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
-      ) : null}
+  const connectionActions = canDelete ? (
       <button
         type="button"
-        className="provider-header-icon-button provider-header-save-button"
-        onClick={() => void handleSave()}
+        className="provider-header-icon-button provider-header-delete-button"
+        onClick={() => setConfirmingDelete(true)}
         disabled={isBusy}
-        aria-label={copy('save', 'Save')}
-        title={copy('save', 'Save')}
+        aria-label={copy('delete', 'Delete')}
+        title={copy('delete', 'Delete')}
       >
-        {busyAction === 'save' ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        ) : (
-          <Save className="h-3.5 w-3.5" />
-        )}
+        <Trash2 className="h-3.5 w-3.5" />
       </button>
-    </>
-  );
+    ) : null;
 
   return (
     <>
@@ -637,6 +641,17 @@ export function CustomProviderEditor({
           </div>
         </section>
         </div>
+        {isDirty ? (
+          <ProviderSaveBar
+            disabled={isBusy}
+            isSaving={busyAction === 'save'}
+            onDiscard={handleDiscard}
+            onSave={() => void handleSave()}
+            discardLabel={copy('settings.providers.discardChanges', '放弃')}
+            saveLabel={copy('settings.providers.saveChanges', 'Save changes')}
+            savingLabel={copy('settings.providers.saving', 'Saving...')}
+          />
+        ) : null}
       </div>
       {confirmingDelete && initialProvider ? (
         <ConfirmationDialog

@@ -14,6 +14,7 @@ import {
   Mic,
   AtSign,
   Check,
+  ChevronDown,
   GitBranch,
   Lock,
   PanelRightClose,
@@ -247,6 +248,7 @@ const TruncatedFileName: React.FC<TruncatedFileNameProps> = ({ path }) => {
 const RELATED_FILES_DEFAULT_WIDTH = 300;
 const RELATED_FILES_MIN_WIDTH = 200;
 const RELATED_FILES_MAX_WIDTH = 360;
+const CHAT_SCROLL_BOTTOM_THRESHOLD_PX = 8;
 const RELATED_FILES_MIN_CENTER_WIDTH = 540;
 const RELATED_FILES_SEPARATOR_WIDTH = 6;
 const SIDEBAR_MEMBER_AVATAR_WIDTH = 28;
@@ -308,37 +310,70 @@ type LinkedWorkItemIssueStatus =
   | "cancelled"
   | "duplicate";
 
-const linkedWorkItemStatusLabel: Record<LinkedWorkItemIssueStatus, string> = {
-  todo: "Todo",
-  in_progress: "In Progress",
-  backlog: "Backlog",
-  ready_to_merge: "Ready to Merge",
-  merging: "Merging",
-  done: "Done",
-  cancelled: "Canceled",
-  duplicate: "Duplicate",
+const linkedWorkItemStatusKeys: Record<LinkedWorkItemIssueStatus, string> = {
+  todo: "linkedWorkItems.status.todo",
+  in_progress: "linkedWorkItems.status.inProgress",
+  backlog: "linkedWorkItems.status.backlog",
+  ready_to_merge: "linkedWorkItems.status.readyToMerge",
+  merging: "linkedWorkItems.status.merging",
+  done: "linkedWorkItems.status.done",
+  cancelled: "linkedWorkItems.status.cancelled",
+  duplicate: "linkedWorkItems.status.duplicate",
 };
 
 const linkedWorkItemStatusOptions: Array<{
   value: ProjectWorkItem["status"];
-  label: string;
+  labelKey: string;
   shortcut: string;
 }> = [
-  { value: "blocked", label: "Backlog", shortcut: "1" },
-  { value: "open", label: "Todo", shortcut: "2" },
-  { value: "in_progress", label: "In Progress", shortcut: "3" },
-  { value: "ready_to_merge", label: "Ready to Merge", shortcut: "4" },
-  { value: "merging", label: "Merging", shortcut: "5" },
-  { value: "done", label: "Done", shortcut: "6" },
-  { value: "cancelled", label: "Canceled", shortcut: "7" },
-  { value: "duplicate", label: "Duplicate", shortcut: "8" },
+  { value: "blocked", labelKey: linkedWorkItemStatusKeys.backlog, shortcut: "1" },
+  { value: "open", labelKey: linkedWorkItemStatusKeys.todo, shortcut: "2" },
+  {
+    value: "in_progress",
+    labelKey: linkedWorkItemStatusKeys.in_progress,
+    shortcut: "3",
+  },
+  {
+    value: "ready_to_merge",
+    labelKey: linkedWorkItemStatusKeys.ready_to_merge,
+    shortcut: "4",
+  },
+  { value: "merging", labelKey: linkedWorkItemStatusKeys.merging, shortcut: "5" },
+  { value: "done", labelKey: linkedWorkItemStatusKeys.done, shortcut: "6" },
+  {
+    value: "cancelled",
+    labelKey: linkedWorkItemStatusKeys.cancelled,
+    shortcut: "7",
+  },
+  {
+    value: "duplicate",
+    labelKey: linkedWorkItemStatusKeys.duplicate,
+    shortcut: "8",
+  },
 ];
+
+const translateWithFallback = (
+  t: (key: string, replacements?: Record<string, string | number>) => string,
+  key: string,
+  fallback: string,
+  replacements?: Record<string, string | number>,
+) => {
+  const translated = t(key, replacements);
+  const text = translated && translated !== key ? translated : fallback;
+  if (!replacements) return text;
+  return Object.entries(replacements).reduce(
+    (current, [name, value]) =>
+      current.replace(`{${name}}`, String(value)),
+    text,
+  );
+};
 
 function LinkedWorkItemRow({
   item,
   statusPending,
   onOpen,
   onStatusChange,
+  t,
 }: {
   item: ProjectWorkItem;
   statusPending: boolean;
@@ -347,12 +382,17 @@ function LinkedWorkItemRow({
     item: ProjectWorkItem,
     status: ProjectWorkItem["status"],
   ) => void;
+  t: (key: string, replacements?: Record<string, string | number>) => string;
 }) {
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const statusMenuRef = useRef<HTMLDivElement | null>(null);
   const issueStatus = linkedWorkItemIssueStatus(item.status);
   const statusLabel =
-    linkedWorkItemStatusLabel[issueStatus] ?? titleCaseStatus(item.status);
+    translateWithFallback(
+      t,
+      linkedWorkItemStatusKeys[issueStatus],
+      titleCaseStatus(item.status),
+    );
 
   useEffect(() => {
     if (!statusMenuOpen) return;
@@ -376,7 +416,12 @@ function LinkedWorkItemRow({
         type="button"
         onClick={() => onOpen(item)}
         className="flex min-w-0 flex-1 items-center gap-1.5 rounded-l-md bg-[var(--surface-1)] px-2 py-1.5 text-left transition hover:bg-[var(--surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/40"
-        aria-label={`Open issue ${item.title}`}
+        aria-label={translateWithFallback(
+          t,
+          "linkedWorkItems.openIssue",
+          "Open issue {title}",
+          { title: item.title },
+        )}
       >
         <PriorityMenuIcon
           priority={item.priority}
@@ -397,8 +442,18 @@ function LinkedWorkItemRow({
             setStatusMenuOpen((current) => !current);
           }}
           className="inline-flex h-full max-w-[128px] items-center gap-1.5 rounded-r-md bg-[var(--surface-1)] px-2 py-1.5 text-[var(--ink-tertiary)] transition hover:bg-[var(--surface-2)] hover:text-[var(--ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/40 disabled:cursor-not-allowed disabled:opacity-70"
-          title={`Change status: ${statusLabel}`}
-          aria-label={`Change status for ${item.title}`}
+          title={translateWithFallback(
+            t,
+            "linkedWorkItems.changeStatusTitle",
+            "Change status: {status}",
+            { status: statusLabel },
+          )}
+          aria-label={translateWithFallback(
+            t,
+            "linkedWorkItems.changeStatusFor",
+            "Change status for {title}",
+            { title: item.title },
+          )}
         >
           {statusPending ? (
             <RefreshCw className="h-[13px] w-[13px] shrink-0 animate-spin" />
@@ -428,7 +483,7 @@ function LinkedWorkItemRow({
                       status={linkedWorkItemIssueStatus(option.value)}
                     />
                     <span className="min-w-0 flex-1 truncate">
-                      {option.label}
+                      {t(option.labelKey)}
                     </span>
                     <span className="ml-auto flex w-8 shrink-0 items-center justify-between text-[var(--ink-subtle)]">
                       {selected ? (
@@ -662,12 +717,15 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
     Set<string>
   >(() => new Set());
   const workspaceGridRef = useRef<HTMLDivElement>(null);
+  const chatMessagesScrollRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const memberRailRef = useRef<HTMLDivElement>(null);
   const copiedResetTimerRef = useRef<number | null>(null);
   const linkedWorkItemsRequestIdRef = useRef(0);
+  const chatAutoFollowRef = useRef(true);
+  const previousActiveSessionIdRef = useRef<string | null>(null);
   const relatedFileChanges = useMemo(
     () => flattenWorkspaceChanges(workspaceChangesAsync.data),
     [workspaceChangesAsync.data],
@@ -868,11 +926,55 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
     }
   }, [activeMemberPickerIndex, members.length]);
 
-  // Keep the latest message anchored before paint so session switches do not
-  // visibly animate through older scroll positions.
-  useLayoutEffect(() => {
+  const isChatScrolledToBottom = useCallback(() => {
+    const element = chatMessagesScrollRef.current;
+    if (!element) return true;
+
+    return (
+      element.scrollHeight - element.scrollTop - element.clientHeight <=
+      CHAT_SCROLL_BOTTOM_THRESHOLD_PX
+    );
+  }, []);
+
+  const scrollChatToBottom = useCallback(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
-  }, [activeSessionId, messages]);
+  }, []);
+
+  const handleChatScroll = useCallback(() => {
+    chatAutoFollowRef.current = isChatScrolledToBottom();
+  }, [isChatScrolledToBottom]);
+
+  const handleChatWheel = useCallback(
+    (event: React.WheelEvent<HTMLDivElement>) => {
+      if (event.deltaY < 0) {
+        chatAutoFollowRef.current = false;
+        return;
+      }
+
+      if (isChatScrolledToBottom()) {
+        chatAutoFollowRef.current = true;
+      }
+    },
+    [isChatScrolledToBottom],
+  );
+
+  // Keep the latest message anchored before paint when the user is already at
+  // the bottom. If they scroll up during agent output, preserve that position.
+  useLayoutEffect(() => {
+    const sessionChanged =
+      previousActiveSessionIdRef.current !== activeSessionId;
+    previousActiveSessionIdRef.current = activeSessionId;
+
+    if (sessionChanged) {
+      chatAutoFollowRef.current = true;
+      scrollChatToBottom();
+      return;
+    }
+
+    if (chatAutoFollowRef.current) {
+      scrollChatToBottom();
+    }
+  }, [activeSessionId, messages, scrollChatToBottom]);
 
   useEffect(
     () => () => {
@@ -1174,6 +1276,8 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
     if (!trimmedInput && attachedFiles.length === 0) return;
     if (isUploadingAttachments) return;
 
+    chatAutoFollowRef.current = true;
+
     if (attachedFiles.length > 0) {
       if (sessionsAsync.source !== "api") {
         showToast(t("attachment.requiresApi"));
@@ -1452,7 +1556,7 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
       <ScrollArea className="flex-1 px-2 pb-2">
         {workspaceChangesAsync.loading && (
           <div className="rounded-md bg-[var(--surface-1)] px-3 py-3 text-[13px] text-[var(--ink-tertiary)]">
-            Loading changes...
+            {t("relatedFiles.loading")}
           </div>
         )}
         {workspaceChangesAsync.error && (
@@ -1566,7 +1670,12 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
           </div>
 
           {/* Messages Feed */}
-          <ScrollArea className="mb-4 flex-1 space-y-4 pr-1">
+          <ScrollArea
+            ref={chatMessagesScrollRef}
+            className="mb-4 flex-1 space-y-4 pr-1"
+            onScroll={handleChatScroll}
+            onWheel={handleChatWheel}
+          >
             {(!messagesAsync.loading || displayedMessages.length === 0) && (
               <ResourceStateNotice
                 resource={messagesAsync}
@@ -1947,9 +2056,10 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
                             .join(", ")}
                         </span>
                       )}
-                      <span className="text-[7px] text-[var(--ink-tertiary)] font-bold">
-                        ▼
-                      </span>
+                      <ChevronDown
+                        aria-hidden="true"
+                        className="h-3 w-3 text-[var(--ink-tertiary)]"
+                      />
                     </button>
 
                     {isMemberPickerOpen && (
@@ -2189,6 +2299,7 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
                         item={item}
                         statusPending={updatingLinkedWorkItemIds.has(item.id)}
                         onOpen={handleOpenLinkedWorkItem}
+                        t={t}
                         onStatusChange={(nextItem, status) => {
                           void handleLinkedWorkItemStatusChange(
                             nextItem,

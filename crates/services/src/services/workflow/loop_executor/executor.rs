@@ -507,7 +507,7 @@ impl<'a> LoopExecutor<'a> {
                 workflow_session.clone()
             };
 
-            let raw_output = if run_as_follow_up {
+            let agent_output = if run_as_follow_up {
                 run_workflow_step_agent_follow_up(
                     self.db,
                     self.chat_runner,
@@ -532,6 +532,7 @@ impl<'a> LoopExecutor<'a> {
                 )
                 .await?
             };
+            let raw_output = agent_output.output;
 
             match parse_loop_review_output(self.execution.id, &workflow_loop.loop_key, &raw_output)
             {

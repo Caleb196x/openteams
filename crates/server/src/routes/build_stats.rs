@@ -31,6 +31,12 @@ pub struct SessionTokensQuery {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct SessionWorkflowStepTokensQuery {
+    pub project_id: Uuid,
+    pub session_id: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct ActivityQuery {
     pub project_id: Uuid,
     #[serde(default = "default_activity_period")]
@@ -82,6 +88,65 @@ pub struct SessionTokenEntry {
 #[derive(Debug, Serialize, Deserialize, TS)]
 pub struct SessionTokensResponse {
     pub sessions: Vec<SessionTokenEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct WorkflowStepTokenEntry {
+    pub session_id: String,
+    pub session_title: String,
+    pub workflow_execution_id: String,
+    pub workflow_step_id: String,
+    pub workflow_step_key: String,
+    pub workflow_step_title: String,
+    pub agent_name: Option<String>,
+    pub latest_run_id: Option<String>,
+    pub run_count: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub reasoning_output_tokens: i64,
+    pub total_tokens: i64,
+    pub estimated_cost: f64,
+    pub model_id: Option<String>,
+    pub model_name: Option<String>,
+}
+
+impl From<services::services::build_stats::token_cost_stats::WorkflowStepTokenStats>
+    for WorkflowStepTokenEntry
+{
+    fn from(
+        stats: services::services::build_stats::token_cost_stats::WorkflowStepTokenStats,
+    ) -> Self {
+        Self {
+            session_id: stats.session_id,
+            session_title: stats.session_title,
+            workflow_execution_id: stats.workflow_execution_id,
+            workflow_step_id: stats.workflow_step_id,
+            workflow_step_key: stats.workflow_step_key,
+            workflow_step_title: stats.workflow_step_title,
+            agent_name: stats.agent_name,
+            latest_run_id: stats.latest_run_id,
+            run_count: stats.run_count,
+            input_tokens: stats.input_tokens,
+            output_tokens: stats.output_tokens,
+            cache_read_tokens: stats.cache_read_tokens,
+            reasoning_output_tokens: stats.reasoning_output_tokens,
+            total_tokens: stats.total_tokens,
+            estimated_cost: stats.estimated_cost,
+            model_id: stats.model_id,
+            model_name: stats.model_name,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, TS)]
+pub struct WorkflowStepTokensResponse {
+    pub steps: Vec<WorkflowStepTokenEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize, TS)]
+pub struct WorkflowStepTokenUsageResponse {
+    pub usage: Option<WorkflowStepTokenEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -154,6 +219,10 @@ pub fn router() -> Router<DeploymentImpl> {
     Router::new()
         .route("/build-stats/daily-tokens", get(get_daily_tokens))
         .route("/build-stats/session-tokens", get(get_session_tokens))
+        .route(
+            "/build-stats/session-workflow-step-tokens",
+            get(get_session_workflow_step_tokens),
+        )
         .route("/build-stats/activity", get(get_activity))
         .route("/build-stats/model-pricing", get(get_model_pricing))
         .route(
@@ -329,6 +398,23 @@ async fn get_session_tokens(
         sessions,
     })))
 }
+async fn get_session_workflow_step_tokens(
+    State(deployment): State<DeploymentImpl>,
+    Query(params): Query<SessionWorkflowStepTokensQuery>,
+) -> Result<ResponseJson<ApiResponse<WorkflowStepTokensResponse>>, ApiError> {
+    let pool = &deployment.db().pool;
+    let steps: Vec<WorkflowStepTokenEntry> = TokenCostStatsService::new()
+        .session_workflow_step_tokens(pool, params.project_id, &params.session_id)
+        .await?
+        .into_iter()
+        .map(WorkflowStepTokenEntry::from)
+        .collect();
+
+    Ok(ResponseJson(ApiResponse::success(
+        WorkflowStepTokensResponse { steps },
+    )))
+}
+
 // 鈹€鈹€鈹€ Activity Handler 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 #[derive(Debug, sqlx::FromRow)]

@@ -131,6 +131,7 @@
   "recentSessions": "最近会话",
   "recommendedTeamSaaS": "推荐的 SaaS 团队配属",
   "relatedFiles.hide": "隐藏关联文件",
+  "relatedFiles.loading": "正在加载变更...",
   "relatedFiles.noChangedFiles": "此会话暂无变更文件。",
   "relatedFiles.noDiffOpenFile": "暂无可用差异，已尝试打开文件。",
   "relatedFiles.openDiff": "打开 {path} 的差异",

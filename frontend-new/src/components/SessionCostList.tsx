@@ -8,6 +8,8 @@ export interface SessionCostListProps {
   sessions: SessionCostEntry[];
   loading: boolean;
   mode?: SessionCostViewMode;
+  selectedSessionId?: string | null;
+  onSessionSelect?: (session: SessionCostEntry) => void;
   t: (key: string, replacements?: Record<string, string | number>) => string;
 }
 
@@ -15,6 +17,8 @@ export function SessionCostList({
   sessions,
   loading,
   mode = 'list',
+  selectedSessionId = null,
+  onSessionSelect,
   t,
 }: SessionCostListProps) {
   const numberValue = (value: unknown): number =>
@@ -26,11 +30,11 @@ export function SessionCostList({
 
   if (loading) {
     return (
-      <div className="space-y-2">
-        {Array.from({ length: 5 }).map((_, i) => (
+      <div className="h-full min-h-0 space-y-2 overflow-hidden">
+        {Array.from({ length: 4 }).map((_, i) => (
           <div
             key={i}
-            className="h-10 animate-pulse rounded bg-[var(--surface-2)]"
+            className="h-8 animate-pulse rounded bg-[var(--surface-2)]"
           />
         ))}
       </div>
@@ -39,7 +43,7 @@ export function SessionCostList({
 
   if (sessions.length === 0) {
     return (
-      <div className="rounded border border-[var(--hairline)] bg-[var(--surface-1)] py-6 text-center text-[12px] text-[var(--ink-subtle)]">
+      <div className="flex h-full min-h-0 items-center justify-center rounded border border-[var(--hairline)] bg-[var(--surface-1)] px-3 text-center text-[12px] text-[var(--ink-subtle)]">
         {t('buildStats.empty.noSessions')}
       </div>
     );
@@ -58,14 +62,26 @@ export function SessionCostList({
   if (mode === 'bar') {
     return (
       <div
-        className="max-h-[360px] space-y-3 overflow-y-auto pr-1"
+        className="h-full min-h-0 space-y-2 overflow-y-auto pr-1"
         aria-label={t('buildStats.sessionTokens')}
       >
         {sorted.map((session) => {
           const totalTokens = numberValue(session.total_tokens);
           const width = Math.max(4, (totalTokens / maxTokens) * 100);
+          const selected = selectedSessionId === session.session_id;
           return (
-            <div key={session.session_id} className="space-y-1">
+            <button
+              key={session.session_id}
+              type="button"
+              onClick={() => onSessionSelect?.(session)}
+              className={`block w-full rounded-sm px-2 py-1 text-left transition ${
+                selected
+                  ? 'bg-[var(--surface-3)]'
+                  : onSessionSelect
+                    ? 'hover:bg-[var(--surface-1)]'
+                    : ''
+              }`}
+            >
               <div className="flex items-center justify-between gap-3 text-[12px]">
                 <span
                   className="min-w-0 flex-1 truncate text-[var(--ink-muted)]"
@@ -83,7 +99,7 @@ export function SessionCostList({
                   style={{ width: `${width}%` }}
                 />
               </div>
-            </div>
+            </button>
           );
         })}
       </div>
@@ -92,7 +108,7 @@ export function SessionCostList({
 
   return (
     <div
-      className="max-h-[360px] overflow-y-auto rounded border border-[var(--hairline)] bg-[var(--surface-1)]"
+      className="h-full min-h-0 overflow-y-auto rounded border border-[var(--hairline)] bg-[var(--surface-1)]"
       role="list"
       aria-label={t('buildStats.sessionTokens')}
     >

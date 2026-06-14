@@ -44,5 +44,14 @@
   "buildStats.tokens": "토큰",
   "buildStats.totalTokens": "총 토큰",
   "buildStats.view.bar": "막대",
-  "buildStats.view.list": "목록"
+  "buildStats.view.list": "목록",
+  "buildStats.workflowSteps.agent": "에이전트",
+  "buildStats.workflowSteps.back": "세션",
+  "buildStats.workflowSteps.breakdown": "입력 / 출력",
+  "buildStats.workflowSteps.cost": "비용",
+  "buildStats.workflowSteps.empty": "이 세션에는 아직 workflow step 토큰 사용량이 없습니다.",
+  "buildStats.workflowSteps.runs": "실행 수",
+  "buildStats.workflowSteps.step": "단계",
+  "buildStats.workflowSteps.tokens": "토큰",
+  "buildStats.workflowSteps.total": "합계"
 }

@@ -8,6 +8,8 @@ export interface DailyTokenChartProps {
   loading: boolean;
   t: (key: string, replacements?: Record<string, string | number>) => string;
   onDateSelect?: (date: string) => void;
+  height?: number;
+  fillHeight?: boolean;
 }
 
 const numberValue = (value: unknown): number =>
@@ -25,6 +27,8 @@ export function DailyTokenChart({
   loading,
   t,
   onDateSelect,
+  height,
+  fillHeight,
 }: DailyTokenChartProps) {
   const label = (
     key: string,
@@ -55,6 +59,8 @@ export function DailyTokenChart({
         })
       }
       formatValue={formatCompactNumber}
+      height={height}
+      fillHeight={fillHeight}
       onDatumClick={
         onDateSelect ? (datum) => onDateSelect(datum.date) : undefined
       }
