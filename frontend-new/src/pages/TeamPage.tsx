@@ -12,6 +12,7 @@ import { useWorkspace } from "@/context/WorkspaceContext";
 import {
   agentRuntimeApi,
   chatAgentsApi,
+  chatSessionsApi,
   mcpServersApi,
   projectApi,
   sessionAgentsApi,
@@ -374,6 +375,16 @@ export function TeamPage() {
   const [mcpApplying, setMcpApplying] = useState(false);
   const [mcpError, setMcpError] = useState<string | null>(null);
   const [mcpSuccess, setMcpSuccess] = useState(false);
+  const [teamProtocolContent, setTeamProtocolContent] = useState("");
+  const [originalTeamProtocolContent, setOriginalTeamProtocolContent] =
+    useState("");
+  const [teamProtocolEnabled, setTeamProtocolEnabled] = useState(false);
+  const [teamProtocolLoading, setTeamProtocolLoading] = useState(false);
+  const [teamProtocolSaving, setTeamProtocolSaving] = useState(false);
+  const [teamProtocolError, setTeamProtocolError] = useState<string | null>(
+    null,
+  );
+  const [teamProtocolSuccess, setTeamProtocolSuccess] = useState(false);
   const loadRequestIdRef = useRef(0);
 
   const currentProject = useMemo(
@@ -450,6 +461,8 @@ export function TeamPage() {
     (capability?.kind === "variant" ? modelVariant : thinkingEffort) ||
     defaultOptionId;
   const mcpDirty = mcpServersJson !== originalMcpServersJson;
+  const teamProtocolDirty =
+    teamProtocolContent !== originalTeamProtocolContent;
   const memberDirty =
     memberFormState !== null &&
     (workspacePath !== memberFormState.workspacePath ||
@@ -555,6 +568,15 @@ export function TeamPage() {
   }, [mcpSuccess]);
 
   useEffect(() => {
+    if (!teamProtocolSuccess) return;
+    const timeoutId = window.setTimeout(
+      () => setTeamProtocolSuccess(false),
+      2000,
+    );
+    return () => window.clearTimeout(timeoutId);
+  }, [teamProtocolSuccess]);
+
+  useEffect(() => {
     if (!notice) return;
     const timeoutId = window.setTimeout(
       () => setNotice(null),
@@ -570,6 +592,52 @@ export function TeamPage() {
   useEffect(() => {
     if (mcpDirty && mcpSuccess) setMcpSuccess(false);
   }, [mcpDirty, mcpSuccess]);
+
+  useEffect(() => {
+    if (teamProtocolDirty && teamProtocolSuccess) {
+      setTeamProtocolSuccess(false);
+    }
+  }, [teamProtocolDirty, teamProtocolSuccess]);
+
+  useEffect(() => {
+    if (!activeSessionId) {
+      setTeamProtocolContent("");
+      setOriginalTeamProtocolContent("");
+      setTeamProtocolEnabled(false);
+      setTeamProtocolError(null);
+      setTeamProtocolLoading(false);
+      setTeamProtocolSuccess(false);
+      return;
+    }
+
+    let cancelled = false;
+    setTeamProtocolLoading(true);
+    setTeamProtocolError(null);
+    setTeamProtocolSuccess(false);
+    void chatSessionsApi
+      .getTeamProtocol(activeSessionId)
+      .then((protocol) => {
+        if (cancelled) return;
+        setTeamProtocolContent(protocol.content);
+        setOriginalTeamProtocolContent(protocol.content);
+        setTeamProtocolEnabled(protocol.enabled);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setTeamProtocolError(
+          err instanceof Error
+            ? err.message
+            : t("teamPage.error.teamProtocolUnavailable"),
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setTeamProtocolLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSessionId, t]);
 
   useEffect(() => {
     if (!memberFormState) return;
@@ -852,6 +920,45 @@ export function TeamPage() {
     setMcpServersJson(originalMcpServersJson);
     setMcpError(null);
     setMcpSuccess(false);
+  };
+
+  const handleTeamProtocolChange = (value: string) => {
+    setTeamProtocolContent(value);
+    setTeamProtocolError(null);
+    setTeamProtocolSuccess(false);
+  };
+
+  const discardTeamProtocolChanges = () => {
+    setTeamProtocolContent(originalTeamProtocolContent);
+    setTeamProtocolError(null);
+    setTeamProtocolSuccess(false);
+  };
+
+  const saveTeamProtocol = async () => {
+    if (!activeSessionId) return;
+    setTeamProtocolSaving(true);
+    setTeamProtocolError(null);
+    setTeamProtocolSuccess(false);
+    try {
+      const content = teamProtocolContent;
+      const saved = await chatSessionsApi.updateTeamProtocol(activeSessionId, {
+        content,
+        enabled: teamProtocolEnabled || content.trim().length > 0,
+      });
+      setTeamProtocolContent(saved.content);
+      setOriginalTeamProtocolContent(saved.content);
+      setTeamProtocolEnabled(saved.enabled);
+      setTeamProtocolSuccess(true);
+      await refreshMessages().catch(() => undefined);
+    } catch (err) {
+      setTeamProtocolError(
+        err instanceof Error
+          ? err.message
+          : t("teamPage.error.saveTeamProtocol"),
+      );
+    } finally {
+      setTeamProtocolSaving(false);
+    }
   };
 
   const discardMemberChanges = () => {
@@ -1137,12 +1244,22 @@ export function TeamPage() {
               skills={runtimeSkills}
               skillsError={runtimeSkillsError}
               skillsLoading={runtimeSkillsLoading}
+              teamProtocolContent={teamProtocolContent}
+              teamProtocolDirty={teamProtocolDirty}
+              teamProtocolError={teamProtocolError}
+              teamProtocolLoading={teamProtocolLoading}
+              teamProtocolSaving={teamProtocolSaving}
+              teamProtocolSessionAvailable={!!activeSessionId}
+              teamProtocolSuccess={teamProtocolSuccess}
               workspacePath={workspacePath}
               onDiscardMemberChanges={discardMemberChanges}
               onApplyMcpServers={applyMcpServers}
               onDiscardMcpChanges={discardMcpChanges}
+              onDiscardTeamProtocolChanges={discardTeamProtocolChanges}
               onMcpServersChange={handleMcpServersChange}
               onSaveMember={saveMember}
+              onSaveTeamProtocol={saveTeamProtocol}
+              onTeamProtocolChange={handleTeamProtocolChange}
               onToggleMcpServer={toggleMcpServer}
               setAllowedSkillIds={setAllowedSkillIds}
               setIsLeader={setIsLeader}

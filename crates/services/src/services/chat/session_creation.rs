@@ -60,7 +60,9 @@ pub async fn create_session_with_project_members(
     for member in default_members {
         let project_member_id: Uuid = member.try_get("project_member_id")?;
         let agent_id: Uuid = member.try_get("agent_id")?;
-        let workspace_path: Option<String> = member.try_get("default_workspace_path")?;
+        let workspace_path: Option<String> = member
+            .try_get::<Option<String>, _>("default_workspace_path")?
+            .or_else(|| session.default_workspace_path.clone());
         let allowed_skill_ids: sqlx::types::Json<Vec<String>> =
             member.try_get("allowed_skill_ids")?;
         let execution_config: sqlx::types::Json<db::models::member_execution_config::MemberExecutionConfig> =
@@ -291,6 +293,44 @@ mod session_creation_tests {
                 .await
                 .expect("count project members");
         assert_eq!(project_member_count, 2);
+    }
+
+    #[tokio::test]
+    async fn member_without_workspace_path_falls_back_to_session_default() {
+        let pool = setup_pool().await;
+        let project_id = Uuid::new_v4();
+        let agent_id = Uuid::new_v4();
+        insert_project_member(
+            &pool,
+            project_id,
+            agent_id,
+            true,
+            None,
+            r#"[]"#,
+            r#"{}"#,
+        )
+        .await;
+
+        let session = create_session_with_project_members(
+            &pool,
+            &CreateChatSession {
+                title: Some("Project session".to_string()),
+                workspace_path: Some("/session/workspace".to_string()),
+                project_id: Some(project_id),
+            },
+            Uuid::new_v4(),
+        )
+        .await
+        .expect("create project session");
+
+        let session_agents = ChatSessionAgent::find_all_for_session(&pool, session.id)
+            .await
+            .expect("list session agents");
+        assert_eq!(session_agents.len(), 1);
+        assert_eq!(
+            session_agents[0].workspace_path.as_deref(),
+            Some("/session/workspace")
+        );
     }
 
     #[tokio::test]

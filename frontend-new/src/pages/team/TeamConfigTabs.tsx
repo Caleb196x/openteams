@@ -8,6 +8,7 @@ import {
   Check,
   CheckCircle2,
   CircleAlert,
+  FileText,
   FolderGit2,
   PackagePlus,
   RefreshCw,
@@ -37,7 +38,7 @@ import {
   type ProjectMemberWithExecution,
 } from "./teamUtils";
 
-type MemberConfigTab = "config" | "skills" | "mcp";
+type MemberConfigTab = "config" | "skills" | "mcp" | "teamProtocol";
 
 type TranslateFn = (
   key: string,
@@ -74,13 +75,23 @@ type TeamConfigTabsProps = {
   skills: BackendChatSkill[];
   skillsError: string | null;
   skillsLoading: boolean;
+  teamProtocolContent: string;
+  teamProtocolDirty: boolean;
+  teamProtocolError: string | null;
+  teamProtocolLoading: boolean;
+  teamProtocolSaving: boolean;
+  teamProtocolSessionAvailable: boolean;
+  teamProtocolSuccess: boolean;
   t: TranslateFn;
   workspacePath: string;
   onApplyMcpServers: () => void;
   onDiscardMemberChanges: () => void;
   onDiscardMcpChanges: () => void;
+  onDiscardTeamProtocolChanges: () => void;
   onMcpServersChange: (value: string) => void;
   onSaveMember: () => void;
+  onSaveTeamProtocol: () => void;
+  onTeamProtocolChange: (value: string) => void;
   onToggleMcpServer: (serverKey: string) => void;
   setAllowedSkillIds: (ids: string[]) => void;
   setIsLeader: (value: boolean | ((current: boolean) => boolean)) => void;
@@ -556,6 +567,76 @@ function McpSaveActions({
   );
 }
 
+function TeamProtocolSaveActions({
+  onDiscardTeamProtocolChanges,
+  onSaveTeamProtocol,
+  t,
+  teamProtocolDirty,
+  teamProtocolError,
+  teamProtocolLoading,
+  teamProtocolSaving,
+  teamProtocolSessionAvailable,
+  teamProtocolSuccess,
+}: Pick<
+  TeamConfigTabsProps,
+  | "onDiscardTeamProtocolChanges"
+  | "onSaveTeamProtocol"
+  | "t"
+  | "teamProtocolDirty"
+  | "teamProtocolError"
+  | "teamProtocolLoading"
+  | "teamProtocolSaving"
+  | "teamProtocolSessionAvailable"
+  | "teamProtocolSuccess"
+>) {
+  if (
+    !teamProtocolSessionAvailable ||
+    (!teamProtocolDirty && !teamProtocolSuccess && !teamProtocolSaving)
+  ) {
+    return null;
+  }
+
+  return (
+    <div className="flex justify-end gap-2">
+      {teamProtocolDirty && !teamProtocolSuccess && (
+        <button
+          type="button"
+          onClick={onDiscardTeamProtocolChanges}
+          disabled={teamProtocolSaving}
+          className="inline-flex h-8 items-center gap-1.5 rounded-[6px] border border-[var(--hairline)] bg-[var(--surface-2)] px-2.5 text-[12px] font-medium text-[var(--ink-subtle)] hover:text-[var(--ink)] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+          {t("teamPage.action.discard")}
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={() => void onSaveTeamProtocol()}
+        disabled={
+          teamProtocolSaving ||
+          teamProtocolLoading ||
+          !!teamProtocolError ||
+          teamProtocolSuccess
+        }
+        className="inline-flex h-8 items-center gap-1.5 rounded-[6px] bg-[var(--primary)] px-2.5 text-[12px] font-semibold text-[var(--on-primary)] transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {teamProtocolSuccess ? (
+          <Check className="h-3.5 w-3.5" />
+        ) : teamProtocolSaving ? (
+          <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Save className="h-3.5 w-3.5" />
+        )}
+        {teamProtocolSuccess
+          ? t("teamPage.action.saved")
+          : teamProtocolSaving
+            ? t("teamPage.action.saving")
+            : t("teamPage.action.saveTeamProtocol")}
+      </button>
+    </div>
+  );
+}
+
 function ConfigTab({
   capability,
   isLeader,
@@ -593,6 +674,16 @@ function ConfigTab({
   | "onDiscardMcpChanges"
   | "onMcpServersChange"
   | "onToggleMcpServer"
+  | "teamProtocolContent"
+  | "teamProtocolDirty"
+  | "teamProtocolError"
+  | "teamProtocolLoading"
+  | "teamProtocolSaving"
+  | "teamProtocolSessionAvailable"
+  | "teamProtocolSuccess"
+  | "onDiscardTeamProtocolChanges"
+  | "onSaveTeamProtocol"
+  | "onTeamProtocolChange"
   | "memberDirty"
   | "memberSuccess"
   | "onDiscardMemberChanges"
@@ -949,25 +1040,81 @@ function McpConfigTab({
   );
 }
 
+function TeamProtocolTab({
+  onTeamProtocolChange,
+  t,
+  teamProtocolContent,
+  teamProtocolError,
+  teamProtocolLoading,
+  teamProtocolSessionAvailable,
+}: Pick<
+  TeamConfigTabsProps,
+  | "onTeamProtocolChange"
+  | "t"
+  | "teamProtocolContent"
+  | "teamProtocolError"
+  | "teamProtocolLoading"
+  | "teamProtocolSessionAvailable"
+>) {
+  return (
+    <div className="space-y-6">
+      {teamProtocolError && (
+        <div className="rounded-[8px] border border-red-500/20 bg-red-500/10 p-3 text-[14px] text-red-400">
+          {t("teamPage.teamProtocol.error", { error: teamProtocolError })}
+        </div>
+      )}
+
+      {!teamProtocolSessionAvailable && (
+        <div className="rounded-[8px] border border-amber-500/30 bg-amber-500/10 p-4 text-[14px] leading-[1.5] text-amber-300">
+          {t("teamPage.teamProtocol.noSession")}
+        </div>
+      )}
+
+      <ConfigSection
+        title={t("teamPage.teamProtocol.title")}
+        description={t("teamPage.teamProtocol.desc")}
+        bodyClassName="!p-0"
+      >
+        <textarea
+          value={
+            teamProtocolLoading
+              ? t("teamPage.teamProtocol.loading")
+              : teamProtocolContent
+          }
+          onChange={(event) => onTeamProtocolChange(event.target.value)}
+          disabled={teamProtocolLoading || !teamProtocolSessionAvailable}
+          spellCheck={false}
+          placeholder={t("teamPage.teamProtocol.placeholder")}
+          className="block h-full min-h-[480px] w-full resize-none overflow-y-auto rounded-[12px] border-0 bg-[var(--surface-3)] px-5 py-5 font-mono text-[14px] leading-relaxed text-[var(--ink)] outline-none transition-colors placeholder:text-[var(--ink-muted)] placeholder:opacity-100 focus:ring-2 focus:ring-[var(--primary-focus)]/50 disabled:opacity-70"
+        />
+      </ConfigSection>
+    </div>
+  );
+}
+
 export function TeamConfigTabs(props: TeamConfigTabsProps) {
   const [activeTab, setActiveTab] = useState<MemberConfigTab>("config");
   const { selectedMember, t } = props;
   const dirtyNotice =
-    props.memberDirty && props.mcpDirty
-      ? t("teamPage.notice.unsavedBoth")
-      : props.memberDirty
-        ? t("teamPage.notice.unsavedMember")
-        : props.mcpDirty
-          ? t("teamPage.notice.unsavedMcp")
-          : null;
+    props.teamProtocolDirty
+      ? t("teamPage.notice.unsavedTeamProtocol")
+      : props.memberDirty && props.mcpDirty
+        ? t("teamPage.notice.unsavedBoth")
+        : props.memberDirty
+          ? t("teamPage.notice.unsavedMember")
+          : props.mcpDirty
+            ? t("teamPage.notice.unsavedMcp")
+            : null;
   const savedNotice =
-    props.memberSuccess && props.mcpSuccess
-      ? t("teamPage.notice.savedBoth")
-      : props.memberSuccess
-        ? t("teamPage.notice.savedMember")
-        : props.mcpSuccess
-          ? t("teamPage.notice.savedMcp")
-          : null;
+    props.teamProtocolSuccess
+      ? t("teamPage.notice.savedTeamProtocol")
+      : props.memberSuccess && props.mcpSuccess
+        ? t("teamPage.notice.savedBoth")
+        : props.memberSuccess
+          ? t("teamPage.notice.savedMember")
+          : props.mcpSuccess
+            ? t("teamPage.notice.savedMcp")
+            : null;
   const statusNotice = dirtyNotice ?? savedNotice;
   const statusKind = dirtyNotice ? "dirty" : savedNotice ? "saved" : null;
   const tabItems = useMemo(
@@ -983,6 +1130,11 @@ export function TeamConfigTabs(props: TeamConfigTabsProps) {
         icon: FolderGit2,
       },
       { id: "mcp" as const, label: t("teamPage.tabs.mcp"), icon: Server },
+      {
+        id: "teamProtocol" as const,
+        label: t("teamPage.tabs.teamProtocol"),
+        icon: FileText,
+      },
     ],
     [t],
   );
@@ -992,8 +1144,17 @@ export function TeamConfigTabs(props: TeamConfigTabsProps) {
   const shouldShowMcpActions =
     !isMcpUnsupported &&
     (props.mcpDirty || props.mcpSuccess || props.mcpApplying);
+  const shouldShowTeamProtocolActions =
+    props.teamProtocolSessionAvailable &&
+    (props.teamProtocolDirty ||
+      props.teamProtocolSuccess ||
+      props.teamProtocolSaving);
   const shouldShowActionFooter =
-    activeTab === "mcp" ? shouldShowMcpActions : shouldShowMemberActions;
+    activeTab === "mcp"
+      ? shouldShowMcpActions
+      : activeTab === "teamProtocol"
+        ? shouldShowTeamProtocolActions
+        : shouldShowMemberActions;
 
   if (!selectedMember) return <EmptyMemberState t={t} />;
 
@@ -1062,7 +1223,7 @@ export function TeamConfigTabs(props: TeamConfigTabsProps) {
             setAllowedSkillIds={props.setAllowedSkillIds}
             t={t}
           />
-        ) : (
+        ) : activeTab === "mcp" ? (
           <McpConfigTab
             configuredMcpServerKeys={props.configuredMcpServerKeys}
             mcpConfig={props.mcpConfig}
@@ -1072,6 +1233,17 @@ export function TeamConfigTabs(props: TeamConfigTabsProps) {
             mcpServersJson={props.mcpServersJson}
             onMcpServersChange={props.onMcpServersChange}
             onToggleMcpServer={props.onToggleMcpServer}
+            t={t}
+          />
+        ) : (
+          <TeamProtocolTab
+            teamProtocolContent={props.teamProtocolContent}
+            teamProtocolError={props.teamProtocolError}
+            teamProtocolLoading={props.teamProtocolLoading}
+            teamProtocolSessionAvailable={
+              props.teamProtocolSessionAvailable
+            }
+            onTeamProtocolChange={props.onTeamProtocolChange}
             t={t}
           />
         )}
@@ -1087,6 +1259,20 @@ export function TeamConfigTabs(props: TeamConfigTabsProps) {
               mcpSuccess={props.mcpSuccess}
               onApplyMcpServers={props.onApplyMcpServers}
               onDiscardMcpChanges={props.onDiscardMcpChanges}
+              t={t}
+            />
+          ) : activeTab === "teamProtocol" ? (
+            <TeamProtocolSaveActions
+              teamProtocolDirty={props.teamProtocolDirty}
+              teamProtocolError={props.teamProtocolError}
+              teamProtocolLoading={props.teamProtocolLoading}
+              teamProtocolSaving={props.teamProtocolSaving}
+              teamProtocolSessionAvailable={props.teamProtocolSessionAvailable}
+              teamProtocolSuccess={props.teamProtocolSuccess}
+              onDiscardTeamProtocolChanges={
+                props.onDiscardTeamProtocolChanges
+              }
+              onSaveTeamProtocol={props.onSaveTeamProtocol}
               t={t}
             />
           ) : (

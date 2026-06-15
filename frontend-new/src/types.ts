@@ -813,6 +813,11 @@ export interface UpdateChatSession {
   chat_input_mode?: string | null;
 }
 
+export interface TeamProtocolConfig {
+  content: string;
+  enabled: boolean;
+}
+
 // ----- Chat messages ---------------------------------------------------------
 
 export type ChatSenderType = 'user' | 'agent' | 'system';

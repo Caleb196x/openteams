@@ -80,6 +80,7 @@ import type {
   SourceControlOperationResponse,
   SourceControlStageRequest,
   SourceControlUnstageRequest,
+  TeamProtocolConfig,
   UpdateAgentRuntimeConfig,
   UpdateAgentSkill,
   UpdateChatAgent,
@@ -354,6 +355,25 @@ export const chatSessionsApi = {
       { method: "POST" },
     );
     return handleApiResponse<BackendChatSession>(r);
+  },
+  getTeamProtocol: async (sessionId: string): Promise<TeamProtocolConfig> => {
+    const r = await makeRequest(
+      `/api/chat/sessions/${encodeURIComponent(sessionId)}/team-protocol`,
+    );
+    return handleApiResponse<TeamProtocolConfig>(r);
+  },
+  updateTeamProtocol: async (
+    sessionId: string,
+    data: TeamProtocolConfig,
+  ): Promise<TeamProtocolConfig> => {
+    const r = await makeRequest(
+      `/api/chat/sessions/${encodeURIComponent(sessionId)}/team-protocol`,
+      {
+        method: "POST",
+        body: jsonBody(data),
+      },
+    );
+    return handleApiResponse<TeamProtocolConfig>(r);
   },
   getWorkspaces: async (
     sessionId: string,

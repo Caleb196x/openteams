@@ -272,15 +272,23 @@ fn create_project_payload(payload: CreateProjectRequest) -> CreateProject {
     }
 }
 
-fn create_project_session_payload(
+async fn create_project_session_payload(
+    pool: &sqlx::SqlitePool,
     project_id: Uuid,
     payload: CreateProjectSessionRequest,
-) -> CreateChatSession {
-    CreateChatSession {
+) -> Result<CreateChatSession, ApiError> {
+    let workspace_path = match payload.workspace_path {
+        Some(path) => Some(path),
+        None => Project::find_by_id(pool, project_id)
+            .await?
+            .and_then(|project| project.default_workspace_path),
+    };
+
+    Ok(CreateChatSession {
         title: payload.title,
-        workspace_path: payload.workspace_path,
+        workspace_path,
         project_id: Some(project_id),
-    }
+    })
 }
 
 fn stats_period(query: ProjectStatsQuery) -> Result<Option<(NaiveDate, NaiveDate)>, ApiError> {
@@ -470,7 +478,7 @@ pub async fn create_project_session(
 
     let session = create_session_with_project_members(
         &deployment.db().pool,
-        &create_project_session_payload(project_id, payload),
+        &create_project_session_payload(&deployment.db().pool, project_id, payload).await?,
         Uuid::new_v4(),
     )
     .await?;
@@ -700,19 +708,60 @@ mod tests {
         );
     }
 
-    #[test]
-    fn project_session_request_uses_path_project_id() {
+    #[tokio::test]
+    async fn project_session_request_uses_path_project_id() {
+        let pool = setup_pool().await;
         let project_id = Uuid::new_v4();
         let payload = create_project_session_payload(
+            &pool,
             project_id,
             CreateProjectSessionRequest {
                 title: Some("Session".to_string()),
                 workspace_path: Some("E:/workspace".to_string()),
             },
-        );
+        )
+        .await
+        .expect("build project session payload");
 
         assert_eq!(payload.project_id, Some(project_id));
         assert_eq!(payload.title.as_deref(), Some("Session"));
+        assert_eq!(payload.workspace_path.as_deref(), Some("E:/workspace"));
+    }
+
+    #[tokio::test]
+    async fn project_session_falls_back_to_project_workspace_path() {
+        let (_app, pool) = setup_app().await;
+        let project = Project::create(
+            &pool,
+            &CreateProject {
+                name: "Fallback project".to_string(),
+                repositories: Vec::new(),
+                description: None,
+                status: None,
+                default_workspace_path: Some("E:/project-default".to_string()),
+                active_repo_id: None,
+            },
+            Uuid::new_v4(),
+        )
+        .await
+        .expect("create project");
+
+        let payload = create_project_session_payload(
+            &pool,
+            project.id,
+            CreateProjectSessionRequest {
+                title: Some("Session".to_string()),
+                workspace_path: None,
+            },
+        )
+        .await
+        .expect("build project session payload");
+
+        assert_eq!(payload.project_id, Some(project.id));
+        assert_eq!(
+            payload.workspace_path.as_deref(),
+            Some("E:/project-default")
+        );
     }
 
     #[test]

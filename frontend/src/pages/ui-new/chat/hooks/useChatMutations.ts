@@ -1,11 +1,13 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import type { ChatMessage, ChatSession, JsonValue } from 'shared/types';
+import type {
+  ChatMessage,
+  ChatSession,
+  CreateChatSession,
+  JsonValue,
+} from 'shared/types';
 import { chatApi } from '@/lib/api';
 
-export interface CreateSessionParams {
-  title?: string;
-  workspace_path?: string;
-}
+export type CreateSessionParams = Partial<CreateChatSession>;
 
 export interface UseChatMutationsResult {
   createSession: ReturnType<
@@ -51,6 +53,7 @@ export function useChatMutations(
       chatApi.createSession({
         title: params?.title ?? null,
         workspace_path: params?.workspace_path ?? null,
+        project_id: params?.project_id ?? null,
       }),
     onSuccess: (session) => {
       // Add new session to cache immediately to prevent race condition
