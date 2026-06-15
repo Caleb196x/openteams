@@ -60,6 +60,7 @@ fn test_agent(name: &str, system_prompt: &str) -> ChatAgent {
         runner_type: "codex".to_string(),
         system_prompt: system_prompt.to_string(),
         model_name: None,
+        owner_project_id: None,
         tools_enabled: sqlx::types::Json(json!({})),
         created_at: Utc::now(),
         updated_at: Utc::now(),
@@ -107,6 +108,7 @@ async fn setup_chat_runner_db() -> DBService {
                 team_protocol_enabled INTEGER DEFAULT 0,
                 default_workspace_path TEXT,
                 chat_input_mode TEXT,
+                project_id BLOB,
                 lead_agent_id TEXT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now', 'subsec')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now', 'subsec')),
@@ -136,6 +138,8 @@ async fn setup_chat_runner_db() -> DBService {
                 pty_session_key TEXT,
                 agent_session_id TEXT,
                 agent_message_id TEXT,
+                project_member_id BLOB,
+                execution_config TEXT NOT NULL DEFAULT '{}',
                 allowed_skill_ids TEXT NOT NULL DEFAULT '[]',
                 created_at TEXT NOT NULL DEFAULT (datetime('now', 'subsec')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now', 'subsec'))
@@ -207,6 +211,7 @@ async fn insert_test_chat_agent(db: &DBService, name: &str) -> ChatAgent {
             system_prompt: Some(format!("You are {name}.")),
             tools_enabled: Some(json!({})),
             model_name: None,
+            owner_project_id: None,
         },
         Uuid::new_v4(),
     )
@@ -226,6 +231,8 @@ async fn insert_test_session_agent(
             agent_id,
             workspace_path: None,
             allowed_skill_ids: Vec::new(),
+            project_member_id: None,
+            execution_config: db::models::member_execution_config::MemberExecutionConfig::default(),
         },
         Uuid::new_v4(),
     )
@@ -326,11 +333,39 @@ fn parse_token_usage_from_codex_token_count_line() {
 }
 
 #[test]
+fn parse_token_usage_from_codex_token_count_line_keeps_model() {
+    let line = r#"{"method":"codex/event/token_count","params":{"msg":{"model":"gpt-5-codex","provider_id":"openai","thread_id":"thread-1","info":{"last_token_usage":{"input_tokens":100,"output_tokens":50},"model_context_window":258400}}}}"#;
+    let usage = ChatRunner::parse_token_usage_from_stdout_line(line).expect("usage");
+    assert_eq!(usage.total_tokens, 150);
+    assert_eq!(usage.runtime_model_id.as_deref(), Some("gpt-5-codex"));
+    assert_eq!(usage.provider_id.as_deref(), Some("openai"));
+    assert_eq!(usage.runtime_thread_id.as_deref(), Some("thread-1"));
+}
+
+#[test]
 fn parse_token_usage_from_plain_token_usage_line() {
     let line = r#"{"type":"token_usage","total_tokens":14596,"model_context_window":258400}"#;
     let usage = ChatRunner::parse_token_usage_from_stdout_line(line).expect("usage");
     assert_eq!(usage.total_tokens, 14596);
     assert_eq!(usage.model_context_window, 258400);
+}
+
+#[test]
+fn parse_token_usage_from_gemini_acp_quota_line() {
+    let line = r#"{"type":"token_usage","total_tokens":168,"model_context_window":0,"input_tokens":123,"output_tokens":45,"runtime_agent":"gemini","runtime_model_id":"gemini-3-pro-preview","provider_id":"google","usage_scope":"turn_delta"}"#;
+    let usage = ChatRunner::parse_token_usage_from_stdout_line(line).expect("usage");
+    assert_eq!(usage.total_tokens, 168);
+    assert_eq!(usage.model_context_window, 0);
+    assert_eq!(usage.input_tokens, Some(123));
+    assert_eq!(usage.output_tokens, Some(45));
+    assert_eq!(usage.runtime_agent.as_deref(), Some("gemini"));
+    assert_eq!(
+        usage.runtime_model_id.as_deref(),
+        Some("gemini-3-pro-preview")
+    );
+    assert_eq!(usage.provider_id.as_deref(), Some("google"));
+    assert_eq!(usage.usage_scope.as_deref(), Some("turn_delta"));
+    assert!(!usage.is_estimated);
 }
 
 #[test]
@@ -1179,8 +1214,18 @@ fn build_protocol_send_message_meta_includes_token_usage() {
         model_context_window: 128000,
         input_tokens: Some(1536),
         output_tokens: Some(512),
+        reasoning_output_tokens: None,
         cache_read_tokens: Some(256),
-        cache_write_tokens: None,
+        runtime_agent: Some("codex".to_string()),
+        runtime_model_id: Some("gpt-5".to_string()),
+        provider_id: Some("openai".to_string()),
+        runtime_thread_id: Some("thread-1".to_string()),
+        usage_scope: Some("turn_delta".to_string()),
+        snapshot_total_tokens: None,
+        snapshot_input_tokens: None,
+        snapshot_output_tokens: None,
+        snapshot_reasoning_output_tokens: None,
+        snapshot_cache_read_tokens: None,
         is_estimated: false,
     };
 
@@ -1349,6 +1394,7 @@ fn build_exact_markdown_prompt_matches_expected_input_template() {
             runner_type: "codex".to_string(),
             system_prompt: "You are the team \"Full-stack Engineer\". Your goal is to ship complete user-facing capabilities by aligning backend contracts, frontend behavior, and operational reliability.\n\n\n".to_string(),
             model_name: None,
+            owner_project_id: None,
             tools_enabled: sqlx::types::Json(json!({})),
             created_at,
             updated_at: created_at,
@@ -1746,6 +1792,90 @@ async fn capture_git_diff_skips_patch_when_diff_matches_run_baseline() {
     );
 }
 
+#[tokio::test]
+async fn capture_git_diff_records_only_paths_changed_since_run_baseline() {
+    let tempdir = tempfile::tempdir().expect("create tempdir");
+    let repo_path = tempdir.path().join("repo");
+    let git = GitService::new();
+    git.initialize_repo_with_main_branch(&repo_path)
+        .expect("init repo");
+
+    std::fs::write(repo_path.join("other_session.txt"), "base\n")
+        .expect("write other file");
+    std::fs::write(repo_path.join("current_session.txt"), "base\n")
+        .expect("write current file");
+    git.commit(&repo_path, "baseline").expect("commit baseline");
+
+    std::fs::write(repo_path.join("other_session.txt"), "other dirty\n")
+        .expect("modify other file");
+    let baseline = ChatRunner::capture_tracked_git_diff_snapshot(&repo_path).await;
+    assert!(
+        baseline
+            .as_deref()
+            .is_some_and(|diff| diff.contains("other_session.txt"))
+    );
+
+    std::fs::write(repo_path.join("current_session.txt"), "current dirty\n")
+        .expect("modify current file");
+
+    let run_dir = tempdir.path().join("run-record");
+    tokio::fs::create_dir_all(&run_dir)
+        .await
+        .expect("create run dir");
+    let session_agent_id = Uuid::new_v4();
+
+    let diff_info = ChatRunner::capture_git_diff(
+        &repo_path,
+        &run_dir,
+        session_agent_id,
+        1,
+        baseline.as_deref(),
+    )
+    .await
+    .expect("capture current-session diff");
+
+    assert_eq!(
+        diff_info.observed_paths,
+        vec!["current_session.txt".to_string()]
+    );
+
+    let patch = std::fs::read_to_string(run_dir.join(format!(
+        "{}_diff.patch",
+        ChatRunner::run_records_prefix(session_agent_id, 1)
+    )))
+    .expect("read filtered patch");
+    assert!(patch.contains("current_session.txt"));
+    assert!(!patch.contains("other_session.txt"));
+}
+
+#[tokio::test]
+async fn capture_untracked_files_can_be_filtered_against_run_baseline() {
+    let tempdir = tempfile::tempdir().expect("create tempdir");
+    let repo_path = tempdir.path().join("repo");
+    let git = GitService::new();
+    git.initialize_repo_with_main_branch(&repo_path)
+        .expect("init repo");
+
+    std::fs::write(repo_path.join("tracked.txt"), "base\n").expect("write tracked");
+    git.commit(&repo_path, "baseline").expect("commit baseline");
+
+    std::fs::write(repo_path.join("other_session_new.txt"), "other\n")
+        .expect("write other untracked");
+    let baseline = ChatRunner::capture_untracked_file_snapshot(&repo_path).await;
+    assert_eq!(baseline, vec!["other_session_new.txt".to_string()]);
+
+    std::fs::write(repo_path.join("current_session_new.txt"), "current\n")
+        .expect("write current untracked");
+    let after = ChatRunner::capture_untracked_file_snapshot(&repo_path).await;
+    let baseline_set = baseline.iter().collect::<std::collections::HashSet<_>>();
+    let filtered = after
+        .into_iter()
+        .filter(|path| !baseline_set.contains(path))
+        .collect::<Vec<_>>();
+
+    assert_eq!(filtered, vec!["current_session_new.txt".to_string()]);
+}
+
 #[test]
 fn resolve_session_team_protocol_returns_enabled_session_content_only() {
     let now = Utc::now();
@@ -1761,6 +1891,7 @@ fn resolve_session_team_protocol_returns_enabled_session_content_only() {
         team_protocol_enabled: true,
         default_workspace_path: None,
         chat_input_mode: None,
+        project_id: None,
         created_at: now,
         updated_at: now,
         archived_at: None,
@@ -1787,6 +1918,7 @@ fn resolve_session_team_protocol_ignores_disabled_or_empty_session_content() {
         team_protocol_enabled: false,
         default_workspace_path: None,
         chat_input_mode: None,
+        project_id: None,
         created_at: now,
         updated_at: now,
         archived_at: None,
@@ -1803,6 +1935,7 @@ fn resolve_session_team_protocol_ignores_disabled_or_empty_session_content() {
         team_protocol_enabled: true,
         default_workspace_path: None,
         chat_input_mode: None,
+        project_id: None,
         created_at: now,
         updated_at: now,
         archived_at: None,

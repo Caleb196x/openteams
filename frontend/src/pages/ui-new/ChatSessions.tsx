@@ -1,5 +1,6 @@
 import {
   type ChangeEvent,
+  type WheelEvent,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -7,7 +8,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { UsersThreeIcon, CaretDoubleDownIcon } from '@phosphor-icons/react';
+import { CaretRightIcon, CaretDoubleDownIcon } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -450,6 +451,8 @@ const COLLAPSED_LEFT_SIDEBAR_WIDTH = 52;
 const MESSAGE_SEARCH_HIGHLIGHT_NAME = 'chat-session-search-highlight';
 const MAX_MESSAGE_SEARCH_HIGHLIGHT_RANGES = 4000;
 const MESSAGE_SEARCH_DEBOUNCE_MS = 120;
+const MESSAGE_SCROLL_NEW_MESSAGE_THRESHOLD_PX = 100;
+const MESSAGE_SCROLL_BOTTOM_THRESHOLD_PX = 8;
 const UNTITLED_SESSION_TITLES = new Set([
   'untitled session',
   'unnamed session',
@@ -919,6 +922,10 @@ export function ChatSessions() {
   const { t: tCommon } = useTranslation('common');
   const { sessionId } = useParams<{ sessionId?: string }>();
   const navigate = useNavigate();
+  const routeSessionId = sessionId ?? null;
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
+    () => routeSessionId
+  );
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -955,6 +962,12 @@ export function ChatSessions() {
     [toast]
   );
 
+  useEffect(() => {
+    if (!routeSessionId) return;
+    setSelectedSessionId(routeSessionId);
+    navigate('/', { replace: true });
+  }, [navigate, routeSessionId]);
+
   // Data queries
   const {
     sortedSessions,
@@ -969,18 +982,19 @@ export function ChatSessions() {
     mentionAgents,
     isSessionsLoading,
     isLoading,
-  } = useChatData(sessionId ?? null);
+  } = useChatData(selectedSessionId);
 
   const activeSessionExists = useMemo(
     () =>
-      !!sessionId && sortedSessions.some((session) => session.id === sessionId),
-    [sessionId, sortedSessions]
+      !!selectedSessionId &&
+      sortedSessions.some((session) => session.id === selectedSessionId),
+    [selectedSessionId, sortedSessions]
   );
-  const activeSessionId = sessionId
+  const activeSessionId = selectedSessionId
     ? isSessionsLoading || activeSessionExists
-      ? sessionId
+      ? selectedSessionId
       : null
-    : (sortedSessions[0]?.id ?? null);
+    : null;
   const activeSession = useMemo(
     () => sortedSessions.find((session) => session.id === activeSessionId),
     [sortedSessions, activeSessionId]
@@ -1339,9 +1353,9 @@ export function ChatSessions() {
           status: 'succeeded',
         }
       );
-      navigate(`/chat/${session.id}`);
+      setSelectedSessionId(session.id);
     },
-    (session) => navigate(`/chat/${session.id}`),
+    (session) => setSelectedSessionId(session.id),
     upsertMessage,
     () => {
       if (activeSessionId) {
@@ -1350,8 +1364,10 @@ export function ChatSessions() {
         });
       }
     },
-    () => {
-      navigate('/chat');
+    (deletedSessionId) => {
+      setSelectedSessionId((current) =>
+        current === deletedSessionId ? null : current
+      );
     }
   );
 
@@ -2619,6 +2635,7 @@ export function ChatSessions() {
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
   const [hasNewMessages, setHasNewMessages] = useState(false);
   const isUserScrolledUpRef = useRef(false);
+  const autoFollowMessagesRef = useRef(true);
   const prevLastTimelineEntryKeyRef = useRef<string | null>(null);
   const scrollMessagesToBottom = useCallback(
     (behavior: ScrollBehavior = 'auto') => {
@@ -2632,6 +2649,33 @@ export function ChatSessions() {
         behavior,
         block: 'end',
       });
+    },
+    []
+  );
+  const syncMessageScrollState = useCallback((container: HTMLDivElement) => {
+    const { scrollTop, scrollHeight, clientHeight } = container;
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+    const isAtBottom = distanceFromBottom <= MESSAGE_SCROLL_BOTTOM_THRESHOLD_PX;
+    const scrolledUp =
+      distanceFromBottom > MESSAGE_SCROLL_NEW_MESSAGE_THRESHOLD_PX;
+
+    autoFollowMessagesRef.current = isAtBottom;
+
+    const shouldTreatAsScrolledUp =
+      !autoFollowMessagesRef.current || scrolledUp;
+    isUserScrolledUpRef.current = shouldTreatAsScrolledUp;
+    setIsUserScrolledUp(shouldTreatAsScrolledUp);
+    if (!shouldTreatAsScrolledUp) {
+      setHasNewMessages(false);
+    }
+  }, []);
+  const handleMessagesWheel = useCallback(
+    (event: WheelEvent<HTMLDivElement>) => {
+      if (event.deltaY >= 0) return;
+
+      autoFollowMessagesRef.current = false;
+      isUserScrolledUpRef.current = true;
+      setIsUserScrolledUp(true);
     },
     []
   );
@@ -2846,32 +2890,31 @@ export function ChatSessions() {
     createSession.mutate(undefined);
   }, [createSession, isSessionsLoading, sortedSessions.length]);
 
-  // Navigate to first session if needed
+  // Keep the selected session valid without reflecting it in the URL.
   useEffect(() => {
     if (isSessionsLoading || isSkillsPanelOpen) return;
 
-    if (!sessionId && sortedSessions.length > 0) {
-      navigate(`/chat/${sortedSessions[0].id}`, { replace: true });
+    if (!selectedSessionId && sortedSessions.length > 0) {
+      setSelectedSessionId(sortedSessions[0].id);
       return;
     }
 
-    if (sessionId && sortedSessions.length === 0) {
-      navigate('/chat', { replace: true });
+    if (selectedSessionId && sortedSessions.length === 0) {
+      setSelectedSessionId(null);
       return;
     }
 
     if (
-      sessionId &&
+      selectedSessionId &&
       sortedSessions.length > 0 &&
-      !sortedSessions.some((session) => session.id === sessionId)
+      !sortedSessions.some((session) => session.id === selectedSessionId)
     ) {
-      navigate(`/chat/${sortedSessions[0].id}`, { replace: true });
+      setSelectedSessionId(sortedSessions[0].id);
     }
   }, [
     isSessionsLoading,
     isSkillsPanelOpen,
-    navigate,
-    sessionId,
+    selectedSessionId,
     sortedSessions,
   ]);
 
@@ -3906,19 +3949,12 @@ export function ChatSessions() {
     if (!container) return;
 
     const handleScroll = () => {
-      const { scrollTop, scrollHeight, clientHeight } = container;
-      const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-      const scrolledUp = distanceFromBottom > 100;
-      isUserScrolledUpRef.current = scrolledUp;
-      setIsUserScrolledUp(scrolledUp);
-      if (!scrolledUp) {
-        setHasNewMessages(false);
-      }
+      syncMessageScrollState(container);
     };
 
     container.addEventListener('scroll', handleScroll, { passive: true });
     return () => container.removeEventListener('scroll', handleScroll);
-  }, [activeSessionId]);
+  }, [activeSessionId, syncMessageScrollState]);
 
   // Auto-scroll (skip when user is viewing history; streaming/running changes are not "new messages")
   useLayoutEffect(() => {
@@ -3941,6 +3977,7 @@ export function ChatSessions() {
       setIsUserScrolledUp(false);
       setHasNewMessages(false);
       isUserScrolledUpRef.current = false;
+      autoFollowMessagesRef.current = true;
       scrollMessagesToBottom('auto');
       if (!isLoading || lastTimelineEntryKey) {
         pendingSessionBottomScrollRef.current = null;
@@ -3948,7 +3985,7 @@ export function ChatSessions() {
       return;
     }
 
-    if (isUserScrolledUpRef.current) {
+    if (!autoFollowMessagesRef.current || isUserScrolledUpRef.current) {
       // Only show "new messages" badge for actual new messages, not streaming/running updates
       if (isNewTimelineEntry) {
         setHasNewMessages(true);
@@ -5315,7 +5352,7 @@ export function ChatSessions() {
 
     const name = newMemberName.trim();
     const runnerType = newMemberRunnerType.trim();
-    const prompt = newMemberPrompt.trim().length > 0 ? newMemberPrompt : ' ';
+    const prompt = newMemberPrompt.trim().length > 0 ? newMemberPrompt : '';
     const workspacePathVal = newMemberWorkspace.trim();
     const selectedVariant = newMemberVariant.trim() || 'DEFAULT';
     const normalizedSelectedSkillIds =
@@ -5455,7 +5492,7 @@ export function ChatSessions() {
         if (
           updatePayload.name ||
           updatePayload.runner_type ||
-          updatePayload.system_prompt ||
+          promptChanged ||
           updatePayload.tools_enabled
         ) {
           await chatApi.updateAgent(agentId, updatePayload);
@@ -5821,7 +5858,7 @@ export function ChatSessions() {
             return next;
           });
           setIsSkillsPanelOpen(false);
-          navigate(`/chat/${id}`);
+          setSelectedSessionId(id);
         }}
         onCreateSession={async () => {
           setIsSkillsPanelOpen(false);
@@ -5843,9 +5880,6 @@ export function ChatSessions() {
             return;
           }
           setIsSkillsPanelOpen(true);
-          if (sessionId) {
-            navigate('/chat');
-          }
         }}
         onOpenSettings={() => {
           SettingsDialog.show();
@@ -5892,12 +5926,12 @@ export function ChatSessions() {
         }}
         onEditSessionTitle={(id) => {
           setIsSkillsPanelOpen(false);
-          navigate(`/chat/${id}`);
+          setSelectedSessionId(id);
           setTimeout(() => setIsEditingTitle(true), 100);
         }}
         onToggleCleanupMode={(id) => {
           setIsSkillsPanelOpen(false);
-          navigate(`/chat/${id}`);
+          setSelectedSessionId(id);
           setTimeout(() => setIsCleanupMode(true), 100);
         }}
         isArchiving={archiveSession.isPending || restoreSession.isPending}
@@ -6069,6 +6103,7 @@ export function ChatSessions() {
                 <div
                   ref={messagesContainerRef}
                   className="chat-session-messages flex-1 min-h-0 overflow-y-auto p-base pb-[40px] space-y-base"
+                  onWheel={handleMessagesWheel}
                 >
                   <div className="chat-session-message-column space-y-double">
                     {isLoading && (
@@ -6384,6 +6419,9 @@ export function ChatSessions() {
                             behavior: 'smooth',
                             block: 'end',
                           });
+                          autoFollowMessagesRef.current = true;
+                          isUserScrolledUpRef.current = false;
+                          setIsUserScrolledUp(false);
                           setHasNewMessages(false);
                         }}
                         className="flex items-center gap-1 rounded-full bg-white px-3 py-1 text-[10px] font-bold text-[#5094fb] shadow-md border border-[#e0e7ef] hover:bg-[#f5f8ff] transition-colors"
@@ -6478,7 +6516,8 @@ export function ChatSessions() {
             title={t('header.openMembersPanel')}
           >
             <span className="chat-session-right-collapsed-toggle-icon">
-              <UsersThreeIcon className="size-icon-xs" />
+              <CaretRightIcon className="size-icon-xs" />
+              <CaretRightIcon className="size-icon-xs -ml-1.5" />
             </span>
             <span>
               {sessionMembers.length} {t('header.aiMembers')}

@@ -164,8 +164,18 @@ impl ChatRunner {
                 "model_context_window": token_usage.model_context_window,
                 "input_tokens": token_usage.input_tokens,
                 "output_tokens": token_usage.output_tokens,
+                "reasoning_output_tokens": token_usage.reasoning_output_tokens,
                 "cache_read_tokens": token_usage.cache_read_tokens,
-                "cache_write_tokens": token_usage.cache_write_tokens,
+                "runtime_agent": token_usage.runtime_agent,
+                "runtime_model_id": token_usage.runtime_model_id,
+                "provider_id": token_usage.provider_id,
+                "runtime_thread_id": token_usage.runtime_thread_id,
+                "usage_scope": token_usage.usage_scope,
+                "snapshot_total_tokens": token_usage.snapshot_total_tokens,
+                "snapshot_input_tokens": token_usage.snapshot_input_tokens,
+                "snapshot_output_tokens": token_usage.snapshot_output_tokens,
+                "snapshot_reasoning_output_tokens": token_usage.snapshot_reasoning_output_tokens,
+                "snapshot_cache_read_tokens": token_usage.snapshot_cache_read_tokens,
                 "is_estimated": token_usage.is_estimated,
             });
         }
@@ -1063,9 +1073,11 @@ impl ChatRunner {
             return Ok(());
         }
 
+        let member_names = chat::member_name_overrides_for_session(pool, session_id).await?;
         let mut agents = Vec::with_capacity(session_agents.len());
         for session_agent in &session_agents {
-            if let Some(agent) = ChatAgent::find_by_id(pool, session_agent.agent_id).await? {
+            if let Some(mut agent) = ChatAgent::find_by_id(pool, session_agent.agent_id).await? {
+                chat::apply_effective_agent_name(&mut agent, &member_names);
                 agents.push(agent);
             }
         }

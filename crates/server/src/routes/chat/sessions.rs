@@ -19,6 +19,7 @@ use db::models::{
     chat_run::ChatRun,
     chat_session::{ChatSession, ChatSessionStatus, CreateChatSession, UpdateChatSession},
     chat_session_agent::{ChatSessionAgent, CreateChatSessionAgent},
+    member_execution_config::MemberExecutionConfig,
 };
 use deployment::Deployment;
 use git::{Commit, DiffTarget, GitCli, GitService};
@@ -26,7 +27,8 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use services::services::{
     analytics_events::{AnalyticsProjector, DomainEvent},
-    workflow_analytics::{self, hash_user_id},
+    chat::create_session_with_project_members,
+    workflow::workflow_analytics::{self, hash_user_id},
 };
 use sqlx::FromRow;
 use ts_rs::TS;
@@ -42,13 +44,15 @@ use crate::{DeploymentImpl, error::ApiError};
 #[derive(Debug, Deserialize, TS)]
 pub struct ChatSessionListQuery {
     pub status: Option<ChatSessionStatus>,
+    pub project_id: Option<Uuid>,
 }
 
 pub async fn get_sessions(
     State(deployment): State<DeploymentImpl>,
     Query(query): Query<ChatSessionListQuery>,
 ) -> Result<ResponseJson<ApiResponse<Vec<ChatSession>>>, ApiError> {
-    let sessions = ChatSession::find_all(&deployment.db().pool, query.status).await?;
+    let sessions =
+        ChatSession::find_all(&deployment.db().pool, query.status, query.project_id).await?;
     Ok(ResponseJson(ApiResponse::success(sessions)))
 }
 
@@ -62,7 +66,9 @@ pub async fn create_session(
     State(deployment): State<DeploymentImpl>,
     Json(payload): Json<CreateChatSession>,
 ) -> Result<ResponseJson<ApiResponse<ChatSession>>, ApiError> {
-    let session = ChatSession::create(&deployment.db().pool, &payload, Uuid::new_v4()).await?;
+    let session =
+        create_session_with_project_members(&deployment.db().pool, &payload, Uuid::new_v4())
+            .await?;
     let user_id_hash = hash_user_id(deployment.user_id());
     workflow_analytics::track_session_created(
         workflow_analytics::analytics_if_enabled(
@@ -190,7 +196,7 @@ pub struct WorkspaceChanges {
     pub modified: Vec<WorkspaceChangedFile>,
     pub added: Vec<WorkspaceChangedFile>,
     pub deleted: Vec<WorkspacePathEntry>,
-    pub untracked: Vec<WorkspacePathEntry>,
+    pub untracked: Vec<WorkspaceChangedFile>,
 }
 
 #[derive(Debug, Clone, Serialize, TS)]
@@ -325,7 +331,9 @@ fn build_workspace_changes(
         }
 
         if untracked_paths.contains(&path) {
-            changes.untracked.push(WorkspacePathEntry { path });
+            changes
+                .untracked
+                .push(diff_to_workspace_changed_file(diff, path, include_diff));
             continue;
         }
 
@@ -1356,6 +1364,8 @@ pub async fn create_session_agent(
             agent_id: payload.agent_id,
             workspace_path,
             allowed_skill_ids,
+            project_member_id: None,
+            execution_config: MemberExecutionConfig::default(),
         },
         Uuid::new_v4(),
     )
@@ -1826,6 +1836,7 @@ mod tests {
             team_protocol_enabled: false,
             default_workspace_path: default_workspace_path.map(str::to_string),
             chat_input_mode: None,
+            project_id: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             archived_at: None,
@@ -1959,7 +1970,7 @@ mod tests {
     }
 
     #[test]
-    fn build_workspace_changes_splits_untracked_from_added() {
+    fn build_workspace_changes_keeps_untracked_diff_payloads() {
         let changes = build_workspace_changes(
             vec![
                 Diff {
@@ -2023,11 +2034,17 @@ mod tests {
                 path: "src/old.ts".to_string()
             }]
         );
-        assert_eq!(
-            changes.untracked,
-            vec![WorkspacePathEntry {
-                path: "tmp/debug.log".to_string()
-            }]
+        assert_eq!(changes.untracked.len(), 1);
+        assert_eq!(changes.untracked[0].path, "tmp/debug.log");
+        assert_eq!(changes.untracked[0].additions, 1);
+        assert_eq!(changes.untracked[0].deletions, 0);
+        assert!(changes.untracked[0].has_diff);
+        assert!(
+            changes.untracked[0]
+                .unified_diff
+                .as_deref()
+                .unwrap_or_default()
+                .contains("+debug")
         );
     }
 
@@ -2102,11 +2119,16 @@ mod tests {
                 .iter()
                 .all(|entry| entry.path != "outside.txt")
         );
-        assert_eq!(
-            changes.untracked,
-            vec![WorkspacePathEntry {
-                path: "untracked.txt".to_string()
-            }]
+        assert_eq!(changes.untracked.len(), 1);
+        assert_eq!(changes.untracked[0].path, "untracked.txt");
+        assert_eq!(changes.untracked[0].additions, 1);
+        assert!(changes.untracked[0].has_diff);
+        assert!(
+            changes.untracked[0]
+                .unified_diff
+                .as_deref()
+                .unwrap_or_default()
+                .contains("+untracked")
         );
     }
 
