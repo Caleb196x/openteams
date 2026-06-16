@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ScrollArea } from "@/components/ScrollArea";
+import { useWorkspace } from "@/context/WorkspaceContext";
 import { projectSourceControlApi } from "@/lib/api";
 import { parseUnifiedDiff, alignSplitLines } from "@/lib/parseDiff";
 import type { DiffLine, DiffHunk, SplitRow } from "@/lib/parseDiff";
@@ -168,6 +169,7 @@ export const DiffViewTab: React.FC<DiffViewTabProps> = ({
   const sourceSessionId = sourceControlRef?.sessionId;
   const sourceFilePath = sourceControlRef?.filePath;
   const sourceArea = sourceControlRef?.area;
+  const { sourceControlRefreshKey } = useWorkspace();
 
   useEffect(() => {
     if (!sourceProjectId || !sourceSessionId || !sourceFilePath || !sourceArea) {
@@ -203,7 +205,13 @@ export const DiffViewTab: React.FC<DiffViewTabProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [sourceArea, sourceFilePath, sourceProjectId, sourceSessionId]);
+  }, [
+    sourceArea,
+    sourceControlRefreshKey,
+    sourceFilePath,
+    sourceProjectId,
+    sourceSessionId,
+  ]);
 
   const effectiveFilePath =
     sourceDiff?.path ?? sourceFilePath ?? filePath ?? "";

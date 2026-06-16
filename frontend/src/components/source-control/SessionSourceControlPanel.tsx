@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronRight,
   Info,
@@ -34,6 +34,7 @@ interface SessionSourceControlPanelProps {
   projectId: string | null;
   sessionId: string | null;
   enabled: boolean;
+  refreshKey?: number;
   fallbackRelatedFiles: React.ReactNode;
   linkedWorkItemIds?: string[];
   onOpenDiff: (
@@ -217,6 +218,7 @@ export const SessionSourceControlPanel: React.FC<
   projectId,
   sessionId,
   enabled,
+  refreshKey,
   fallbackRelatedFiles,
   linkedWorkItemIds = [],
   onOpenDiff,
@@ -232,6 +234,7 @@ export const SessionSourceControlPanel: React.FC<
     discard,
     commit,
   } = useSessionSourceControl({ projectId, sessionId, enabled });
+  const lastRefreshKeyRef = useRef(refreshKey);
   const [commitMessage, setCommitMessage] = useState("");
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -241,6 +244,16 @@ export const SessionSourceControlPanel: React.FC<
   const [commitListExpanded, setCommitListExpanded] = useState(true);
   const [confirmDialog, setConfirmDialog] =
     useState<SourceControlConfirmDialogState | null>(null);
+
+  useEffect(() => {
+    if (refreshKey === undefined || lastRefreshKeyRef.current === refreshKey) {
+      return;
+    }
+    lastRefreshKeyRef.current = refreshKey;
+    if (enabled) {
+      void refresh();
+    }
+  }, [enabled, refresh, refreshKey]);
 
   const viewModel = useMemo(
     () => buildSourceControlViewModel(status, t),

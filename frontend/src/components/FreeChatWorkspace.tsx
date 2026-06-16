@@ -721,6 +721,7 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
     refreshMembers,
     chatMessageFontSize,
     workspaceChangesAsync,
+    sourceControlRefreshKey,
     refreshWorkspaceChanges,
     resetWorkspaceChanges,
     projects,
@@ -2503,6 +2504,7 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
               projectId={selectedProjectId || null}
               sessionId={activeSessionId || null}
               enabled={Boolean(selectedProjectId && activeSessionId)}
+              refreshKey={sourceControlRefreshKey}
               fallbackRelatedFiles={plainRelatedFilesContent}
               linkedWorkItemIds={linkedWorkItems.map((item) => item.id)}
               onOpenDiff={(projectId, sessionId, filePath, area) => {
