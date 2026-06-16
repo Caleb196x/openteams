@@ -1073,6 +1073,7 @@ function WorkspaceLayout() {
           routeMentions,
           fallbackMention,
           workflowLeadAgentId,
+          persistToBackend: true,
         });
       }
 

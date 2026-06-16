@@ -98,6 +98,7 @@ interface SendMessageOptions {
   routeMentions?: string[];
   fallbackMention?: string | null;
   workflowLeadAgentId?: string | null;
+  persistToBackend?: boolean;
 }
 
 export type ToastTone = 'info' | 'success' | 'warning' | 'error';
@@ -135,6 +136,8 @@ type ChatStreamEvent =
       agent_id: string;
       agent_name: string;
       run_id: string;
+      source_message_id: string;
+      client_message_id: string | null;
       started_at: string | null;
     }
   | {
@@ -150,7 +153,16 @@ type ChatStreamEvent =
       session_agent_id: string;
       agent_id: string;
       state: string;
+      run_id: string | null;
       started_at: string | null;
+    }
+  | {
+      type: 'mention_error';
+      session_id: string;
+      message_id: string;
+      agent_name: string;
+      agent_id: string | null;
+      reason: string;
     }
   | {
       type: 'workflow_runtime_line';
@@ -238,17 +250,48 @@ const userMessageClientId = (message: Message): string | undefined =>
   message.clientMessageId ??
   (isOptimisticUserMessage(message) ? message.id : undefined);
 
+type PendingPlaceholderMatch = {
+  sessionAgentId?: string;
+  clientMessageId?: string | null;
+  sourceMessageId?: string | null;
+};
+
+const normalizePendingPlaceholderMatch = (
+  match?: string | PendingPlaceholderMatch,
+): PendingPlaceholderMatch => {
+  if (typeof match === 'string') return { sessionAgentId: match };
+  return match ?? {};
+};
+
+const pendingPlaceholderMatches = (
+  message: Message,
+  match: PendingPlaceholderMatch,
+): boolean => {
+  if (!isPendingAgentPlaceholder(message)) return false;
+  if (match.clientMessageId && message.clientMessageId === match.clientMessageId) {
+    return true;
+  }
+  if (match.sourceMessageId && message.sourceMessageId === match.sourceMessageId) {
+    return true;
+  }
+  if (match.sessionAgentId && message.sessionAgentId === match.sessionAgentId) {
+    return true;
+  }
+  return false;
+};
+
 const findPendingAgentPlaceholderIndex = (
   messages: Message[],
-  sessionAgentId?: string,
+  match?: string | PendingPlaceholderMatch,
 ): number => {
-  if (sessionAgentId) {
+  const normalized = normalizePendingPlaceholderMatch(match);
+  if (
+    normalized.clientMessageId ||
+    normalized.sourceMessageId ||
+    normalized.sessionAgentId
+  ) {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
-      const message = messages[index];
-      if (
-        isPendingAgentPlaceholder(message) &&
-        message.sessionAgentId === sessionAgentId
-      ) {
+      if (pendingPlaceholderMatches(messages[index], normalized)) {
         return index;
       }
     }
@@ -438,6 +481,7 @@ const makePendingAgentPlaceholder = (
     text: '',
     isThinking: true,
     isAgentRunning: true,
+    clientMessageId: userMsgId,
     sessionAgentId: fallbackMember?.id,
     activityLines: [],
     activityLoadState: 'loaded',
@@ -517,7 +561,7 @@ const mergePersistedWithRunningPlaceholders = (
 
     if (!message.isAgentRunning || persistedIds.has(message.id)) continue;
     if (message.runId && persistedRunIds.has(message.runId)) continue;
-    const key = `agent:${message.runId ?? message.id}`;
+    const key = `agent:${message.runId ?? message.clientMessageId ?? message.id}`;
     if (message.runId) hasRunIdPlaceholder = true;
     const existing = carriedMessagesByKey.get(key);
     const existingLineCount = existing?.activityLines?.length ?? 0;
@@ -527,11 +571,16 @@ const mergePersistedWithRunningPlaceholders = (
     }
   }
 
-  // If a real run placeholder exists, discard any pending placeholders (no runId)
-  // to avoid showing duplicates.
+  // If a real run placeholder exists, discard only hydrated pending placeholders
+  // (no runId). Keep optimistic pending placeholders because they can represent
+  // a newly queued message for the same agent while another run is active.
   if (hasRunIdPlaceholder) {
     for (const [key, message] of carriedMessagesByKey) {
-      if (!message.runId && isPendingAgentPlaceholder(message)) {
+      if (
+        !message.runId &&
+        isPendingAgentPlaceholder(message) &&
+        !isOptimisticPendingAgentPlaceholder(message)
+      ) {
         carriedMessagesByKey.delete(key);
       }
     }
@@ -1569,6 +1618,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
         let carriedLines: ChatRunActivityLine[] | undefined;
         let carriedState = incoming.activityLoadState;
         let carriedSessionAgentId = incoming.sessionAgentId;
+        let carriedSourceMessageId = incoming.sourceMessageId;
+        let carriedClientMessageId = incoming.clientMessageId;
         const hasMatchingRun = Boolean(
           incoming.runId &&
           current.some(
@@ -1576,8 +1627,19 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
               message.runId === incoming.runId && message.isAgentRunning,
           ),
         );
+        const hasMatchingClientMessage = Boolean(
+          !incoming.isUser &&
+            incoming.clientMessageId &&
+            current.some(
+              (message) =>
+                message.isAgentRunning &&
+                message.clientMessageId === incoming.clientMessageId,
+            ),
+        );
         const hasMatchingSessionAgent = Boolean(
           !incoming.isUser &&
+            !hasMatchingRun &&
+            !hasMatchingClientMessage &&
             incoming.sessionAgentId &&
             current.some(
               (message) =>
@@ -1586,17 +1648,32 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
             ),
         );
         const fallbackPendingIndex =
-          !incoming.isUser && !hasMatchingRun && !hasMatchingSessionAgent
-            ? findPendingAgentPlaceholderIndex(current, incoming.sessionAgentId)
+          !incoming.isUser &&
+          !hasMatchingRun &&
+          !hasMatchingClientMessage &&
+          !hasMatchingSessionAgent
+            ? findPendingAgentPlaceholderIndex(current, {
+                sessionAgentId: incoming.sessionAgentId,
+                clientMessageId: incoming.clientMessageId,
+                sourceMessageId: incoming.sourceMessageId,
+              })
             : -1;
         const withoutPlaceholder = current.filter((message) => {
           const isMatchingRun =
             incoming.runId &&
             message.runId === incoming.runId &&
             message.isAgentRunning;
+          const isMatchingClientMessage =
+            !incoming.isUser &&
+            !isMatchingRun &&
+            hasMatchingClientMessage &&
+            incoming.clientMessageId &&
+            message.isAgentRunning &&
+            message.clientMessageId === incoming.clientMessageId;
           const isMatchingSessionAgent =
             !incoming.isUser &&
             !isMatchingRun &&
+            !isMatchingClientMessage &&
             hasMatchingSessionAgent &&
             incoming.sessionAgentId &&
             message.isAgentRunning &&
@@ -1607,11 +1684,20 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
             !hasMatchingSessionAgent &&
             fallbackPendingIndex >= 0 &&
             current[fallbackPendingIndex]?.id === message.id;
-          if (isMatchingRun || isMatchingSessionAgent || isPendingRun) {
+          if (
+            isMatchingRun ||
+            isMatchingClientMessage ||
+            isMatchingSessionAgent ||
+            isPendingRun
+          ) {
             carriedLines = message.activityLines;
             carriedState = message.activityLoadState ?? 'loaded';
             carriedSessionAgentId =
               carriedSessionAgentId ?? message.sessionAgentId;
+            carriedSourceMessageId =
+              carriedSourceMessageId ?? message.sourceMessageId;
+            carriedClientMessageId =
+              carriedClientMessageId ?? message.clientMessageId;
             return false;
           }
           return true;
@@ -1621,6 +1707,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
           activityLines: carriedLines ?? incoming.activityLines,
           activityLoadState: carriedState,
           sessionAgentId: carriedSessionAgentId,
+          sourceMessageId: carriedSourceMessageId,
+          clientMessageId: carriedClientMessageId,
           isAgentRunning: undefined,
           isThinking: undefined,
         };
@@ -1639,7 +1727,19 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
                 index === existingIndex ? nextMessage : message,
               )
             : [...withoutPlaceholder, nextMessage];
-        return { ...prev, [sid]: resolveQuotedMessageReferences(next) };
+        const correlatedNext =
+          nextMessage.isUser && nextClientMessageId
+            ? next.map((message) =>
+                isPendingAgentPlaceholder(message) &&
+                message.clientMessageId === nextClientMessageId
+                  ? { ...message, sourceMessageId: nextMessage.id }
+                  : message,
+              )
+            : next;
+        return {
+          ...prev,
+          [sid]: resolveQuotedMessageReferences(correlatedNext),
+        };
       });
     },
     [],
@@ -1712,7 +1812,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
       );
       const pendingIndex = findPendingAgentPlaceholderIndex(
         pruned,
-        line.session_agent_id,
+        { sessionAgentId: line.session_agent_id },
       );
       if (pendingIndex >= 0) {
         const next = pruned.map((message, index) =>
@@ -1749,6 +1849,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
           isAgentRunning: true,
           runId: event.run_id,
           sessionAgentId: event.session_agent_id,
+          sourceMessageId: event.source_message_id,
+          clientMessageId: event.client_message_id ?? undefined,
           activityLines: [],
           activityLoadState: 'idle',
         };
@@ -1759,10 +1861,11 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
           event.session_agent_id,
           event.run_id,
         );
-        const pendingIndex = findPendingAgentPlaceholderIndex(
-          pruned,
-          event.session_agent_id,
-        );
+        const pendingIndex = findPendingAgentPlaceholderIndex(pruned, {
+          sessionAgentId: event.session_agent_id,
+          sourceMessageId: event.source_message_id,
+          clientMessageId: event.client_message_id,
+        });
         if (pendingIndex >= 0) {
           const next = pruned.map((message, index) =>
             index === pendingIndex ? placeholder : message,
@@ -1892,7 +1995,9 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
         void refreshMembers();
 
         // When an agent leaves an active run state,
-        // clear any lingering running/thinking placeholder messages for it.
+        // clear only placeholders tied to that concrete run. Optimistic
+        // pending placeholders represent newly sent/queued messages and must
+        // survive stale idle/dead events from an earlier run.
         if (!isActiveAgentState(parsed.state)) {
           optimisticallyStoppedSessionAgentIdsRef.current.delete(
             parsed.session_agent_id,
@@ -1904,13 +2009,34 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
               (msg) =>
                 !(
                   msg.isAgentRunning &&
-                  msg.sessionAgentId === parsed.session_agent_id
+                  msg.sessionAgentId === parsed.session_agent_id &&
+                  !isOptimisticPendingAgentPlaceholder(msg) &&
+                  (!parsed.run_id ||
+                    !msg.runId ||
+                    msg.runId === parsed.run_id)
                 ),
             );
             if (updated.length === current.length) return prev;
             return { ...prev, [sid]: updated };
           });
         }
+        return;
+      }
+
+      if (parsed.type === 'mention_error' && parsed.session_id === sid) {
+        setAllMessages((prev) => {
+          const current = prev[sid];
+          if (!current) return prev;
+          const updated = current.filter(
+            (msg) =>
+              !(
+                isOptimisticPendingAgentPlaceholder(msg) &&
+                msg.sourceMessageId === parsed.message_id
+              ),
+          );
+          if (updated.length === current.length) return prev;
+          return { ...prev, [sid]: updated };
+        });
       }
     };
 
@@ -2107,7 +2233,9 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
     text: string,
     options: SendMessageOptions = {},
   ) => {
-    if (!sessionId || sessionsAsync.source !== 'api') return;
+    const shouldUseBackend =
+      sessionsAsync.source === 'api' || options.persistToBackend === true;
+    if (!sessionId || !shouldUseBackend) return;
     const fallbackMention =
       options.fallbackMention ??
       (options.routeMentions && options.routeMentions.length > 0
@@ -2193,8 +2321,10 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
       quotedMessage: options.quotedMessage,
       referenceMessageId: options.quotedMessage?.id,
     };
+    const shouldPersistToBackend =
+      sessionsAsync.source === 'api' || options.persistToBackend === true;
     const pendingAgentMsg =
-      sessionsAsync.source === 'api'
+      shouldPersistToBackend
         ? makePendingAgentPlaceholder(
             text,
             userMsgId,
@@ -2224,7 +2354,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
     });
 
     // Mock-only session (e.g., backend offline): use the local cascade.
-    if (sessionsAsync.source !== 'api') {
+    if (!shouldPersistToBackend) {
       dispatchMockReply(text, sid);
       return;
     }
