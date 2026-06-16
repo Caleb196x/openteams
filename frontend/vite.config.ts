@@ -1,10 +1,30 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import {defineConfig} from 'vite';
+import {createLogger, defineConfig, type LogErrorOptions} from 'vite';
+
+const logger = createLogger();
+const defaultError = logger.error.bind(logger);
+
+const isIgnorableWsProxyReset = (
+  message: string,
+  options?: LogErrorOptions,
+) => {
+  const errorCode = (
+    options?.error as (Error & {code?: string}) | null | undefined
+  )?.code;
+
+  return errorCode === 'ECONNRESET' && message.includes('ws proxy error:');
+};
+
+logger.error = (message, options) => {
+  if (isIgnorableWsProxyReset(message, options)) return;
+  defaultError(message, options);
+};
 
 export default defineConfig(() => {
   return {
+    customLogger: logger,
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
