@@ -1179,11 +1179,22 @@ export function IssueDetailPage({
           if (option) handleAssignSession(option.value);
           return;
         }
-        const option = filterMenuOptions(
+        const trimmedLabelQuery = labelQuery.trim();
+        const labelOptions = filterMenuOptions(
           buildLabelMenuOptions(labelDraftToList(labelDraft), tr),
           labelQuery,
-        )[0];
-        if (option) handleLabelMenuSelect(option.value);
+        );
+        const exactLabelMatch = labelOptions.find(
+          (candidate) =>
+            labelKey(candidate.value) === labelKey(trimmedLabelQuery),
+        );
+        if (exactLabelMatch) {
+          handleLabelMenuSelect(exactLabelMatch.value);
+        } else if (trimmedLabelQuery) {
+          handleLabelMenuSelect(trimmedLabelQuery);
+        } else if (labelOptions[0]) {
+          handleLabelMenuSelect(labelOptions[0].value);
+        }
         return;
       }
 
@@ -2691,6 +2702,12 @@ function LabelDropdown({
   const hasLabels = labels.length > 0;
   const addLabelLabel = tr('issue.detail.addLabel', 'Add label');
   const savingLabelsLabel = tr('issue.detail.savingLabels', 'Saving labels');
+  const createLabelValue = query.trim();
+  const canCreateLabel =
+    createLabelValue !== '' &&
+    !options.some(
+      (option) => labelKey(option.value) === labelKey(createLabelValue),
+    );
 
   return (
     <div ref={menuRef} className="relative">
@@ -2795,8 +2812,30 @@ function LabelDropdown({
                   </button>
                 );
               })
-            ) : (
+            ) : canCreateLabel ? null : (
               <CommandNoMatches tr={tr} />
+            )}
+            {canCreateLabel && (
+              <button
+                key={`create-${createLabelValue}`}
+                type="button"
+                disabled={disabled}
+                className="flex h-8 w-full items-center gap-3 whitespace-nowrap rounded-[8px] px-3 text-left text-[13px] font-bold leading-normal text-[var(--ink)] transition hover:bg-[var(--surface-4)] disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={() => onSelect(createLabelValue)}
+              >
+                <Plus
+                  aria-hidden="true"
+                  className="h-[13px] w-[13px] shrink-0 text-[var(--primary)]"
+                  strokeWidth={2.6}
+                />
+                <span className="min-w-0 flex-1 truncate">
+                  {tr(
+                    'issue.detail.createLabel',
+                    "Create new label '{label}'",
+                    { label: labelDisplayName(createLabelValue, tr) },
+                  )}
+                </span>
+              </button>
             )}
           </div>
         </div>

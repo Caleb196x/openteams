@@ -7,6 +7,7 @@ import {
   Maximize2,
   Minimize2,
   Paperclip,
+  Plus,
   Search,
   Tag,
   X,
@@ -623,6 +624,27 @@ function LabelDropdown({
     labels.length === 0
       ? 'Labels'
       : labels.map((label) => labelDisplayName(label)).join(', ');
+  const createLabelValue = query.trim();
+  const canCreateLabel =
+    createLabelValue !== '' &&
+    !options.some(
+      (option) => labelKey(option.value) === labelKey(createLabelValue),
+    );
+
+  const handleSearchEnter = () => {
+    if (canCreateLabel) {
+      onToggleLabel(createLabelValue);
+      return;
+    }
+    const firstMatch = options.find((option) =>
+      labelMatches(option.value, createLabelValue),
+    );
+    if (firstMatch) {
+      onToggleLabel(firstMatch.value);
+      return;
+    }
+    if (options[0]) onToggleLabel(options[0].value);
+  };
 
   return (
     <div className="relative">
@@ -640,6 +662,7 @@ function LabelDropdown({
             shortcut="L"
             value={query}
             onChange={onQueryChange}
+            onEnter={handleSearchEnter}
           />
           <div
             className="max-h-[220px] space-y-1 overflow-y-auto px-3 py-3 ot-scroll-area-styled"
@@ -669,6 +692,26 @@ function LabelDropdown({
                 </button>
               );
             })}
+            {canCreateLabel && (
+              <button
+                key={`create-${createLabelValue}`}
+                aria-label={`Create new label ${createLabelValue}`}
+                className="flex h-8 w-full items-center gap-3 whitespace-nowrap rounded-[7px] px-3 text-left text-[13px] font-bold leading-none text-[var(--ink)] transition hover:bg-[var(--surface-4)]"
+                role="option"
+                type="button"
+                onClick={() => onToggleLabel(createLabelValue)}
+              >
+                <Plus
+                  aria-hidden="true"
+                  className="h-3.5 w-3.5 shrink-0 text-[var(--primary)]"
+                  strokeWidth={2.6}
+                />
+                <span className="min-w-0 flex-1 truncate">
+                  Create new label &lsquo;{labelDisplayName(createLabelValue)}
+                  &rsquo;
+                </span>
+              </button>
+            )}
           </div>
         </PropertyMenuShell>
       )}
@@ -714,11 +757,13 @@ function PropertySearchRow({
   shortcut,
   value,
   onChange,
+  onEnter,
 }: {
   placeholder: string;
   shortcut: string;
   value: string;
   onChange: (value: string) => void;
+  onEnter?: () => void;
 }) {
   return (
     <div className="flex h-12 items-center gap-2.5 border-b border-[var(--hairline)] px-4">
@@ -732,6 +777,16 @@ function PropertySearchRow({
         placeholder={placeholder}
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        onKeyDown={
+          onEnter
+            ? (event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  onEnter();
+                }
+              }
+            : undefined
+        }
       />
       <span className="flex h-5 min-w-[20px] items-center justify-center rounded-[5px] border border-[var(--hairline)] px-1 font-mono text-[11px] font-bold text-[var(--ink-tertiary)]">
         {shortcut}
