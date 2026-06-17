@@ -1081,7 +1081,6 @@ interface WorkspaceContextProps {
   refreshWorkflowCard: (messageId: string) => Promise<void>;
   workspaceChanges: WorkspaceChangesResponse | null;
   workspaceChangesAsync: AsyncResourceState<WorkspaceChangesResponse | null>;
-  sourceControlRefreshKey: number;
   refreshWorkspaceChanges: (
     sessionId: string,
     path: string,
@@ -1216,7 +1215,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
 
   // Settings view controller
   const [activeSettingsTab, setActiveSettingsTab] =
-    useState<string>('appearance');
+    useState<string>('providers');
 
   // Modal Switches
   const [isNewTaskModalOpen, setIsNewTaskModalOpen] = useState<boolean>(false);
@@ -2657,7 +2656,6 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
         parsed.type === 'file_change_refresh' &&
         parsed.session_id === sid
       ) {
-        setSourceControlRefreshKey((key) => key + 1);
         const workspacePath = activeWorkspacePathRef.current;
         if (workspacePath) {
           void refreshWorkspaceChanges(sid, workspacePath, true);
@@ -3422,7 +3420,6 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
         refreshWorkflowCard,
         workspaceChanges: workspaceChangesAsync.data,
         workspaceChangesAsync,
-        sourceControlRefreshKey,
         refreshWorkspaceChanges,
         resetWorkspaceChanges,
         refreshAll,
