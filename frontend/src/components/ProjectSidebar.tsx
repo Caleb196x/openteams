@@ -123,6 +123,11 @@ const sidebarItemClass =
 const visibleSessionLimit = 6;
 const blankTeamId = "blank_team";
 
+const prioritizeRunningSessions = (sessions: Session[]): Session[] => [
+  ...sessions.filter((session) => session.hasRunningAgent),
+  ...sessions.filter((session) => !session.hasRunningAgent),
+];
+
 const blankTeamOptions: DropdownSelectOption[] = [
   {
     id: blankTeamId,
@@ -362,11 +367,18 @@ export function ProjectSidebar({
     [displayedProjects, projectActionMenu],
   );
   const buildStats = realBuildStats ?? ZERO_BUILD_STATS;
-  const hasOverflowSessions = sessions.length > visibleSessionLimit;
+  const orderedSessions = useMemo(
+    () => prioritizeRunningSessions(sessions),
+    [sessions],
+  );
+  const hasOverflowSessions = orderedSessions.length > visibleSessionLimit;
   const visibleSessions = sessionsExpanded
-    ? sessions
-    : sessions.slice(0, visibleSessionLimit);
-  const hiddenSessionCount = Math.max(sessions.length - visibleSessionLimit, 0);
+    ? orderedSessions
+    : orderedSessions.slice(0, visibleSessionLimit);
+  const hiddenSessionCount = Math.max(
+    orderedSessions.length - visibleSessionLimit,
+    0,
+  );
   const teamOptions = useMemo<DropdownSelectOption[]>(() => {
     const enabledTeamPresets = teamPresets.filter(
       (preset) => preset.enabled !== false,

@@ -143,6 +143,22 @@ const runningSessionHtml = renderToStaticMarkup(
     onProjectAction={() => undefined}
   />,
 );
+const runningOrderedHtml = renderToStaticMarkup(
+  <ProjectSidebar
+    shellOptions={mockShellOptions}
+    sessions={mockWorkspaceBootstrap.sessions.map((session) => ({
+      ...session,
+      hasRunningAgent: session.id === "sess-8",
+    }))}
+    activeSessionId={mockWorkspaceBootstrap.defaults.activeSessionId}
+    activePage="workspace"
+    weeklyCost={mockWorkspaceBootstrap.defaults.weeklyCost}
+    onNavigate={() => undefined}
+    onSessionSelect={() => undefined}
+    onPrimaryAction={() => undefined}
+    onProjectAction={() => undefined}
+  />,
+);
 const moreAttrStart = html.indexOf('data-sidebar-more="true"');
 const moreStart =
   moreAttrStart >= 0 ? html.lastIndexOf("<button", moreAttrStart) : -1;
@@ -208,6 +224,14 @@ check(
   runningSessionHtml.includes("animate-spin") &&
     runningSessionHtml.includes("agent running"),
   runningSessionHtml,
+);
+check(
+  "moves running sessions to the top of the collapsed session group",
+  runningOrderedHtml.indexOf("Billing copy polish") >= 0 &&
+    runningOrderedHtml.indexOf("Billing copy polish") <
+      runningOrderedHtml.indexOf("Fix login flicker") &&
+    !runningOrderedHtml.includes("Refactor auth guard"),
+  runningOrderedHtml,
 );
 check(
   "keeps collapsed session list height content-sized",
