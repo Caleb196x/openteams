@@ -246,7 +246,7 @@ const isActiveAgentState = (state: string | undefined): boolean =>
   state === 'running' || state === 'stopping' || state === 'waitingapproval';
 
 const isRunningSessionAgentState = (state: string | undefined): boolean =>
-  state === 'running';
+  state === 'running' || state === 'stopping';
 
 const hasRunningSessionAgent = (
   sessionAgents: BackendChatSessionAgent[],
@@ -1953,6 +1953,24 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
     async (sessionId: string, queueId: string): Promise<void> => {
       const response = await chatQueuesApi.deleteQueued(sessionId, queueId);
       mergeMemberQueueSnapshot(response.queue);
+      // When the backend also removed the underlying chat_messages row, drop the matching
+      // message from the visible conversation so it disappears without a manual refresh.
+      const deletedMessageId = response.deleted_chat_message_id;
+      if (deletedMessageId) {
+        setAllMessages((prev) => {
+          const current = filterMessagesForSession(
+            sessionId,
+            prev[sessionId] ?? [],
+          );
+          const updated = current.filter(
+            (message) => message.id !== deletedMessageId,
+          );
+          if (updated.length === current.length) return prev;
+          const next = { ...prev, [sessionId]: updated };
+          setMessagesAsync(succeed(updated));
+          return next;
+        });
+      }
     },
     [mergeMemberQueueSnapshot],
   );

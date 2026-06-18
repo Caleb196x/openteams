@@ -1462,6 +1462,7 @@ function WorkspaceLayout() {
               activeAppPage === "issue" ||
               activeAppPage === "agents" ||
               activeAppPage === "team" ||
+              activeAppPage === "team-templates" ||
               activeTab?.kind === "diff" ||
               activeTab?.kind === "sc-diff"
                 ? "overflow-hidden p-0"
