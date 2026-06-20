@@ -231,6 +231,7 @@ struct RunMetaFile {
 
 #[derive(Debug, Deserialize)]
 struct WorkRecordJsonLine {
+    session_id: Uuid,
     run_id: Uuid,
     message_type: String,
     content: String,
@@ -976,7 +977,9 @@ fn load_run_artifact_work_record_paths(
     load_work_record_lines(run.session_id)
         .into_iter()
         .filter(|record| {
-            record.run_id == run.id && record.message_type.eq_ignore_ascii_case("artifact")
+            record.session_id == run.session_id
+                && record.run_id == run.id
+                && record.message_type.eq_ignore_ascii_case("artifact")
         })
         .flat_map(|record| {
             extract_workspace_paths_from_artifact_text(&record.content, workspace_path)
@@ -1054,7 +1057,9 @@ fn collect_session_plain_observed_paths(
         }
 
         for record in work_records.iter().filter(|record| {
-            record.run_id == run.id && record.message_type.eq_ignore_ascii_case("artifact")
+            record.session_id == session_id
+                && record.run_id == run.id
+                && record.message_type.eq_ignore_ascii_case("artifact")
         }) {
             for path in extract_workspace_paths_from_artifact_text(&record.content, workspace_path)
             {
@@ -2459,6 +2464,7 @@ new file mode 100644
         .expect("write meta");
 
         let session_id = Uuid::new_v4();
+        let other_session_id = Uuid::new_v4();
         let run = test_run(session_id, Uuid::new_v4(), 1, &run_dir, Utc::now());
         let protocol_dir = asset_dir()
             .join("chat")
@@ -2468,8 +2474,13 @@ new file mode 100644
         fs::write(
             protocol_dir.join("work_records.jsonl"),
             format!(
-                "{{\"run_id\":\"{}\",\"message_type\":\"artifact\",\"content\":\"Saved `.openteams/context/demo/report.md` and `docs/report.md`.\"}}\n",
-                run.id
+                concat!(
+                    "{{\"session_id\":\"{other_session_id}\",\"run_id\":\"{run_id}\",\"message_type\":\"artifact\",\"content\":\"Saved `docs/other-session.md`.\"}}\n",
+                    "{{\"session_id\":\"{session_id}\",\"run_id\":\"{run_id}\",\"message_type\":\"artifact\",\"content\":\"Saved `.openteams/context/demo/report.md` and `docs/report.md`.\"}}\n"
+                ),
+                other_session_id = other_session_id,
+                session_id = session_id,
+                run_id = run.id
             ),
         )
         .expect("write work records");
@@ -3059,9 +3070,10 @@ new file mode 100644
             protocol_dir.join("work_records.jsonl"),
             format!(
                 concat!(
-                    "{{\"run_id\":\"{run_id}\",\"message_type\":\"artifact\",\"content\":\"Saved `binaries/test.txt`.\"}}\n",
-                    "{{\"run_id\":\"{run_id}\",\"message_type\":\"artifact\",\"content\":\"Saved `.openteams/test.txt`, `.openteams/context/demo/messages.jsonl`, `.openteams/context/demo/attachments/message-1/input.txt`, and `.openteams/context/demo/independent-mode-discussion-proposal.md`.\"}}\n"
+                    "{{\"session_id\":\"{session_id}\",\"run_id\":\"{run_id}\",\"message_type\":\"artifact\",\"content\":\"Saved `binaries/test.txt`.\"}}\n",
+                    "{{\"session_id\":\"{session_id}\",\"run_id\":\"{run_id}\",\"message_type\":\"artifact\",\"content\":\"Saved `.openteams/test.txt`, `.openteams/context/demo/messages.jsonl`, `.openteams/context/demo/attachments/message-1/input.txt`, and `.openteams/context/demo/independent-mode-discussion-proposal.md`.\"}}\n"
                 ),
+                session_id = session_id,
                 run_id = run.id
             ),
         )
