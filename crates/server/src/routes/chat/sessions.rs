@@ -265,9 +265,9 @@ fn is_artifact_observed_source(source: &str) -> bool {
 }
 
 fn is_openteams_relative_path(path: &str) -> bool {
-    PathBuf::from(path).components().next().is_some_and(|component| {
-        matches!(component, Component::Normal(part) if part == ".openteams")
-    })
+    PathBuf::from(path).components().next().is_some_and(
+        |component| matches!(component, Component::Normal(part) if part == ".openteams"),
+    )
 }
 
 static INLINE_CODE_PATH_RE: LazyLock<Regex> =
@@ -524,8 +524,10 @@ fn extract_workspace_paths_from_text_with_options(
         }
     }
 
-    for token in text.split_whitespace() {
-        candidates.push(token.to_string());
+    if candidates.is_empty() {
+        for token in text.split_whitespace() {
+            candidates.push(token.to_string());
+        }
     }
 
     candidates
@@ -877,6 +879,23 @@ pub(crate) fn collect_run_files(run: &ChatRun, include_diff: bool) -> WorkspaceC
         });
     }
 
+    // Protocol artifact work records are written after the run delta/meta path
+    // capture, so read them at request time as a fallback for message-bottom
+    // run files. These rows deliberately have no inline diff.
+    for path in load_run_artifact_work_record_paths(run, root) {
+        if !covered.insert(path.clone()) {
+            continue;
+        }
+
+        changes.untracked.push(WorkspaceChangedFile {
+            path,
+            additions: 0,
+            deletions: 0,
+            unified_diff: None,
+            has_diff: false,
+        });
+    }
+
     changes.modified.sort_by(|a, b| a.path.cmp(&b.path));
     changes.added.sort_by(|a, b| a.path.cmp(&b.path));
     changes.deleted.sort_by(|a, b| a.path.cmp(&b.path));
@@ -947,6 +966,21 @@ fn load_work_record_lines(session_id: Uuid) -> Vec<WorkRecordJsonLine> {
     content
         .lines()
         .filter_map(|line| serde_json::from_str::<WorkRecordJsonLine>(line).ok())
+        .collect()
+}
+
+fn load_run_artifact_work_record_paths(
+    run: &ChatRun,
+    workspace_path: &std::path::Path,
+) -> HashSet<String> {
+    load_work_record_lines(run.session_id)
+        .into_iter()
+        .filter(|record| {
+            record.run_id == run.id && record.message_type.eq_ignore_ascii_case("artifact")
+        })
+        .flat_map(|record| {
+            extract_workspace_paths_from_artifact_text(&record.content, workspace_path)
+        })
         .collect()
 }
 
@@ -2414,6 +2448,49 @@ new file mode 100644
     }
 
     #[test]
+    fn collect_run_files_reads_artifact_work_records_after_meta_capture() {
+        let tempdir = tempfile::tempdir().expect("create tempdir");
+        let run_dir = tempdir.path().join("run-record");
+        fs::create_dir_all(&run_dir).expect("create run dir");
+        fs::write(
+            run_dir.join("meta.json"),
+            r#"{"workspace_observed_paths":[]}"#,
+        )
+        .expect("write meta");
+
+        let session_id = Uuid::new_v4();
+        let run = test_run(session_id, Uuid::new_v4(), 1, &run_dir, Utc::now());
+        let protocol_dir = asset_dir()
+            .join("chat")
+            .join(format!("session_{session_id}"))
+            .join("protocol");
+        fs::create_dir_all(&protocol_dir).expect("create protocol dir");
+        fs::write(
+            protocol_dir.join("work_records.jsonl"),
+            format!(
+                "{{\"run_id\":\"{}\",\"message_type\":\"artifact\",\"content\":\"Saved `.openteams/context/demo/report.md` and `docs/report.md`.\"}}\n",
+                run.id
+            ),
+        )
+        .expect("write work records");
+
+        let changes = collect_run_files(&run, false);
+
+        let session_asset_dir = asset_dir()
+            .join("chat")
+            .join(format!("session_{session_id}"));
+        let _ = fs::remove_dir_all(session_asset_dir);
+
+        let untracked_paths: Vec<_> = changes.untracked.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            untracked_paths,
+            vec![".openteams/context/demo/report.md", "docs/report.md"]
+        );
+        assert!(changes.untracked.iter().all(|entry| !entry.has_diff));
+        assert!(changes.untracked.iter().all(|entry| entry.additions == 0));
+    }
+
+    #[test]
     fn collect_run_files_returns_empty_when_no_patch() {
         let tempdir = tempfile::tempdir().expect("create tempdir");
         let run_dir = tempdir.path().join("run-record");
@@ -2899,8 +2976,7 @@ new file mode 100644
     }
 
     #[test]
-    fn collect_workspace_changes_merges_artifact_paths_but_excludes_openteams_artifacts()
-     {
+    fn collect_workspace_changes_merges_artifact_paths_but_excludes_openteams_artifacts() {
         let tempdir = tempfile::tempdir().expect("create tempdir");
         let repo_path = tempdir.path().join("repo");
         let git = GitService::new();
