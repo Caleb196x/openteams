@@ -74,6 +74,17 @@ fn spawn_detached_command(command: &mut Command) -> Result<(), std::io::Error> {
     Ok(())
 }
 
+fn absolute_open_target_path(path: PathBuf) -> PathBuf {
+    if path.is_absolute() {
+        return path;
+    }
+
+    match std::env::current_dir() {
+        Ok(cwd) => cwd.join(&path),
+        Err(_) => path,
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn spawn_open_in_explorer(path: &Path, is_directory: bool) -> Result<(), std::io::Error> {
     let mut command = Command::new("open");
@@ -93,12 +104,22 @@ fn spawn_open_in_explorer(path: &Path, is_directory: bool) -> Result<(), std::io
 #[cfg(target_os = "windows")]
 fn spawn_open_in_explorer(path: &Path, is_directory: bool) -> Result<(), std::io::Error> {
     let mut command = Command::new("explorer");
-    if is_directory {
-        command.arg(path);
-    } else {
-        command.arg(format!("/select,{}", path.display()));
+    for arg in windows_explorer_args(path, is_directory) {
+        command.arg(arg);
     }
     spawn_detached_command(&mut command)
+}
+
+#[cfg(target_os = "windows")]
+fn windows_explorer_args(path: &Path, is_directory: bool) -> Vec<std::ffi::OsString> {
+    if is_directory {
+        return vec![path.as_os_str().to_os_string()];
+    }
+
+    vec![
+        std::ffi::OsString::from("/select,"),
+        path.as_os_str().to_os_string(),
+    ]
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -119,6 +140,7 @@ pub async fn open_in_explorer(
         Ok(path) => path,
         Err(err) => return Ok(open_in_explorer_response(false, Some(err))),
     };
+    let target_path = absolute_open_target_path(target_path);
 
     let metadata = match tokio::fs::metadata(&target_path).await {
         Ok(metadata) => metadata,
@@ -257,5 +279,26 @@ mod tests {
 
         let error = resolve_open_target_path(&request).expect_err("reject parent escape");
         assert_eq!(error, "Path must stay within workspace");
+    }
+
+    #[test]
+    fn absolute_open_target_path_makes_relative_paths_absolute() {
+        let relative = PathBuf::from("src/main.rs");
+        let resolved = absolute_open_target_path(relative.clone());
+
+        assert!(resolved.is_absolute());
+        assert!(resolved.ends_with(relative));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_explorer_args_passes_select_switch_and_path_separately() {
+        let path = PathBuf::from(r"C:\workspace\project with spaces\src\main.rs");
+        let args = windows_explorer_args(&path, false);
+
+        assert_eq!(
+            args,
+            vec![std::ffi::OsString::from("/select,"), path.into()]
+        );
     }
 }
