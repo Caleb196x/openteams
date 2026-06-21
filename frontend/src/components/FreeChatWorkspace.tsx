@@ -38,7 +38,6 @@ import { AgentMessageContent } from "@/components/AgentMessageContent";
 import { SessionSourceControlPanel } from "@/components/source-control/SessionSourceControlPanel";
 import {
   chatMessagesApi,
-  filesystemApi,
   sessionAgentsApi,
   projectWorkItemsApi,
 } from "@/lib/api";
@@ -60,6 +59,7 @@ import {
 import { markPendingIssueStatusSync } from "@/lib/pendingIssueStatusSync";
 import { notifyBuildStatsUsageUpdated } from "@/lib/buildStatsEvents";
 import { requestTeamMemberInviteNavigation } from "@/lib/teamNavigation";
+import { openInSystemFileManager } from "@/lib/systemFileManager";
 import {
   flattenWorkspaceChanges,
   hasRelatedFileDiff,
@@ -1865,8 +1865,7 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
 
   const openArtifactInExplorer = useCallback(
     (path: string) => {
-      void filesystemApi
-        .openInExplorer(path, currentWorkspacePath, activeSessionId)
+      void openInSystemFileManager(path, currentWorkspacePath, activeSessionId)
         .then((response) => {
           if (!response.ok) {
             showToast(response.error ?? "Failed to open in Explorer");
