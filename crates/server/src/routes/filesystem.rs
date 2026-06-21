@@ -198,6 +198,19 @@ fn spawn_open_in_explorer(path: &Path, is_directory: bool) -> Result<(), std::io
 
 #[cfg(target_os = "windows")]
 fn spawn_open_in_explorer(path: &Path, is_directory: bool) -> Result<(), std::io::Error> {
+    if !is_directory {
+        match windows_select_file_in_explorer(path) {
+            Ok(()) => return Ok(()),
+            Err(err) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %err,
+                    "Failed to select file through Windows Shell API, falling back to explorer.exe"
+                );
+            }
+        }
+    }
+
     let mut command = Command::new("explorer");
     for arg in windows_explorer_args(path, is_directory) {
         command.arg(arg);
@@ -208,13 +221,81 @@ fn spawn_open_in_explorer(path: &Path, is_directory: bool) -> Result<(), std::io
 #[cfg(target_os = "windows")]
 fn windows_explorer_args(path: &Path, is_directory: bool) -> Vec<std::ffi::OsString> {
     if is_directory {
-        return vec![path.as_os_str().to_os_string()];
+        return vec![windows_normalized_shell_path(path)];
     }
 
     vec![
         std::ffi::OsString::from("/select,"),
-        path.as_os_str().to_os_string(),
+        windows_normalized_shell_path(path),
     ]
+}
+
+#[cfg(target_os = "windows")]
+fn windows_normalized_shell_path(path: &Path) -> std::ffi::OsString {
+    std::ffi::OsString::from(path.to_string_lossy().replace('/', "\\"))
+}
+
+#[cfg(target_os = "windows")]
+fn windows_select_file_in_explorer(path: &Path) -> Result<(), std::io::Error> {
+    let path = path.to_path_buf();
+    std::thread::spawn(move || windows_select_file_in_explorer_on_current_thread(&path))
+        .join()
+        .map_err(|_| std::io::Error::other("Windows Shell API thread panicked"))?
+}
+
+#[cfg(target_os = "windows")]
+fn windows_select_file_in_explorer_on_current_thread(path: &Path) -> Result<(), std::io::Error> {
+    use std::os::windows::ffi::OsStrExt;
+
+    use windows_sys::Win32::{
+        System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize},
+        UI::Shell::{ILCreateFromPathW, ILFree, SHOpenFolderAndSelectItems},
+    };
+
+    const S_OK: i32 = 0;
+    const S_FALSE: i32 = 1;
+    const RPC_E_CHANGED_MODE: i32 = 0x80010106u32 as i32;
+
+    let shell_path = windows_normalized_shell_path(path);
+    let wide_path: Vec<u16> = shell_path.encode_wide().chain(std::iter::once(0)).collect();
+
+    unsafe {
+        let init_result = CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED as u32);
+        let should_uninitialize = init_result == S_OK || init_result == S_FALSE;
+        if init_result < 0 && init_result != RPC_E_CHANGED_MODE {
+            return Err(hresult_error("CoInitializeEx", init_result));
+        }
+
+        let pidl = ILCreateFromPathW(wide_path.as_ptr());
+        if pidl.is_null() {
+            if should_uninitialize {
+                CoUninitialize();
+            }
+            return Err(std::io::Error::other(
+                "ILCreateFromPathW failed to create a shell item",
+            ));
+        }
+
+        let select_result = SHOpenFolderAndSelectItems(pidl, 0, std::ptr::null(), 0);
+        ILFree(pidl);
+        if should_uninitialize {
+            CoUninitialize();
+        }
+
+        if select_result >= 0 {
+            Ok(())
+        } else {
+            Err(hresult_error("SHOpenFolderAndSelectItems", select_result))
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn hresult_error(context: &str, hresult: i32) -> std::io::Error {
+    std::io::Error::other(format!(
+        "{context} failed with HRESULT 0x{:08X}",
+        hresult as u32
+    ))
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]

@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { FolderOpen } from "lucide-react";
 import { ScrollArea } from "@/components/ScrollArea";
-import { filesystemApi, projectSourceControlApi } from "@/lib/api";
+import { projectSourceControlApi } from "@/lib/api";
 import { parseUnifiedDiff, alignSplitLines } from "@/lib/parseDiff";
 import type { DiffLine, DiffHunk, SplitRow } from "@/lib/parseDiff";
+import { openInSystemFileManager } from "@/lib/systemFileManager";
 import type {
   SourceControlDiffArea,
   SourceControlDiffResponse,
@@ -240,12 +241,11 @@ export const DiffViewTab: React.FC<DiffViewTabProps> = ({
   const handleOpenInExplorer = useCallback(() => {
     if (!effectiveFilePath) return;
     setOpenExplorerError(null);
-    void filesystemApi
-      .openInExplorer(
-        effectiveFilePath,
-        workspacePath,
-        sourceSessionId ?? sessionId,
-      )
+    void openInSystemFileManager(
+      effectiveFilePath,
+      workspacePath,
+      sourceSessionId ?? sessionId,
+    )
       .then((response) => {
         if (!response.ok) {
           setOpenExplorerError(response.error ?? "Failed to open in Explorer");
