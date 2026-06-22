@@ -278,13 +278,15 @@ export type CreateScratch = { payload: ScratchPayload, };
 
 export type UpdateScratch = { payload: ScratchPayload, };
 
-export type ChatSession = { id: string, title: string | null, status: ChatSessionStatus, lead_agent_id: string | null, summary_text: string | null, archive_ref: string | null, last_seen_diff_key: string | null, team_protocol: string | null, team_protocol_enabled: boolean, default_workspace_path: string | null, chat_input_mode: string | null, project_id: string | null, created_at: string, updated_at: string, archived_at: string | null, };
+export type ChatSession = { id: string, title: string | null, status: ChatSessionStatus, lead_agent_id: string | null, summary_text: string | null, archive_ref: string | null, last_seen_diff_key: string | null, team_protocol: string | null, team_protocol_enabled: boolean, default_workspace_path: string | null, chat_input_mode: string | null, project_id: string | null, worktree_mode: ChatSessionWorktreeMode, created_at: string, updated_at: string, archived_at: string | null, };
 
 export enum ChatSessionStatus { active = "active", archived = "archived" }
 
-export type CreateChatSession = { title: string | null, workspace_path: string | null, project_id: string | null, };
+export enum ChatSessionWorktreeMode { inherit = "inherit", disabled = "disabled", isolated = "isolated" }
 
-export type UpdateChatSession = { title: string | null, status: ChatSessionStatus | null, lead_agent_id?: string | null, summary_text: string | null, archive_ref: string | null, last_seen_diff_key: string | null, team_protocol: string | null, team_protocol_enabled: boolean | null, default_workspace_path: string | null, chat_input_mode?: string | null, };
+export type CreateChatSession = { title: string | null, workspace_path: string | null, project_id: string | null, worktree_mode?: ChatSessionWorktreeMode, };
+
+export type UpdateChatSession = { title: string | null, status: ChatSessionStatus | null, lead_agent_id?: string | null, summary_text: string | null, archive_ref: string | null, last_seen_diff_key: string | null, team_protocol: string | null, team_protocol_enabled: boolean | null, default_workspace_path: string | null, chat_input_mode?: string | null, worktree_mode?: ChatSessionWorktreeMode, };
 
 export type ChatAgent = { id: string, name: string, runner_type: string, system_prompt: string, tools_enabled: JsonValue, model_name: string | null, owner_project_id: string | null, created_at: string, updated_at: string, };
 
@@ -315,6 +317,32 @@ export enum ChatRunArtifactState { full = "full", stub = "stub", pruned = "prune
 export type ChatRunRetentionSummary = { kind: string | null, finished_at: string | null, error_summary: string | null, error_type: string | null, assistant_excerpt: string | null, total_tokens: number | null, token_usage: TokenUsageInfo | null, workflow_execution_id: string | null, workflow_agent_session_id: string | null, workflow_step_id: string | null, workflow_step_key: string | null, log_bytes_total: bigint | null, log_bytes_persisted: bigint | null, live_bytes_dropped: bigint | null, log_truncated: boolean | null, log_capture_degraded: boolean | null, pruned_at: string | null, prune_reason: string | null, };
 
 export type ChatRunRetentionInfo = { run_id: string, session_agent_id: string, created_at: string, log_state: ChatRunLogState, artifact_state: ChatRunArtifactState, log_truncated: boolean, log_capture_degraded: boolean, pruned_at: string | null, prune_reason: string | null, retention_summary: ChatRunRetentionSummary | null, };
+
+export type SessionWorktree = { id: string, session_id: string, project_id: string | null, base_workspace_path: string, repo_path: string, base_branch: string, base_commit: string | null, branch_name: string, worktree_path: string, mode: SessionWorktreeMode, status: SessionWorktreeStatus, merge_target_branch: string | null, merge_operation: SessionWorktreeMergeOperation | null,
+/**
+ * JSON array of file paths (relative to the merge target) that are in
+ * conflict while `status = needs_conflict_resolution`. Stored as raw
+ * text so we do not couple the wire type to `sqlx::types::Json`.
+ */
+conflict_files_json: string, operation_started_at: string | null, cleanup_error: string | null, last_used_at: string | null, merged_at: string | null, archived_at: string | null, created_at: string, updated_at: string, };
+
+export enum SessionWorktreeStatus { creating = "creating", active = "active", dirty = "dirty", merging = "merging", needs_conflict_resolution = "needs_conflict_resolution", merged = "merged", archived = "archived", cleanup_pending = "cleanup_pending", cleanup_failed = "cleanup_failed" }
+
+export enum SessionWorktreeMode { session = "session" }
+
+export enum SessionWorktreeMergeOperation { squash_merge = "squash_merge", cherry_pick = "cherry_pick", rebase = "rebase" }
+
+export type ConflictFileContent = { path: string, base?: string | null, current?: string | null, session?: string | null, working_tree: string, is_binary: boolean, };
+
+export type ConflictFileInfo = { path: string,
+/**
+ * Human-readable conflict status, e.g. `both_modified`, `deleted_by_us`,
+ * `deleted_by_them`, `added_by_us`, `added_by_them`. Derived from Git
+ * index stage presence in Phase 1.
+ */
+status: string, };
+
+export type MergeResult = { worktree: SessionWorktree, has_conflicts: boolean, conflict_files: Array<string>, };
 
 export type WorkflowStepTokenEntry = { session_id: string, session_title: string, workflow_execution_id: string, workflow_step_id: string, workflow_step_key: string, workflow_step_title: string, agent_name: string | null, latest_run_id: string | null, run_count: bigint, input_tokens: bigint, output_tokens: bigint, cache_read_tokens: bigint, reasoning_output_tokens: bigint, total_tokens: bigint, estimated_cost: number, model_id: string | null, model_name: string | null, };
 
@@ -641,7 +669,47 @@ export type ChatMessageListQuery = { limit: bigint | null, };
 
 export type ChatWorkItemListQuery = { limit: bigint | null, };
 
+export type PrepareWorktreeRequest = { base_workspace_path?: string | null, base_branch?: string | null, };
+
+export type MergeWorktreeRequest = { commit_message?: string | null, target_branch?: string | null, };
+
+export type ResolveConflictRequest = { content: string, };
+
+export type ContinueMergeRequest = { commit_message?: string | null, };
+
 export type CreateChatMessageRequest = { sender_type: ChatSenderType, sender_id: string | null, content: string, meta: JsonValue | null, };
+
+export type PrepareWorktreeRequest = { base_workspace_path?: string | null, base_branch?: string | null, };
+
+export type MergeWorktreeRequest = { commit_message?: string | null, target_branch?: string | null, };
+
+export type ResolveConflictRequest = { content: string, };
+
+export type ContinueMergeRequest = { commit_message?: string | null, };
+
+export type PrepareWorktreeRequest = { base_workspace_path?: string | null, base_branch?: string | null, };
+
+export type MergeWorktreeRequest = { commit_message?: string | null, target_branch?: string | null, };
+
+export type ResolveConflictRequest = { content: string, };
+
+export type ContinueMergeRequest = { commit_message?: string | null, };
+
+export type PrepareWorktreeRequest = { base_workspace_path?: string | null, base_branch?: string | null, };
+
+export type MergeWorktreeRequest = { commit_message?: string | null, target_branch?: string | null, };
+
+export type ResolveConflictRequest = { content: string, };
+
+export type ContinueMergeRequest = { commit_message?: string | null, };
+
+export type PrepareWorktreeRequest = { base_workspace_path?: string | null, base_branch?: string | null, };
+
+export type MergeWorktreeRequest = { commit_message?: string | null, target_branch?: string | null, };
+
+export type ResolveConflictRequest = { content: string, };
+
+export type ContinueMergeRequest = { commit_message?: string | null, };
 
 export type UserReviewResponseRequest = { review_id: string, action: string, feedback: string | null, expected_step_id: string | null, };
 
