@@ -202,27 +202,13 @@ export type GitHubRetryPrRequest = { pending_pr_id: string, operation_source: Gi
 
 export type GitHubCreatePrResponse = { pull_request: GitHubPullRequestSummary | null, delivery_record: ProjectDeliveryRecord | null, external_link: ProjectWorkItemExternalLink | null, audit_id: string, result: GitHubOperationResult, pending_pr: GitHubPendingPrCreation | null, };
 
-export type RepoWithTargetBranch = { target_branch: string, id: string, path: string, name: string, display_name: string, setup_script: string | null, cleanup_script: string | null, archive_script: string | null, copy_files: string | null, parallel_setup_script: boolean, dev_server_script: string | null, default_target_branch: string | null, default_working_dir: string | null, created_at: Date, updated_at: Date, };
-
 export type Tag = { id: string, tag_name: string, content: string, created_at: string, updated_at: string, };
 
 export type CreateTag = { tag_name: string, content: string, };
 
 export type UpdateTag = { tag_name: string | null, content: string | null, };
 
-export type TaskStatus = "todo" | "inprogress" | "inreview" | "done" | "cancelled";
-
-export type Task = { id: string, project_id: string, title: string, description: string | null, status: TaskStatus, parent_workspace_id: string | null, created_at: string, updated_at: string, };
-
-export type TaskWithAttemptStatus = { has_in_progress_attempt: boolean, last_attempt_failed: boolean, executor: string, id: string, project_id: string, title: string, description: string | null, status: TaskStatus, parent_workspace_id: string | null, created_at: string, updated_at: string, };
-
-export type TaskRelationships = { parent_task: Task | null, current_workspace: Workspace, children: Array<Task>, };
-
 export type DraftFollowUpData = { message: string, executor_profile_id: ExecutorProfileId, };
-
-export type DraftWorkspaceData = { message: string, project_id: string | null, repos: Array<DraftWorkspaceRepo>, selected_profile: ExecutorProfileId | null, };
-
-export type DraftWorkspaceRepo = { repo_id: string, target_branch: string, };
 
 export type PreviewSettingsData = { url: string, screen_size: string | null, responsive_width: number | null, responsive_height: number | null, };
 
@@ -268,9 +254,9 @@ is_terminal_visible: boolean | null,
  */
 workspace_panel_states: { [key in string]?: WorkspacePanelStateData }, };
 
-export type ScratchPayload = { "type": "DRAFT_TASK", "data": string } | { "type": "DRAFT_FOLLOW_UP", "data": DraftFollowUpData } | { "type": "QUEUED_FOLLOW_UP", "data": DraftFollowUpData } | { "type": "DRAFT_WORKSPACE", "data": DraftWorkspaceData } | { "type": "PREVIEW_SETTINGS", "data": PreviewSettingsData } | { "type": "WORKSPACE_NOTES", "data": WorkspaceNotesData } | { "type": "UI_PREFERENCES", "data": UiPreferencesData };
+export type ScratchPayload = { "type": "DRAFT_FOLLOW_UP", "data": DraftFollowUpData } | { "type": "QUEUED_FOLLOW_UP", "data": DraftFollowUpData } | { "type": "PREVIEW_SETTINGS", "data": PreviewSettingsData } | { "type": "WORKSPACE_NOTES", "data": WorkspaceNotesData } | { "type": "UI_PREFERENCES", "data": UiPreferencesData };
 
-export enum ScratchType { DRAFT_TASK = "DRAFT_TASK", DRAFT_FOLLOW_UP = "DRAFT_FOLLOW_UP", QUEUED_FOLLOW_UP = "QUEUED_FOLLOW_UP", DRAFT_WORKSPACE = "DRAFT_WORKSPACE", PREVIEW_SETTINGS = "PREVIEW_SETTINGS", WORKSPACE_NOTES = "WORKSPACE_NOTES", UI_PREFERENCES = "UI_PREFERENCES" }
+export enum ScratchType { DRAFT_FOLLOW_UP = "DRAFT_FOLLOW_UP", QUEUED_FOLLOW_UP = "QUEUED_FOLLOW_UP", PREVIEW_SETTINGS = "PREVIEW_SETTINGS", WORKSPACE_NOTES = "WORKSPACE_NOTES", UI_PREFERENCES = "UI_PREFERENCES" }
 
 export type Scratch = { id: string, payload: ScratchPayload, created_at: string, updated_at: string, };
 
@@ -278,7 +264,7 @@ export type CreateScratch = { payload: ScratchPayload, };
 
 export type UpdateScratch = { payload: ScratchPayload, };
 
-export type ChatSession = { id: string, title: string | null, status: ChatSessionStatus, lead_agent_id: string | null, summary_text: string | null, archive_ref: string | null, last_seen_diff_key: string | null, team_protocol: string | null, team_protocol_enabled: boolean, default_workspace_path: string | null, chat_input_mode: string | null, project_id: string | null, worktree_mode: ChatSessionWorktreeMode, created_at: string, updated_at: string, archived_at: string | null, };
+export type ChatSession = { id: string, title: string | null, status: ChatSessionStatus, lead_agent_id: string | null, summary_text: string | null, archive_ref: string | null, last_seen_diff_key: string | null, team_protocol: string | null, team_protocol_enabled: boolean, default_workspace_path: string | null, chat_input_mode: string | null, project_id: string | null, worktree_mode: ChatSessionWorktreeMode, pinned_at: string | null, created_at: string, updated_at: string, archived_at: string | null, };
 
 export enum ChatSessionStatus { active = "active", archived = "archived" }
 
@@ -330,19 +316,25 @@ export enum SessionWorktreeStatus { creating = "creating", active = "active", di
 
 export enum SessionWorktreeMode { session = "session" }
 
-export enum SessionWorktreeMergeOperation { squash_merge = "squash_merge", cherry_pick = "cherry_pick", rebase = "rebase" }
+export enum SessionWorktreeMergeOperation { merge = "merge", squash_merge = "squash_merge", cherry_pick = "cherry_pick", rebase = "rebase" }
 
-export type ConflictFileContent = { path: string, base?: string | null, current?: string | null, session?: string | null, working_tree: string, is_binary: boolean, };
+export type ConflictFileContent = { path: string, base?: string | null, current?: string | null, session?: string | null, working_tree: string, is_binary: boolean, is_too_large: boolean, size_bytes: bigint, };
 
 export type ConflictFileInfo = { path: string,
 /**
  * Human-readable conflict status, e.g. `both_modified`, `deleted_by_us`,
- * `deleted_by_them`, `added_by_us`, `added_by_them`. Derived from Git
- * index stage presence in Phase 1.
+ * `deleted_by_them`, `added_by_us`, `added_by_them`. Derived from Git's
+ * unmerged porcelain status so the UI can pick text or file-level flow.
  */
 status: string, };
 
+export type ConflictResolutionSide = "current" | "session";
+
 export type MergeResult = { worktree: SessionWorktree, has_conflicts: boolean, conflict_files: Array<string>, };
+
+export type ValidateWorkspacePathRequest = { workspace_path: string, };
+
+export type ValidateWorkspacePathResponse = { valid: boolean, is_git_repo: boolean, error: string | null, };
 
 export type WorkflowStepTokenEntry = { session_id: string, session_title: string, workflow_execution_id: string, workflow_step_id: string, workflow_step_key: string, workflow_step_title: string, agent_name: string | null, latest_run_id: string | null, run_count: bigint, input_tokens: bigint, output_tokens: bigint, cache_read_tokens: bigint, reasoning_output_tokens: bigint, total_tokens: bigint, estimated_cost: number, model_id: string | null, model_name: string | null, };
 
@@ -534,30 +526,6 @@ export type Image = { id: string, file_path: string, original_name: string, mime
 
 export type CreateImage = { file_path: string, original_name: string, mime_type: string | null, size_bytes: bigint, hash: string, };
 
-export type Workspace = { id: string, task_id: string, container_ref: string | null, branch: string, agent_working_dir: string | null, setup_completed_at: string | null, created_at: string, updated_at: string, archived: boolean, pinned: boolean, name: string | null, };
-
-export type Session = { id: string, workspace_id: string, executor: string | null, created_at: string, updated_at: string, };
-
-export type ExecutionProcess = { id: string, session_id: string, run_reason: ExecutionProcessRunReason, executor_action: ExecutorAction, status: ExecutionProcessStatus, exit_code: bigint | null,
-/**
- * dropped: true if this process is excluded from the current
- * history view (due to restore/trimming). Hidden from logs/timeline;
- * still listed in the Processes tab.
- */
-dropped: boolean, started_at: string, completed_at: string | null, created_at: string, updated_at: string, };
-
-export enum ExecutionProcessStatus { running = "running", completed = "completed", failed = "failed", killed = "killed" }
-
-export type ExecutionProcessRunReason = "setupscript" | "cleanupscript" | "archivescript" | "codingagent" | "devserver";
-
-export type ExecutionProcessRepoState = { id: string, execution_process_id: string, repo_id: string, before_head_commit: string | null, after_head_commit: string | null, merge_commit: string | null, created_at: Date, updated_at: Date, };
-
-export type Merge = { "type": "direct" } & DirectMerge | { "type": "pr" } & PrMerge;
-
-export type DirectMerge = { id: string, workspace_id: string, repo_id: string, merge_commit: string, target_branch_name: string, created_at: string, };
-
-export type PrMerge = { id: string, workspace_id: string, repo_id: string, created_at: string, target_branch_name: string, pr_info: PullRequestInfo, };
-
 export type MergeStatus = "open" | "merged" | "closed" | "unknown";
 
 export type PullRequestInfo = { number: bigint, url: string, status: MergeStatus, merged_at: string | null, merge_commit_sha: string | null, };
@@ -673,43 +641,18 @@ export type PrepareWorktreeRequest = { base_workspace_path?: string | null, base
 
 export type MergeWorktreeRequest = { commit_message?: string | null, target_branch?: string | null, };
 
-export type ResolveConflictRequest = { content: string, };
+export type ResolveConflictRequest = {
+/**
+ * Relative path of the conflicted file to resolve, e.g. `src/main.rs`.
+ * Moved from a path parameter to the body so Axum's catch-all
+ * limitation (must be last segment) doesn't block nested paths in
+ * the resolve endpoint.
+ */
+path: string, content?: string | null, use_stage?: ConflictResolutionSide, delete_file?: boolean, };
 
 export type ContinueMergeRequest = { commit_message?: string | null, };
 
 export type CreateChatMessageRequest = { sender_type: ChatSenderType, sender_id: string | null, content: string, meta: JsonValue | null, };
-
-export type PrepareWorktreeRequest = { base_workspace_path?: string | null, base_branch?: string | null, };
-
-export type MergeWorktreeRequest = { commit_message?: string | null, target_branch?: string | null, };
-
-export type ResolveConflictRequest = { content: string, };
-
-export type ContinueMergeRequest = { commit_message?: string | null, };
-
-export type PrepareWorktreeRequest = { base_workspace_path?: string | null, base_branch?: string | null, };
-
-export type MergeWorktreeRequest = { commit_message?: string | null, target_branch?: string | null, };
-
-export type ResolveConflictRequest = { content: string, };
-
-export type ContinueMergeRequest = { commit_message?: string | null, };
-
-export type PrepareWorktreeRequest = { base_workspace_path?: string | null, base_branch?: string | null, };
-
-export type MergeWorktreeRequest = { commit_message?: string | null, target_branch?: string | null, };
-
-export type ResolveConflictRequest = { content: string, };
-
-export type ContinueMergeRequest = { commit_message?: string | null, };
-
-export type PrepareWorktreeRequest = { base_workspace_path?: string | null, base_branch?: string | null, };
-
-export type MergeWorktreeRequest = { commit_message?: string | null, target_branch?: string | null, };
-
-export type ResolveConflictRequest = { content: string, };
-
-export type ContinueMergeRequest = { commit_message?: string | null, };
 
 export type UserReviewResponseRequest = { review_id: string, action: string, feedback: string | null, expected_step_id: string | null, };
 
@@ -727,7 +670,7 @@ export type AddProjectMemberRequest = { member_type: ProjectMemberType, user_id:
 
 export type UpdateProjectMemberRequest = { member_name?: string | null, role: string | null, display_order: bigint | null, default_workspace_path: string | null, is_default: boolean | null, allowed_skill_ids: Array<string> | null, execution_config: MemberExecutionConfig | null, };
 
-export type CreateProjectSessionRequest = { title: string | null, workspace_path: string | null, };
+export type CreateProjectSessionRequest = { title: string | null, workspace_path: string | null, worktree_mode?: ChatSessionWorktreeMode, };
 
 export type ProjectStatsQuery = { period_start: string | null, period_end: string | null, };
 

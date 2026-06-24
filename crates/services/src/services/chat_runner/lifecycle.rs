@@ -989,6 +989,17 @@ impl ChatRunner {
         };
 
         if session_agent.workspace_path.is_none() {
+            // respects "优先保留显式 agent workspace" because a user-set
+            // Isolated sessions resolve through the worktree reducer during
+            // the run. That path also syncs all session members to the
+            // isolated worktree once it exists.
+            let session = ChatSession::find_by_id(&self.db.pool, session_id).await?;
+            if let Some(ref session) = session
+                && session.worktree_mode == ChatSessionWorktreeMode::Isolated
+            {
+                return Ok(Some((session_agent, agent)));
+            }
+
             let workspace_path = self
                 .resolve_workspace_path_for_agent(session_id, agent.id, None)
                 .await?;
@@ -1293,6 +1304,7 @@ impl ChatRunner {
                     session_agent.workspace_path.clone(),
                 )
                 .await?;
+            session_agent.workspace_path = Some(workspace_path.clone());
             startup_timing.mark(
                 startup_timing::StartupMilestoneName::WorkspaceResolved,
                 Some(workspace_path.clone()),

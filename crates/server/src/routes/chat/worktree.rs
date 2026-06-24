@@ -26,6 +26,7 @@ pub fn router() -> Router<DeploymentImpl> {
         .route("/discard", post(discard_worktree))
         .route("/cleanup", post(cleanup_merged_worktree))
         .route("/retry-cleanup", post(retry_cleanup_worktree))
+        .route("/force-remove", post(force_remove_worktree))
         .route("/merge-conflicts", get(list_merge_conflicts))
         .route(
             "/merge-conflicts/{*file_path}",
@@ -152,7 +153,7 @@ pub async fn prepare_worktree(
 }
 
 /// POST /chat/sessions/{session_id}/worktree/merge
-/// Squash-merge session worktree changes into the base workspace.
+/// Merge session worktree changes into the base workspace.
 pub async fn merge_worktree(
     Extension(session): Extension<ChatSession>,
     State(deployment): State<DeploymentImpl>,
@@ -162,7 +163,7 @@ pub async fn merge_worktree(
     let result = service
         .perform_merge(
             session.id,
-            SessionWorktreeMergeOperation::SquashMerge,
+            SessionWorktreeMergeOperation::Merge,
             payload.target_branch,
             payload.commit_message,
         )
@@ -208,6 +209,20 @@ pub async fn retry_cleanup_worktree(
     let service = SessionWorktreeService::new(deployment.db().pool.clone());
     let worktree = service
         .retry_cleanup(session.id)
+        .await
+        .map_err(session_worktree_api_error)?;
+    Ok(ResponseJson(ApiResponse::success(worktree)))
+}
+
+/// POST /chat/sessions/{session_id}/worktree/force-remove
+/// Force-remove a cleanup_failed worktree from Git/app state.
+pub async fn force_remove_worktree(
+    Extension(session): Extension<ChatSession>,
+    State(deployment): State<DeploymentImpl>,
+) -> Result<ResponseJson<ApiResponse<SessionWorktree>>, ApiError> {
+    let service = SessionWorktreeService::new(deployment.db().pool.clone());
+    let worktree = service
+        .force_remove_failed_cleanup(session.id)
         .await
         .map_err(session_worktree_api_error)?;
     Ok(ResponseJson(ApiResponse::success(worktree)))

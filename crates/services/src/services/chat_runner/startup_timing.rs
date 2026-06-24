@@ -92,16 +92,19 @@ pub(super) struct RunStartupTiming {
     identity: RunStartupIdentity,
     started: Instant,
     started_at: String,
+    last_marked: Mutex<Instant>,
     artifact_path: Mutex<Option<PathBuf>>,
     milestones: Mutex<Vec<StartupMilestone>>,
 }
 
 impl RunStartupTiming {
     pub(super) fn new(identity: RunStartupIdentity) -> Self {
+        let started = Instant::now();
         Self {
             identity,
-            started: Instant::now(),
+            started,
             started_at: Utc::now().to_rfc3339(),
+            last_marked: Mutex::new(started),
             artifact_path: Mutex::new(None),
             milestones: Mutex::new(Vec::new()),
         }
@@ -118,9 +121,16 @@ impl RunStartupTiming {
     }
 
     pub(super) fn mark(&self, name: StartupMilestoneName, detail: Option<String>) {
+        let now = Instant::now();
+        let elapsed_ms = {
+            let mut last_marked = self.lock_last_marked();
+            let elapsed = elapsed_ms(now.duration_since(*last_marked));
+            *last_marked = now;
+            elapsed
+        };
         let milestone = StartupMilestone {
             name,
-            elapsed_ms: elapsed_ms(self.started.elapsed()),
+            elapsed_ms,
             at: Utc::now().to_rfc3339(),
             detail,
         };
@@ -212,6 +222,12 @@ impl RunStartupTiming {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
+    fn lock_last_marked(&self) -> std::sync::MutexGuard<'_, Instant> {
+        self.last_marked
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn lock_milestones(&self) -> std::sync::MutexGuard<'_, Vec<StartupMilestone>> {
         self.milestones
             .lock()
@@ -244,9 +260,20 @@ mod tests {
         timing
             .mark_and_persist(StartupMilestoneName::RunScheduled, None)
             .await;
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        timing
+            .mark_and_persist(StartupMilestoneName::PromptBuilt, None)
+            .await;
 
         let content = fs::read_to_string(path).await.expect("read timing");
         assert!(content.contains("\"schema_version\": 1"));
         assert!(content.contains("\"run_scheduled\""));
+        let value: serde_json::Value = serde_json::from_str(&content).expect("parse timing");
+        assert!(
+            value["milestones"][1]["elapsed_ms"]
+                .as_u64()
+                .expect("elapsed ms")
+                >= 1
+        );
     }
 }

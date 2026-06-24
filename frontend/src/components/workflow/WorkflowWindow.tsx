@@ -994,7 +994,6 @@ function InspectorCard({
                 key: `${entry.id}-${index}`,
                 timestamp: formatWorkflowLogTimestamp(entry.created_at),
                 content: line,
-                isError: /error|failed|fatal|exception/i.test(line),
               }));
             if (lines.length === 0) return groups;
             if (existing) {
@@ -1007,7 +1006,7 @@ function InspectorCard({
               });
             }
             return groups;
-          }, new Map<string, { key: string; agentName: string; lines: Array<{ key: string; timestamp: string; content: string; isError: boolean }> }>())
+          }, new Map<string, { key: string; agentName: string; lines: Array<{ key: string; timestamp: string; content: string }> }>())
           .values()
       ),
     [agentName, step.id, streamEntries, t]

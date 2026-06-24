@@ -1605,7 +1605,6 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
     runId?: string,
   ) => {
     if (isStopPendingForMessage(sessionAgentId, runId)) return;
-    markSessionAgentStopped(sessionAgentId);
 
     setStoppingSessionAgentIds((current) => {
       return {
@@ -1616,6 +1615,7 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
 
     try {
       await sessionAgentsApi.stop(activeSessionId, sessionAgentId);
+      markSessionAgentStopped(sessionAgentId);
       showToast(t("agent.stopRequested"));
       void refreshMembers();
     } catch {
@@ -1864,8 +1864,12 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
   };
 
   const openArtifactInExplorer = useCallback(
-    (path: string) => {
-      void openInSystemFileManager(path, currentWorkspacePath, activeSessionId)
+    (path: string, workspacePath?: string | null) => {
+      void openInSystemFileManager(
+        path,
+        workspacePath ?? currentWorkspacePath,
+        activeSessionId,
+      )
         .then((response) => {
           if (!response.ok) {
             showToast(response.error ?? "Failed to open in Explorer");
@@ -1882,6 +1886,15 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
     [activeSessionId, currentWorkspacePath, showToast],
   );
 
+  const isDifferentWorkspace = (workspacePath?: string | null) => {
+    if (!workspacePath) return false;
+    if (!currentWorkspacePath) return true;
+    return (
+      workspacePath.replace(/\\/g, "/").toLowerCase() !==
+      currentWorkspacePath.replace(/\\/g, "/").toLowerCase()
+    );
+  };
+
   // Open an artifact file from an agent message. Files without run diff data
   // (including ignored `.openteams/` artifacts) open in Explorer directly.
   const handleOpenArtifact = useCallback(
@@ -1892,7 +1905,7 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
         file.supplementary ||
         file.hasDiff === false
       ) {
-        openArtifactInExplorer(path);
+        openArtifactInExplorer(path, file.workspacePath);
         return;
       }
 
@@ -1909,6 +1922,10 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
         );
         return;
       }
+      if (isDifferentWorkspace(file.workspacePath)) {
+        openArtifactInExplorer(path, file.workspacePath);
+        return;
+      }
       if (selectedProjectId && onOpenSourceControlDiffTab) {
         onOpenSourceControlDiffTab(
           selectedProjectId,
@@ -1918,7 +1935,7 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
         );
         return;
       }
-      openArtifactInExplorer(path);
+      openArtifactInExplorer(path, file.workspacePath);
     },
     [
       relatedFileChanges,
@@ -1927,6 +1944,7 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
       activeSessionId,
       selectedProjectId,
       openArtifactInExplorer,
+      currentWorkspacePath,
     ],
   );
 
@@ -2930,6 +2948,11 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
               projectId={selectedProjectId || null}
               sessionId={activeSessionId || null}
               enabled={Boolean(selectedProjectId && activeSessionId)}
+              worktreeMode={
+                sessionsAsync.data?.find(
+                  (session) => session.id === activeSessionId,
+                )?.worktreeMode
+              }
               fallbackRelatedFiles={plainRelatedFilesContent}
               linkedWorkItemIds={linkedWorkItems.map((item) => item.id)}
               onOpenDiff={(projectId, sessionId, filePath, area) => {

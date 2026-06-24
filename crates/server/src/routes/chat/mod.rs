@@ -26,6 +26,8 @@ pub fn router(deployment: &DeploymentImpl) -> Router<DeploymentImpl> {
         )
         .route("/archive", axum::routing::post(sessions::archive_session))
         .route("/restore", axum::routing::post(sessions::restore_session))
+        .route("/pin", axum::routing::post(sessions::pin_session))
+        .route("/unpin", axum::routing::post(sessions::unpin_session))
         .route("/stream", get(sessions::stream_session_ws))
         .route("/workspaces", get(sessions::get_session_workspaces))
         .route(
