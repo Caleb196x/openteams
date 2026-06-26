@@ -151,6 +151,17 @@ type ChatStreamEvent =
       line: ChatRunActivityLine;
     }
   | {
+      type: 'agent_delta';
+      session_id: string;
+      session_agent_id: string;
+      agent_id: string;
+      run_id: string;
+      stream_type: 'assistant' | 'thinking' | 'error';
+      content: string;
+      delta: boolean;
+      is_final: boolean;
+    }
+  | {
       type: 'message_new' | 'message_updated';
       message: BackendChatMessage;
     }
@@ -230,6 +241,7 @@ const UNREAD_AGENT_COMPLETION_SESSION_IDS_STORAGE_KEY =
   'openteams-unread-agent-completion-session-ids';
 const ACKED_WORKFLOW_INPUT_IDS_STORAGE_KEY =
   'openteams-acked-workflow-input-ids';
+const LIVE_DELTA_ACTIVITY_LINE_PREFIX = 'live-delta-';
 // WebSocket auto-reconnect backoff bounds (ms).
 const CHAT_STREAM_RECONNECT_BASE_DELAY_MS = 1000;
 const CHAT_STREAM_RECONNECT_MAX_DELAY_MS = 30000;
@@ -850,10 +862,6 @@ const makePendingAgentPlaceholder = (
   };
 };
 
-const isWorkflowPlanCardMessage = (message: Message): boolean =>
-  message.workflowCard?.cardType === 'workflow_plan' ||
-  message.workflowCard?.cardType === 'workflow_plan_generation';
-
 const summarizeQuotedContent = (content: string): string => {
   const normalized = content.trim().replace(/\s+/g, ' ');
   if (!normalized) return '';
@@ -1023,6 +1031,11 @@ const sortActivityLines = (
     if (a.sequence !== b.sequence) return a.sequence - b.sequence;
     return a.line_id.localeCompare(b.line_id);
   });
+
+const liveDeltaActivityLineId = (
+  runId: string,
+  streamType: ChatRunActivityLine['stream_type'],
+) => `${LIVE_DELTA_ACTIVITY_LINE_PREFIX}${runId}-${streamType}`;
 
 const latestRunsBySessionAgent = (
   runs: ChatRunRetentionInfo[],
@@ -3000,8 +3013,22 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
         (message) => message.runId === line.run_id,
       );
       const mergeLine = (message: Message): Message => {
-        const lines = message.activityLines ?? [];
+        const liveLineId =
+          line.line_type === 'thinking'
+            ? liveDeltaActivityLineId(line.run_id, line.stream_type)
+            : null;
+        const originalLines = message.activityLines ?? [];
+        const lines = liveLineId
+          ? originalLines.filter((item) => item.line_id !== liveLineId)
+          : originalLines;
         if (lines.some((item) => item.line_id === line.line_id)) {
+          if (lines.length !== originalLines.length) {
+            return {
+              ...message,
+              activityLines: lines,
+              activityLoadState: 'idle',
+            };
+          }
           return message;
         }
         const nextLines = [...lines, line].sort((a, b) => {
@@ -3070,15 +3097,84 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
         );
         return { ...prev, [line.session_id]: next };
       }
-        return {
-          ...prev,
-          [line.session_id]: orderMessagesForConversation([
-            ...pruned,
-            placeholder,
-          ]),
-        };
+      return {
+        ...prev,
+        [line.session_id]: orderMessagesForConversation([
+          ...pruned,
+          placeholder,
+        ]),
+      };
     });
   }, []);
+
+  const upsertStreamDeltaActivityLine = useCallback(
+    (event: Extract<ChatStreamEvent, { type: 'agent_delta' }>) => {
+      if (event.stream_type !== 'thinking' || !event.content) {
+        return;
+      }
+
+      setAllMessages((prev) => {
+        const current = filterMessagesForSession(
+          event.session_id,
+          prev[event.session_id] ?? [],
+        );
+        const existingIndex = current.findIndex(
+          (message) => message.runId === event.run_id,
+        );
+        if (existingIndex < 0) {
+          return prev;
+        }
+
+        const next = current.map((message, index) => {
+          if (index !== existingIndex) return message;
+
+          const lines = message.activityLines ?? [];
+          const lineId = liveDeltaActivityLineId(
+            event.run_id,
+            event.stream_type,
+          );
+          const existingLine = lines.find((line) => line.line_id === lineId);
+          const content =
+            event.delta && existingLine
+              ? `${existingLine.content}${event.content}`
+              : event.content;
+          const maxSequence = lines.reduce(
+            (max, line) => Math.max(max, line.sequence),
+            -1,
+          );
+          const agentName = message.sender.startsWith('@')
+            ? message.sender.slice(1)
+            : message.sender || event.agent_id;
+          const liveLine: ChatRunActivityLine = {
+            line_id: lineId,
+            run_id: event.run_id,
+            session_id: event.session_id,
+            session_agent_id: event.session_agent_id,
+            agent_id: event.agent_id,
+            agent_name: agentName,
+            sequence: existingLine?.sequence ?? maxSequence + 1,
+            line_type: 'thinking',
+            stream_type: event.stream_type,
+            content,
+            created_at: existingLine?.created_at ?? new Date().toISOString(),
+          };
+          const nextLines = sortActivityLines([
+            ...lines.filter((line) => line.line_id !== lineId),
+            liveLine,
+          ]);
+
+          return {
+            ...message,
+            activityLines: nextLines,
+            activityLoadState: 'idle' as const,
+          };
+        });
+
+        return { ...prev, [event.session_id]: next };
+      });
+    },
+    [],
+  );
 
   const insertRunningPlaceholder = useCallback(
     (event: Extract<ChatStreamEvent, { type: 'agent_run_started' }>) => {
@@ -3280,6 +3376,11 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
         return;
       }
 
+      if (parsed.type === 'agent_delta' && parsed.session_id === sid) {
+        upsertStreamDeltaActivityLine(parsed);
+        return;
+      }
+
       if (
         parsed.type === 'workflow_runtime_line' &&
         parsed.session_id === sid
@@ -3476,6 +3577,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
     setSessionRunningIndicator,
     setSessionWorkflowRunningIndicator,
     sessionsAsync.source,
+    upsertStreamDeltaActivityLine,
     upsertStreamedMessage,
   ]);
 
@@ -3726,23 +3828,16 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
     };
     const shouldPersistToBackend =
       sessionsAsync.source === 'api' || options.persistToBackend === true;
-    const hasWorkflowPlanCard = (allMessagesRef.current[sid] ?? []).some(
-      isWorkflowPlanCardMessage,
-    );
-    const shouldCreatePendingAgentPlaceholder =
-      shouldPersistToBackend &&
-      (!hasWorkflowPlanCard || hasExplicitMentions || hasRouteMentionOverride);
-    const pendingAgentMsg =
-      shouldCreatePendingAgentPlaceholder
-        ? makePendingAgentPlaceholder(
-            text,
-            userMsgId,
-            sid === activeSessionIdRef.current ? membersAsync.data : [],
-            fallbackMention,
-            sid,
-            options.placeholderMember,
-          )
-        : null;
+    const pendingAgentMsg = shouldPersistToBackend
+      ? makePendingAgentPlaceholder(
+          text,
+          userMsgId,
+          sid === activeSessionIdRef.current ? membersAsync.data : [],
+          fallbackMention,
+          sid,
+          options.placeholderMember,
+        )
+      : null;
     const existingQueue = pendingAgentMsg?.sessionAgentId
       ? memberQueuesBySessionAgentId[pendingAgentMsg.sessionAgentId]
       : undefined;

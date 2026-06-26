@@ -412,27 +412,65 @@ body[data-mode="light"] .animate-shimmer::after {
 }
 
 .team-template-page {
-  --team-template-canvas: var(--surface-2);
-  --team-template-grid-line: rgba(255, 255, 255, 0.06);
-  --team-template-grid-line-strong: rgba(255, 255, 255, 0.1);
-  --team-template-hover: rgba(255, 255, 255, 0.035);
-  --team-template-title: rgba(255, 255, 255, 0.9);
-  --team-template-description: rgba(255, 255, 255, 0.42);
-  --team-template-icon: rgba(255, 255, 255, 0.42);
-  --team-template-tag-text: rgba(226, 232, 242, 0.55);
-  background: var(--team-template-canvas);
+  --team-template-canvas: transparent;
+  --team-template-border: rgba(255, 255, 255, 0.06);
+  --team-template-border-strong: rgba(255, 255, 255, 0.12);
+  --team-template-grid-line: var(--team-template-border);
+  --team-template-grid-line-strong: var(--team-template-border-strong);
+  --team-template-surface: rgba(255, 255, 255, 0.03);
+  --team-template-surface-hover: rgba(255, 255, 255, 0.06);
+  --team-template-active-surface: rgba(255, 255, 255, 0.048);
+  --team-template-tag-surface: rgba(255, 255, 255, 0.018);
+  --team-template-hover: var(--team-template-surface-hover);
+  --team-template-top-highlight: rgba(255, 255, 255, 0.1);
+  --team-template-top-highlight-strong: rgba(255, 255, 255, 0.14);
+  --team-template-top-glow: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.1) 50%,
+    transparent 100%
+  );
+  --team-template-title: #f2f2f2;
+  --team-template-muted: #8a8f98;
+  --team-template-aux: rgba(255, 255, 255, 0.4);
+  --team-template-icon-strong: rgba(255, 255, 255, 0.7);
+  --team-template-accent: var(--primary-hover);
+  --team-template-accent-glow: color-mix(in srgb, var(--primary-hover) 34%, transparent);
+  --team-template-description: var(--team-template-muted);
+  --team-template-icon: var(--team-template-muted);
+  --team-template-tag-text: var(--team-template-muted);
+  background: transparent;
 }
 
 body[data-mode="light"] .team-template-page {
-  --team-template-canvas: var(--surface-2);
-  --team-template-grid-line: rgba(15, 23, 42, 0.09);
-  --team-template-grid-line-strong: rgba(15, 23, 42, 0.15);
-  --team-template-hover: rgba(15, 23, 42, 0.035);
-  --team-template-title: rgba(15, 23, 42, 0.9);
-  --team-template-description: rgba(15, 23, 42, 0.52);
-  --team-template-icon: rgba(15, 23, 42, 0.48);
-  --team-template-tag-text: rgba(15, 23, 42, 0.58);
-  background: var(--team-template-canvas);
+  --team-template-canvas: transparent;
+  --team-template-border: rgba(15, 23, 42, 0.08);
+  --team-template-border-strong: rgba(15, 23, 42, 0.12);
+  --team-template-grid-line: var(--team-template-border);
+  --team-template-grid-line-strong: var(--team-template-border-strong);
+  --team-template-surface: rgba(15, 23, 42, 0.026);
+  --team-template-surface-hover: rgba(15, 23, 42, 0.052);
+  --team-template-active-surface: rgba(15, 23, 42, 0.048);
+  --team-template-tag-surface: rgba(15, 23, 42, 0.018);
+  --team-template-hover: var(--team-template-surface-hover);
+  --team-template-top-highlight: rgba(255, 255, 255, 0.85);
+  --team-template-top-highlight-strong: rgba(255, 255, 255, 0.95);
+  --team-template-top-glow: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.76) 50%,
+    transparent 100%
+  );
+  --team-template-title: #111827;
+  --team-template-muted: #62666d;
+  --team-template-aux: rgba(15, 23, 42, 0.46);
+  --team-template-icon-strong: rgba(15, 23, 42, 0.68);
+  --team-template-accent: var(--primary-hover);
+  --team-template-accent-glow: color-mix(in srgb, var(--primary-hover) 28%, transparent);
+  --team-template-description: var(--team-template-muted);
+  --team-template-icon: var(--team-template-muted);
+  --team-template-tag-text: var(--team-template-muted);
+  background: transparent;
 }
 
 .team-template-status-bar {
@@ -494,12 +532,15 @@ body[data-mode="light"] .team-template-status-rule {
   cursor: pointer;
   overflow: hidden;
   transition:
-    background-color 0.16s ease,
-    color 0.16s ease;
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    color 0.2s ease,
+    transform 0.2s ease;
 }
 
 .team-template-card:hover {
-  background: var(--team-template-hover);
+  background-color: var(--team-template-hover);
 }
 
 .team-template-card :where(h3, p, .team-template-tag),
@@ -551,7 +592,7 @@ body[data-mode="light"] .team-template-status-rule {
 }
 
 .team-template-tag[data-category$="operations"]::before {
-  background: #a78bfa;
+  background: var(--primary-hover);
 }
 
 .team-template-card:hover .team-template-icon {

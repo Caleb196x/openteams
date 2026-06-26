@@ -102,15 +102,28 @@ check(
     source.includes('chatSessionsApi.streamUrl') &&
     source.includes('parsed.type ===') &&
     source.includes('agent_run_started') &&
-    source.includes('agent_activity_line'),
+    source.includes('agent_activity_line') &&
+    source.includes('agent_delta'),
   source,
 );
 check(
   'stream events create placeholders, append lines, and replace final messages',
   source.includes('insertRunningPlaceholder(parsed)') &&
     source.includes('appendStreamActivityLine(parsed.line)') &&
+    source.includes('upsertStreamDeltaActivityLine(parsed)') &&
     source.includes('const incomingMessage = mapBackendChatMessage(parsed.message)') &&
     source.includes('upsertStreamedMessage(sid, incomingMessage)'),
+  source,
+);
+check(
+  'agent_delta thinking is bridged into live activity lines',
+  source.includes("type: 'agent_delta'") &&
+    source.includes('LIVE_DELTA_ACTIVITY_LINE_PREFIX') &&
+    source.includes("event.stream_type !== 'thinking'") &&
+    source.includes('liveDeltaActivityLineId') &&
+    source.includes('event.delta && existingLine') &&
+    source.includes('activityLines: nextLines') &&
+    source.includes('liveDeltaActivityLineId(line.run_id, line.stream_type)'),
   source,
 );
 check(
@@ -188,15 +201,13 @@ check(
   source,
 );
 check(
-  'workflow plan cards suppress unprompted optimistic agent placeholders',
-  source.includes('const isWorkflowPlanCardMessage = (message: Message): boolean') &&
-    source.includes("message.workflowCard?.cardType === 'workflow_plan'") &&
-    source.includes("message.workflowCard?.cardType === 'workflow_plan_generation'") &&
-    source.includes('const hasWorkflowPlanCard = (allMessagesRef.current[sid] ?? []).some(') &&
-    source.includes('isWorkflowPlanCardMessage') &&
-    source.includes('const shouldCreatePendingAgentPlaceholder =') &&
-    /!hasWorkflowPlanCard\s*\|\|\s*hasExplicitMentions\s*\|\|\s*hasRouteMentionOverride/.test(source) &&
-    source.includes('shouldCreatePendingAgentPlaceholder'),
+  'workflow plan cards do not suppress optimistic agent placeholders',
+  !source.includes('const isWorkflowPlanCardMessage =') &&
+    !source.includes('const hasWorkflowPlanCard =') &&
+    !source.includes('shouldCreatePendingAgentPlaceholder') &&
+    /const pendingAgentMsg = shouldPersistToBackend\s*\?\s*makePendingAgentPlaceholder/.test(
+      source,
+    ),
   source,
 );
 check(
