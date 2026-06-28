@@ -19,7 +19,7 @@ use db::{
             ChatRun, ChatRunArtifactState, ChatRunLogState, ChatRunRetentionSummary, CreateChatRun,
         },
         chat_session::{ChatSession, ChatSessionWorktreeMode},
-        chat_session_agent::{ChatSessionAgent, ChatSessionAgentState},
+        chat_session_agent::{ChatSessionAgent, ChatSessionAgentState, CreateChatSessionAgent},
         chat_skill::ChatSkill,
         chat_work_item::{ChatWorkItem, ChatWorkItemType, CreateChatWorkItem},
         project_member::{ProjectMember, ProjectMemberType},

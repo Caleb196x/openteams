@@ -436,7 +436,8 @@ fn openteams_home_dir() -> io::Result<PathBuf> {
 }
 
 fn workspace_runtime_key(current_dir: &Path) -> String {
-    let canonical = std::fs::canonicalize(current_dir).unwrap_or_else(|_| current_dir.to_path_buf());
+    let canonical =
+        std::fs::canonicalize(current_dir).unwrap_or_else(|_| current_dir.to_path_buf());
     let mut hasher = Sha256::new();
     hasher.update(canonical.to_string_lossy().as_bytes());
     let digest = hasher.finalize();

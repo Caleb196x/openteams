@@ -982,40 +982,39 @@ impl ChatRunner {
                 }
             }
 
-        let Some((session_agent, agent)) = exact_member_match
-            .or(exact_template_match)
-            .or(ci_member_match)
-            .or(ci_template_match)
-        else {
-            return Ok(None);
-        };
+            let Some((session_agent, agent)) = exact_member_match
+                .or(exact_template_match)
+                .or(ci_member_match)
+                .or(ci_template_match)
+            else {
+                return Ok(None);
+            };
 
-        if session_agent.workspace_path.is_none() {
-            // respects "优先保留显式 agent workspace" because a user-set
-            // Isolated sessions resolve through the worktree reducer during
-            // the run. That path also syncs all session members to the
-            // isolated worktree once it exists.
-            let session = ChatSession::find_by_id(&self.db.pool, session_id).await?;
-            if let Some(ref session) = session
-                && session.worktree_mode == ChatSessionWorktreeMode::Isolated
-            {
-                return Ok(Some((session_agent, agent)));
-            }
+            if session_agent.workspace_path.is_none() {
+                // respects "优先保留显式 agent workspace" because a user-set
+                // Isolated sessions resolve through the worktree reducer during
+                // the run. That path also syncs all session members to the
+                // isolated worktree once it exists.
+                let session = ChatSession::find_by_id(&self.db.pool, session_id).await?;
+                if let Some(ref session) = session
+                    && session.worktree_mode == ChatSessionWorktreeMode::Isolated
+                {
+                    return Ok(Some((session_agent, agent)));
+                }
 
-            let workspace_path = self
-                .resolve_workspace_path_for_agent(session_id, agent.id, None)
+                let workspace_path = self
+                    .resolve_workspace_path_for_agent(session_id, agent.id, None)
+                    .await?;
+                let updated = ChatSessionAgent::update_workspace_path(
+                    &self.db.pool,
+                    session_agent.id,
+                    Some(workspace_path),
+                )
                 .await?;
-            let updated = ChatSessionAgent::update_workspace_path(
-                &self.db.pool,
-                session_agent.id,
-                Some(workspace_path),
-            )
-            .await?;
-            return Ok(Some((updated, agent)));
-        }
-
-                return Ok(Some((session_agent, agent)));
+                return Ok(Some((updated, agent)));
             }
+
+            return Ok(Some((session_agent, agent)));
         }
 
         self.materialize_project_member_for_mention(session_id, mention)
