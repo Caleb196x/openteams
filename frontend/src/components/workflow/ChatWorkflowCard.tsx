@@ -635,7 +635,7 @@ export function ChatWorkflowCard({
       )}
 
       {shouldShowProgressInfo ? (
-        <div className="mt-4 flex flex-wrap items-start gap-3">
+        <div className="mt-4 flex w-full flex-wrap items-start gap-3">
           <div
             className={`max-w-full shrink-0 ${
               shouldExpandFeedbackCard ? 'w-[320px]' : 'w-[200px]'
