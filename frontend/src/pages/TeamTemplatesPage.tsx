@@ -7,6 +7,7 @@ import {
   Code2,
   Flame,
   Megaphone,
+  MoreHorizontal,
   Pencil,
   Plus,
   Rocket,
@@ -24,10 +25,15 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import { AgentMarkdown } from "@/components/AgentMarkdown";
+import {
+  DropdownSelect,
+  type DropdownSelectOption,
+} from "@/components/DropdownSelect";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import {
   agentRuntimeApi,
@@ -35,11 +41,16 @@ import {
   chatSessionsApi,
   projectApi,
   sessionAgentsApi,
+  skillsApi,
   teamPresetsApi,
 } from "@/lib/api";
-import { getRuntimeDisplayState } from "@/pages/agent-runtime/agentRuntimeViewModel";
+import {
+  getRuntimeDisplayState,
+  getRunnerLabel,
+} from "@/pages/agent-runtime/agentRuntimeViewModel";
 import type {
   AgentRuntimeStatus,
+  BackendChatSkill,
   JsonValue as FrontendJsonValue,
   UpdateChatSession,
 } from "@/types";
@@ -102,6 +113,8 @@ type FormValidationIssue = {
 };
 
 const emptyToolsEnabledText = "{}";
+const defaultRunnerOptionId = "__default_runner";
+const defaultModelOptionId = "__default_model";
 
 const jsonValueToText = (value: JsonValue | null | undefined): string => {
   if (value === null || value === undefined) return emptyToolsEnabledText;
@@ -111,6 +124,11 @@ const jsonValueToText = (value: JsonValue | null | undefined): string => {
     return emptyToolsEnabledText;
   }
 };
+
+const createUniqueTemplateId = (): string =>
+  `custom_${Date.now().toString(36)}_${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
 
 const blankMember = (index: number): MemberForm => ({
   id: index === 0 ? "lead" : `member_${index + 1}`,
@@ -124,7 +142,7 @@ const blankMember = (index: number): MemberForm => ({
 });
 
 const blankForm = (): TeamPresetForm => ({
-  id: "custom_team",
+  id: createUniqueTemplateId(),
   name: "",
   description: "",
   leadMemberId: "lead",
@@ -448,19 +466,22 @@ type TeamTemplatePresentation = {
 };
 
 const scenarioBadgeClassName =
-  "inline-flex items-center gap-1.5 font-mono text-[11px] font-normal text-[var(--team-template-muted)]";
+  "inline-flex items-center gap-1.5 font-mono text-[9px] font-semibold uppercase text-[var(--team-template-muted)]";
 
 const hairlineSurfaceClassName =
-  "relative overflow-hidden border border-[var(--team-template-border)] bg-[linear-gradient(180deg,var(--team-template-surface-top),var(--team-template-surface))] shadow-[0_1px_3px_rgba(0,0,0,0.5),inset_0_1px_0_var(--team-template-top-highlight)] before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-[var(--team-template-top-glow)]";
+  "relative overflow-hidden border border-[var(--team-template-border)] bg-[linear-gradient(180deg,var(--team-template-surface-top),var(--team-template-surface))] shadow-[inset_0_1px_0_var(--team-template-top-highlight)] before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-[var(--team-template-top-glow)]";
 
 const interactiveSurfaceClassName =
-  "transition-all duration-200 ease-out hover:-translate-y-px hover:border-[var(--team-template-border-strong)] hover:bg-[var(--team-template-surface-hover)] hover:shadow-[inset_0_1px_0_var(--team-template-top-highlight-strong)]";
+  "transition-all duration-150 ease-out hover:border-[var(--team-template-border-strong)] hover:bg-[var(--team-template-surface-hover)] hover:shadow-[inset_0_1px_0_var(--team-template-top-highlight-strong)]";
 
 const quietButtonClassName =
-  `inline-flex items-center justify-center rounded-md ${hairlineSurfaceClassName} text-[var(--team-template-title)] ${interactiveSurfaceClassName}`;
+  `inline-flex items-center justify-center rounded-[4px] ${hairlineSurfaceClassName} text-[var(--team-template-title)] ${interactiveSurfaceClassName}`;
 
 const activeSurfaceClassName =
   "border border-[var(--team-template-border)] bg-[var(--team-template-active-surface)] shadow-[inset_0_1px_0_var(--team-template-top-highlight-strong)]";
+
+const dangerGhostButtonClassName =
+  "inline-flex items-center justify-center rounded-[4px] text-red-300/85 transition-colors duration-150 hover:bg-red-500/10 hover:text-red-200 disabled:opacity-50 disabled:hover:bg-transparent";
 
 const recommendedBadgeClassName =
   "inline-flex text-[var(--team-template-muted)] transition-colors duration-150 group-hover:text-[var(--team-template-accent)]";
@@ -759,17 +780,44 @@ function FormInput({
   error,
   label,
   onChange,
+  variant = "default",
   value,
 }: {
   disabled?: boolean;
   error?: string;
   label: string;
   onChange: (value: string) => void;
+  variant?: "default" | "bare" | "inline";
   value: string;
 }) {
+  const bare = variant === "bare";
+  const inline = variant === "inline";
+
+  if (inline) {
+    return (
+      <label className="team-template-compact-field grid grid-cols-[72px_minmax(0,1fr)] items-start gap-2 border-b border-[var(--team-template-border)] py-1.5 last:border-b-0">
+        <span className="pt-1 font-mono text-[10px] font-semibold uppercase tracking-[0.04em] text-[var(--team-template-aux)]">
+          {label}
+        </span>
+        <span className="min-w-0">
+          <input
+            disabled={disabled}
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            className={[
+              "team-template-field h-7 w-full rounded-[3px] border-0 bg-transparent px-1 text-[13px] text-[var(--team-template-title)] outline-none transition-colors duration-150 placeholder:text-[var(--team-template-muted)] hover:bg-white/[0.035] focus:bg-white/[0.05] disabled:cursor-not-allowed disabled:opacity-60",
+              error ? "bg-red-500/10 text-red-200" : "",
+            ].join(" ")}
+          />
+          {error && <p className="mt-1 text-[11px] text-red-400">{error}</p>}
+        </span>
+      </label>
+    );
+  }
+
   return (
     <label className="block">
-      <span className="text-[11px] font-medium text-[var(--team-template-muted)]">
+      <span className="font-mono text-[10px] font-semibold uppercase text-[var(--team-template-muted)]">
         {label}
       </span>
       <input
@@ -777,7 +825,10 @@ function FormInput({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         className={[
-          "team-template-field mt-1.5 h-8 w-full rounded-md border bg-[var(--team-template-surface)] px-3 text-[13px] text-[var(--team-template-title)] shadow-[inset_0_1px_0_var(--team-template-top-highlight)] outline-none transition-colors duration-150 placeholder:text-[var(--team-template-muted)] focus:border-[var(--team-template-border-strong)] disabled:cursor-not-allowed disabled:opacity-60",
+          "team-template-field mt-1.5 h-8 w-full border text-[13px] text-[var(--team-template-title)] outline-none transition-colors duration-150 placeholder:text-[var(--team-template-muted)] disabled:cursor-not-allowed disabled:opacity-60",
+          bare
+            ? "rounded-none border-x-0 border-t-0 bg-transparent px-0 shadow-none focus:border-[var(--team-template-field-focus)]"
+            : "rounded-[4px] bg-[var(--team-template-field-surface)] px-3 shadow-[inset_0_1px_0_var(--team-template-field-highlight)] focus:border-[var(--team-template-field-focus)] focus:shadow-[inset_0_0_0_1px_var(--team-template-field-focus)]",
           error ? "border-red-400/70" : "border-[var(--team-template-border)]",
         ].join(" ")}
       />
@@ -792,6 +843,7 @@ function FormTextarea({
   label,
   onChange,
   rows = 3,
+  variant = "default",
   value,
 }: {
   disabled?: boolean;
@@ -799,11 +851,48 @@ function FormTextarea({
   label: string;
   onChange: (value: string) => void;
   rows?: number;
+  variant?: "default" | "bare" | "inline";
   value: string;
 }) {
+  const bare = variant === "bare";
+  const inline = variant === "inline";
+  const inlineTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (!inline) return;
+    const textarea = inlineTextareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = "0px";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }, [inline, value]);
+
+  if (inline) {
+    return (
+      <label className="team-template-compact-field grid grid-cols-[72px_minmax(0,1fr)] items-start gap-2 border-b border-[var(--team-template-border)] py-1.5 last:border-b-0">
+        <span className="pt-1 font-mono text-[10px] font-semibold uppercase tracking-[0.04em] text-[var(--team-template-aux)]">
+          {label}
+        </span>
+        <span className="min-w-0">
+          <textarea
+            ref={inlineTextareaRef}
+            disabled={disabled}
+            value={value}
+            rows={rows}
+            onChange={(event) => onChange(event.target.value)}
+            className={[
+              "team-template-field min-h-7 w-full resize-none overflow-hidden rounded-[3px] border-0 bg-transparent px-1 py-1 text-[13px] leading-[1.45] text-[var(--team-template-title)] outline-none transition-colors duration-150 placeholder:text-[var(--team-template-muted)] hover:bg-white/[0.035] focus:bg-white/[0.05] disabled:cursor-not-allowed disabled:opacity-60",
+              error ? "bg-red-500/10 text-red-200" : "",
+            ].join(" ")}
+          />
+          {error && <p className="mt-1 text-[11px] text-red-400">{error}</p>}
+        </span>
+      </label>
+    );
+  }
+
   return (
     <label className="block">
-      <span className="text-[11px] font-medium text-[var(--team-template-muted)]">
+      <span className="font-mono text-[10px] font-semibold uppercase text-[var(--team-template-muted)]">
         {label}
       </span>
       <textarea
@@ -812,7 +901,10 @@ function FormTextarea({
         rows={rows}
         onChange={(event) => onChange(event.target.value)}
         className={[
-          "team-template-field mt-1.5 w-full resize-y rounded-md border bg-[var(--team-template-surface)] px-3 py-2 text-[13px] leading-relaxed text-[var(--team-template-title)] shadow-[inset_0_1px_0_var(--team-template-top-highlight)] outline-none transition-colors duration-150 placeholder:text-[var(--team-template-muted)] focus:border-[var(--team-template-border-strong)] disabled:cursor-not-allowed disabled:opacity-60",
+          "team-template-field mt-1.5 w-full resize-y border text-[13px] leading-relaxed text-[var(--team-template-title)] outline-none transition-colors duration-150 placeholder:text-[var(--team-template-muted)] disabled:cursor-not-allowed disabled:opacity-60",
+          bare
+            ? "rounded-none border-x-0 border-t-0 bg-transparent px-0 py-1 shadow-none focus:border-[var(--team-template-field-focus)]"
+            : "rounded-[4px] bg-[var(--team-template-field-surface)] px-3 py-2 shadow-[inset_0_1px_0_var(--team-template-field-highlight)] focus:border-[var(--team-template-field-focus)] focus:shadow-[inset_0_0_0_1px_var(--team-template-field-focus)]",
           error ? "border-red-400/70" : "border-[var(--team-template-border)]",
         ].join(" ")}
       />
@@ -821,7 +913,41 @@ function FormTextarea({
   );
 }
 
+function AutoGrowingTextarea({
+  disabled,
+  onChange,
+  placeholder,
+  value,
+}: {
+  disabled?: boolean;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  value: string;
+}) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = "0px";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }, [value]);
+
+  return (
+    <textarea
+      ref={textareaRef}
+      disabled={disabled}
+      value={value}
+      rows={1}
+      placeholder={placeholder}
+      onChange={(event) => onChange(event.target.value)}
+      className="team-template-document-description -mx-1 mt-1.5 w-full resize-none overflow-hidden rounded-[4px] border-0 bg-transparent px-1 py-1 text-[14px] leading-relaxed text-[var(--team-template-muted)] outline-none transition-colors duration-150 placeholder:text-[var(--team-template-aux)] hover:bg-white/[0.035] focus:bg-white/[0.05] disabled:cursor-not-allowed disabled:opacity-60"
+    />
+  );
+}
+
 function MarkdownEditableField({
+  compact = false,
   disabled,
   editable,
   onCommit,
@@ -829,6 +955,7 @@ function MarkdownEditableField({
   rows = 5,
   value,
 }: {
+  compact?: boolean;
   disabled?: boolean;
   editable: boolean;
   onCommit: (value: string) => void;
@@ -860,7 +987,11 @@ function MarkdownEditableField({
         placeholder={placeholder}
         onBlur={commitDraft}
         onChange={(event) => setDraft(event.target.value)}
-        className="team-template-field w-full resize-y rounded-md border border-[var(--team-template-border)] bg-[var(--team-template-surface)] px-3 py-2 text-[13px] leading-relaxed text-[var(--team-template-title)] shadow-[inset_0_1px_0_var(--team-template-top-highlight)] outline-none transition-colors duration-150 placeholder:text-[var(--team-template-muted)] focus:border-[var(--team-template-border-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+        className={
+          compact
+            ? "team-template-field w-full resize-y rounded-[3px] border border-transparent bg-transparent px-1 py-1 text-[13px] leading-[1.45] text-[var(--team-template-title)] outline-none transition-colors duration-150 placeholder:text-[var(--team-template-muted)] hover:bg-white/[0.035] focus:border-[var(--team-template-field-focus)] focus:bg-white/[0.05] disabled:cursor-not-allowed disabled:opacity-60"
+            : "team-template-field w-full resize-y rounded-[4px] border border-[var(--team-template-border)] bg-[var(--team-template-field-surface)] px-3 py-2 text-[13px] leading-relaxed text-[var(--team-template-title)] shadow-[inset_0_1px_0_var(--team-template-field-highlight)] outline-none transition-colors duration-150 placeholder:text-[var(--team-template-muted)] focus:border-[var(--team-template-field-focus)] focus:shadow-[inset_0_0_0_1px_var(--team-template-field-focus)] disabled:cursor-not-allowed disabled:opacity-60"
+        }
       />
     );
   }
@@ -868,8 +999,14 @@ function MarkdownEditableField({
   return (
     <div
       className={[
-        "min-h-[72px] rounded-md border border-[var(--team-template-border)] bg-[var(--team-template-surface)] p-3 text-[13px] leading-relaxed text-[var(--team-template-title)] shadow-[inset_0_1px_0_var(--team-template-top-highlight)]",
-        editable && !disabled ? "cursor-text hover:border-[var(--team-template-border-strong)]" : "",
+        compact
+          ? "min-h-7 max-h-12 overflow-hidden rounded-[3px] border border-transparent bg-transparent px-1 py-1 text-[13px] leading-[1.45] text-[var(--team-template-title)]"
+          : "min-h-[72px] rounded-[4px] border border-[var(--team-template-border)] bg-[var(--team-template-field-surface)] p-3 text-[13px] leading-relaxed text-[var(--team-template-title)] shadow-[inset_0_1px_0_var(--team-template-field-highlight)]",
+        editable && !disabled
+          ? compact
+            ? "cursor-text hover:bg-white/[0.035] hover:text-[var(--team-template-title)]"
+            : "cursor-text hover:border-[var(--team-template-border-strong)]"
+          : "",
       ].join(" ")}
       onClick={() => {
         if (editable && !disabled) setEditing(true);
@@ -953,10 +1090,10 @@ const memberDotClassNames = [
 ] as const;
 
 const memberRoleToneClassNames = [
-  "border-[rgba(77,170,251,0.12)] bg-[rgba(77,170,251,0.06)]",
-  "border-[rgba(196,167,255,0.12)] bg-[rgba(196,167,255,0.06)]",
-  "border-[rgba(93,228,167,0.12)] bg-[rgba(93,228,167,0.06)]",
-  "border-[rgba(245,180,82,0.12)] bg-[rgba(245,180,82,0.06)]",
+  "text-[#6DBBFF]",
+  "text-[#C4A7FF]",
+  "text-[#5DE4A7]",
+  "text-[#F5B452]",
 ] as const;
 
 const getMemberToneIndex = (member: ChatMemberPreset, index: number): number => {
@@ -1061,6 +1198,26 @@ const formToPreviewDetail = (form: TeamPresetForm): ChatTeamPreset => ({
   enabled: form.enabled,
 });
 
+const formDirtySnapshot = (form: TeamPresetForm): string =>
+  JSON.stringify({
+    name: form.name,
+    description: form.description,
+    leadMemberId: form.leadMemberId,
+    workflowSteps: form.workflowSteps,
+    teamProtocol: form.teamProtocol,
+    enabled: form.enabled,
+    members: form.members.map((member) => ({
+      id: member.id,
+      name: member.name,
+      description: member.description,
+      runnerType: member.runnerType,
+      recommendedModel: member.recommendedModel,
+      systemPrompt: member.systemPrompt,
+      selectedSkillIdsText: member.selectedSkillIdsText,
+      toolsEnabledText: member.toolsEnabledText,
+    })),
+  });
+
 const nextMemberDraft = (members: MemberForm[]): MemberForm => {
   const usedIds = new Set(members.map((member) => member.id));
   let index = members.length + 1;
@@ -1122,14 +1279,14 @@ function MemberInfoSection({
   title: string;
 }) {
   return (
-    <section className="border-t border-[var(--team-template-border)] pt-6 first:border-t-0 first:pt-0">
-      <div className="mb-3 flex items-center justify-between gap-3">
+    <section className="team-template-compact-section border-t border-[var(--team-template-border)] pt-4 first:border-t-0 first:pt-0">
+      <div className="mb-2 flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
-          <h3 className="truncate text-[12px] font-semibold text-[var(--team-template-title)]">
+          <h3 className="truncate text-[12px] font-semibold leading-tight text-[var(--team-template-title)]">
             {title}
           </h3>
         </div>
-        <span className="font-mono text-[9px] font-medium text-[var(--team-template-aux)]">
+        <span className="font-mono text-[9px] font-medium tracking-[0.06em] text-[var(--team-template-aux)]">
           {meta}
         </span>
       </div>
@@ -1163,21 +1320,25 @@ function TemplateMemberInfoPage({
   fieldErrors = {},
   formMember,
   index,
+  installedSkills = [],
   isLead,
   member,
   onMemberChange,
+  runtimes = [],
 }: {
   disabled?: boolean;
   editable?: boolean;
   fieldErrors?: Record<string, string>;
   formMember?: MemberForm;
   index: number;
+  installedSkills?: BackendChatSkill[];
   isLead: boolean;
   member: ChatMemberPreset;
   onMemberChange?: (
     patch: Partial<MemberForm>,
     options?: DraftCommitOptions,
   ) => void;
+  runtimes?: AgentRuntimeStatus[];
 }) {
   const roleKey = getMemberRoleKey(member);
   const roleDescription = formatMemberValue(
@@ -1190,23 +1351,186 @@ function TemplateMemberInfoPage({
   );
   const mcpConfig = formatMemberJsonConfig(member.tools_enabled);
   const memberKey = formMember?.id ?? member.id;
+  const selectedSkillIds = useMemo(
+    () => parseSkillIds(formMember?.selectedSkillIdsText ?? ""),
+    [formMember?.selectedSkillIdsText],
+  );
+  const currentRunnerType = formMember?.runnerType.trim() ?? "";
+  const currentModel = formMember?.recommendedModel.trim() ?? "";
+  const availableRuntimes = useMemo(
+    () =>
+      runtimes.filter(
+        (runtime) => getRuntimeDisplayState(runtime) === "available",
+      ),
+    [runtimes],
+  );
+  const runtimeOptions = useMemo<DropdownSelectOption[]>(() => {
+    const options: DropdownSelectOption[] = [
+      {
+        id: defaultRunnerOptionId,
+        label: "默认执行器",
+        description: "使用首个可用执行器",
+      },
+      ...availableRuntimes.map((runtime) => ({
+        id: runtime.runner_type,
+        label: getRunnerLabel(runtime.runner_type),
+        description:
+          runtime.discovered_models.length > 0
+            ? `${runtime.discovered_models.length} 个可用模型`
+            : "未发现模型",
+        group: "可用执行器",
+      })),
+    ];
+
+    if (
+      currentRunnerType &&
+      !options.some((option) => option.id === currentRunnerType)
+    ) {
+      options.push({
+        id: currentRunnerType,
+        label: getRunnerLabel(currentRunnerType),
+        description: "当前配置值，执行器当前不可用",
+        group: "当前配置",
+      });
+    }
+
+    return options;
+  }, [availableRuntimes, currentRunnerType]);
+  const runtimeForModels = useMemo(
+    () =>
+      currentRunnerType
+        ? runtimes.find((runtime) => runtime.runner_type === currentRunnerType)
+        : firstAvailableRuntime(availableRuntimes),
+    [availableRuntimes, currentRunnerType, runtimes],
+  );
+  const effectiveRunnerType =
+    currentRunnerType || runtimeForModels?.runner_type || "";
+  const [runtimeSkills, setRuntimeSkills] = useState<BackendChatSkill[]>([]);
+  const [runtimeSkillsLoading, setRuntimeSkillsLoading] = useState(false);
+  const [runtimeSkillsError, setRuntimeSkillsError] = useState<string | null>(
+    null,
+  );
+
+  useEffect(() => {
+    if (!editable || !effectiveRunnerType) {
+      setRuntimeSkills([]);
+      setRuntimeSkillsLoading(false);
+      setRuntimeSkillsError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setRuntimeSkillsLoading(true);
+    setRuntimeSkillsError(null);
+    void skillsApi
+      .listNative(effectiveRunnerType)
+      .then((items) => {
+        if (!cancelled) setRuntimeSkills(items.map((item) => item.skill));
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setRuntimeSkills([]);
+        setRuntimeSkillsError(
+          errorText(error, "无法加载当前执行器的技能。"),
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setRuntimeSkillsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [editable, effectiveRunnerType]);
+  const modelOptions = useMemo<DropdownSelectOption[]>(() => {
+    const options: DropdownSelectOption[] = [
+      {
+        id: defaultModelOptionId,
+        label: "默认模型",
+        description: runtimeForModels
+          ? `跟随 ${getRunnerLabel(runtimeForModels.runner_type)} 配置`
+          : "选择执行器后使用默认模型",
+      },
+    ];
+    const modelNames = [
+      runtimeConfiguredModel(runtimeForModels),
+      ...(runtimeForModels?.discovered_models ?? []),
+    ]
+      .map((model) => model.trim())
+      .filter(Boolean);
+
+    for (const modelName of Array.from(new Set(modelNames))) {
+      options.push({
+        id: modelName,
+        label: modelName,
+        description: runtimeForModels
+          ? getRunnerLabel(runtimeForModels.runner_type)
+          : undefined,
+        group: "可用模型",
+      });
+    }
+
+    if (
+      currentModel &&
+      !options.some((option) => option.id === currentModel)
+    ) {
+      options.push({
+        id: currentModel,
+        label: currentModel,
+        description: "当前配置值，未在执行器模型列表中找到",
+        group: "当前配置",
+      });
+    }
+
+    return options;
+  }, [currentModel, runtimeForModels]);
+  const skillOptions = useMemo<DropdownSelectOption[]>(() => {
+    const options: DropdownSelectOption[] = runtimeSkills.map((skill) => ({
+      id: skill.id,
+      label: skill.name,
+      description: skill.description || skill.id,
+      group: skill.category ?? "已安装技能",
+      hint: skill.enabled ? undefined : "Disabled",
+    }));
+    const knownSkillIds = new Set(options.map((option) => option.id));
+    for (const skillId of selectedSkillIds) {
+      if (!knownSkillIds.has(skillId)) {
+        const installedSkill = installedSkills.find(
+          (skill) => skill.id === skillId,
+        );
+        options.push({
+          id: skillId,
+          label: installedSkill?.name ?? skillId,
+          description: installedSkill
+            ? "当前已选，但不属于当前执行器"
+            : "当前已选，未在已安装技能中找到",
+          group: "当前配置",
+        });
+      }
+    }
+    return options;
+  }, [installedSkills, runtimeSkills, selectedSkillIds]);
+  const skillPlaceholder = effectiveRunnerType
+    ? `选择 ${getRunnerLabel(effectiveRunnerType)} 技能`
+    : "选择执行器后配置技能";
 
   if (editable && formMember) {
     return (
-      <aside className="team-template-member-detail flex min-h-0 flex-col p-1 lg:h-full lg:p-0">
-        <header className="flex min-w-0 items-start justify-between gap-4 border-b border-[var(--team-template-border)] pb-4">
-          <div className="flex min-w-0 items-start gap-3">
+      <aside className="team-template-member-detail flex min-h-0 flex-col p-1 text-[13px] lg:h-full lg:p-0">
+        <header className="flex min-w-0 items-start justify-between gap-3 border-b border-[var(--team-template-border)] pb-3">
+          <div className="flex min-w-0 items-start gap-2.5">
             <span
               aria-hidden="true"
-              className={`mt-1 h-2 w-2 shrink-0 rounded-full shadow-[0_0_10px_currentColor] ${getMemberDotClassName(member, index)}`}
+              className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${getMemberDotClassName(member, index)}`}
             />
             <div className="min-w-0">
               <div className="flex min-w-0 items-center gap-2">
-                <h2 className="truncate text-[16px] font-semibold leading-tight text-[var(--team-template-title)]">
+                <h2 className="truncate text-[15px] font-semibold leading-tight text-[var(--team-template-title)]">
                   {formMember.name || roleKey}
                 </h2>
                 {isLead && (
-                  <span className="rounded-[4px] border border-[var(--team-template-ghost-badge-border)] px-1.5 py-0.5 font-mono text-[9px] font-medium text-[var(--team-template-muted)]">
+                  <span className="inline-flex items-center gap-1 font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--team-template-muted)]">
+                    <span className="h-1 w-1 rounded-full bg-current opacity-70" />
                     LEAD
                   </span>
                 )}
@@ -1218,50 +1542,83 @@ function TemplateMemberInfoPage({
           </div>
         </header>
 
-        <div className="team-template-scrollbar min-h-0 flex-1 space-y-7 overflow-y-auto pt-4">
+        <div className="team-template-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto pt-3">
           <MemberInfoSection meta="MEMBER" title="成员信息">
-            <div className="space-y-4">
+            <div>
               <FormInput
                 disabled={disabled}
                 error={fieldErrors[`member:${memberKey}:name`]}
                 label="成员名"
                 value={formMember.name}
+                variant="inline"
                 onChange={(name) => onMemberChange?.({ name })}
               />
               <FormTextarea
                 disabled={disabled}
                 label="成员描述"
+                rows={1}
                 value={formMember.description}
+                variant="inline"
                 onChange={(description) => onMemberChange?.({ description })}
               />
             </div>
           </MemberInfoSection>
 
           <MemberInfoSection meta="MODEL" title="模型配置">
-            <div className="space-y-4">
-              <FormInput
-                disabled={disabled}
-                label="Runtime"
-                value={formMember.runnerType}
-                onChange={(runnerType) => onMemberChange?.({ runnerType })}
-              />
-              <FormInput
-                disabled={disabled}
-                label="Model"
-                value={formMember.recommendedModel}
-                onChange={(recommendedModel) =>
-                  onMemberChange?.({ recommendedModel })
-                }
-              />
+            <div>
+              <div className="team-template-compact-field grid grid-cols-[72px_minmax(0,1fr)] items-start gap-2 border-b border-[var(--team-template-border)] py-1.5">
+                <span className="pt-1 font-mono text-[10px] font-semibold uppercase tracking-[0.04em] text-[var(--team-template-aux)]">
+                  执行器
+                </span>
+                <DropdownSelect
+                  value={currentRunnerType || defaultRunnerOptionId}
+                  options={runtimeOptions}
+                  placeholder="选择执行器"
+                  searchPlaceholder="搜索执行器..."
+                  emptyLabel="暂无可用执行器"
+                  disabled={disabled}
+                  className="w-full [&>button]:h-7 [&>button]:rounded-[3px] [&>button]:border-transparent [&>button]:bg-transparent [&>button]:px-1 [&>button]:py-0 [&>button]:text-[13px] [&>button]:shadow-none [&>button:hover]:bg-white/[0.035]"
+                  maxPanelHeightClassName="max-h-[180px]"
+                  onChange={(value) =>
+                    onMemberChange?.({
+                      runnerType:
+                        value === defaultRunnerOptionId ? "" : value,
+                      recommendedModel: "",
+                    })
+                  }
+                />
+              </div>
+              <div className="team-template-compact-field grid grid-cols-[72px_minmax(0,1fr)] items-start gap-2 border-b border-[var(--team-template-border)] py-1.5 last:border-b-0">
+                <span className="pt-1 font-mono text-[10px] font-semibold uppercase tracking-[0.04em] text-[var(--team-template-aux)]">
+                  模型
+                </span>
+                <DropdownSelect
+                  value={currentModel || defaultModelOptionId}
+                  options={modelOptions}
+                  placeholder="选择模型"
+                  searchPlaceholder="搜索模型..."
+                  emptyLabel="暂无可用模型"
+                  disabled={disabled || modelOptions.length === 0}
+                  className="w-full [&>button]:h-7 [&>button]:rounded-[3px] [&>button]:border-transparent [&>button]:bg-transparent [&>button]:px-1 [&>button]:py-0 [&>button]:text-[13px] [&>button]:shadow-none [&>button:hover]:bg-white/[0.035]"
+                  maxPanelHeightClassName="max-h-[180px]"
+                  onChange={(value) =>
+                    onMemberChange?.({
+                      recommendedModel:
+                        value === defaultModelOptionId ? "" : value,
+                    })
+                  }
+                />
+              </div>
             </div>
           </MemberInfoSection>
 
           <MemberInfoSection meta="ROLE" title="职责设定">
             <MarkdownEditableField
+              compact
               disabled={disabled}
               editable
               placeholder="填写成员职责设定..."
-              rows={7}
+              rows={4}
               value={formMember.systemPrompt}
               onCommit={(systemPrompt) =>
                 onMemberChange?.({ systemPrompt }, { autoSave: true })
@@ -1270,22 +1627,48 @@ function TemplateMemberInfoPage({
           </MemberInfoSection>
 
           <MemberInfoSection meta="SKILLS" title="技能配置">
-            <FormInput
-              disabled={disabled}
-              label="技能 ID（逗号分隔）"
-              value={formMember.selectedSkillIdsText}
-              onChange={(selectedSkillIdsText) =>
-                onMemberChange?.({ selectedSkillIdsText })
+            <DropdownSelect
+              selectionMode="multiple"
+              values={selectedSkillIds}
+              options={skillOptions}
+              placeholder={skillPlaceholder}
+              searchPlaceholder="搜索技能..."
+              emptyLabel={
+                runtimeSkillsLoading
+                  ? "正在加载技能..."
+                  : runtimeSkillsError || "当前执行器暂无可用技能"
+              }
+              disabled={disabled || runtimeSkillsLoading || skillOptions.length === 0}
+              className="w-full [&>button]:min-h-7 [&>button]:rounded-[3px] [&>button]:border-transparent [&>button]:bg-transparent [&>button]:px-1 [&>button]:py-1 [&>button]:text-[13px] [&>button]:shadow-none [&>button:hover]:bg-white/[0.035]"
+              maxPanelHeightClassName="max-h-[220px]"
+              formatValueLabel={(selectedOptions) => {
+                if (selectedOptions.length === 0) return skillPlaceholder;
+                if (selectedOptions.length === 1) return selectedOptions[0].label;
+                return `${selectedOptions.length} 个技能`;
+              }}
+              onChange={(values) =>
+                onMemberChange?.({ selectedSkillIdsText: values.join(", ") })
               }
             />
           </MemberInfoSection>
 
           <MemberInfoSection meta="MCP" title="MCP 配置">
-            <label className="block">
+            <label className="relative block">
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute left-3 top-2.5 select-none font-mono text-[10px] leading-relaxed text-[var(--team-template-index)]"
+              >
+                1<br />
+                2<br />
+                3<br />
+                4<br />
+                5<br />
+                6
+              </span>
               <textarea
                 disabled={disabled}
                 value={formMember.toolsEnabledText}
-                rows={9}
+                rows={6}
                 onBlur={() =>
                   onMemberChange?.(
                     { toolsEnabledText: formMember.toolsEnabledText },
@@ -1296,10 +1679,10 @@ function TemplateMemberInfoPage({
                   onMemberChange?.({ toolsEnabledText: event.target.value })
                 }
                 className={[
-                  "team-template-field w-full resize-y rounded-md border bg-[var(--team-template-surface)] px-3 py-2 font-mono text-[12px] leading-relaxed text-[var(--team-template-code-text)] shadow-[inset_0_1px_0_var(--team-template-top-highlight)] outline-none transition-colors duration-150 placeholder:text-[var(--team-template-muted)] focus:border-[var(--team-template-border-strong)] disabled:cursor-not-allowed disabled:opacity-60",
+                  "team-template-field w-full resize-y rounded-[3px] border-x-0 border-t-0 bg-[var(--team-template-code-surface)] py-1.5 pl-10 pr-3 font-mono text-[12px] leading-relaxed text-[var(--team-template-code-text)] outline-none transition-colors duration-150 placeholder:text-[var(--team-template-muted)] focus:border-[var(--team-template-field-focus)] disabled:cursor-not-allowed disabled:opacity-60",
                   fieldErrors[`member:${memberKey}:tools_enabled`]
                     ? "border-red-400/70"
-                    : "border-[var(--team-template-border)]",
+                    : "border-[var(--team-template-code-border)]",
                 ].join(" ")}
               />
               {fieldErrors[`member:${memberKey}:tools_enabled`] && (
@@ -1462,8 +1845,13 @@ function WorkflowPreview({
   }, [steps]);
 
   return (
-    <section className="team-template-workflow-preview border-t border-[var(--team-template-border)] pt-5">
-      <div className="mb-4 flex items-center justify-between gap-3">
+    <section
+      className={[
+        "team-template-workflow-preview text-[13px]",
+        editable ? "pt-3" : "border-t border-[var(--team-template-border)] pt-4",
+      ].join(" ")}
+    >
+      <div className="mb-3 flex min-h-7 items-center justify-between gap-3">
         <h2 className="text-[12px] font-medium tracking-[0.02em] text-[var(--team-template-muted)]">
           工作流程
         </h2>
@@ -1474,19 +1862,23 @@ function WorkflowPreview({
       </div>
 
       {editable ? (
-        <div className="space-y-3">
+        <div className="team-template-deboxed-workflow relative space-y-1 border-l border-[var(--team-template-border)] pl-4">
           {editableSteps.length === 0 && (
-            <p className="rounded-md border border-dashed border-[var(--team-template-border)] px-3 py-4 text-[12px] text-[var(--team-template-muted)]">
+            <p className="rounded-[4px] border border-dashed border-[var(--team-template-border)] px-3 py-4 text-[12px] text-[var(--team-template-muted)]">
               No workflow steps defined.
             </p>
           )}
           {editableSteps.map((step, index) => (
             <section
               key={`workflow-step-${index}`}
-              className="rounded-md border border-[var(--team-template-border)] bg-[var(--team-template-surface)] p-3"
+              className="team-template-compact-workflow-step group relative py-2"
             >
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <span className="font-mono text-[10px] text-[var(--team-template-aux)]">
+              <span
+                aria-hidden="true"
+                className="absolute -left-[19px] top-3 h-1.5 w-1.5 rounded-full border border-[var(--team-template-pipeline-dot-muted)] bg-[var(--team-template-canvas)]"
+              />
+              <div className="mb-1.5 flex items-center justify-between gap-3">
+                <span className="font-mono text-[9px] font-semibold text-[var(--team-template-aux)]">
                   STEP {String(index + 1).padStart(2, "0")}
                 </span>
                 <button
@@ -1497,17 +1889,18 @@ function WorkflowPreview({
                       editableSteps.filter((_, stepIndex) => stepIndex !== index),
                     )
                   }
-                  className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--team-template-muted)] transition-colors duration-150 hover:bg-red-500/10 hover:text-red-300 disabled:opacity-40"
+                  className="pointer-events-none flex h-6 w-6 items-center justify-center rounded-[4px] text-[var(--team-template-muted)] opacity-0 transition-all duration-150 hover:bg-red-500/10 hover:text-red-300 group-hover:pointer-events-auto group-hover:opacity-100 focus:pointer-events-auto focus:opacity-100 disabled:opacity-40"
                   aria-label="Remove workflow step"
                 >
                   <Trash2 aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={1.4} />
                 </button>
               </div>
-              <div className="space-y-3">
+              <div className="space-y-1.5">
                 <FormInput
                   disabled={disabled}
                   label="步骤标题"
                   value={step.title}
+                  variant="bare"
                   onChange={(title) => updateStep(index, { title })}
                 />
                 <FormTextarea
@@ -1515,6 +1908,7 @@ function WorkflowPreview({
                   label="步骤描述"
                   rows={2}
                   value={step.description}
+                  variant="bare"
                   onChange={(description) => updateStep(index, { description })}
                 />
               </div>
@@ -1526,7 +1920,7 @@ function WorkflowPreview({
             onClick={() =>
               onStepsChange?.([...editableSteps, { title: "", description: "" }])
             }
-            className={`${quietButtonClassName} h-8 gap-1.5 px-3 text-[12px] font-medium disabled:opacity-50`}
+            className={`${quietButtonClassName} mt-2 h-7 gap-1.5 px-2.5 text-[11px] font-medium disabled:opacity-50`}
           >
             <Plus aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={1.4} />
             Add Step
@@ -1605,7 +1999,10 @@ function TemplateDetailView({
   fieldErrors = {},
   form,
   formError,
+  installedSkills = [],
+  runtimes = [],
   saving = false,
+  saveStatus = null,
   selectedEditableMemberId,
   usingTemplate,
   onBack,
@@ -1630,7 +2027,10 @@ function TemplateDetailView({
   fieldErrors?: Record<string, string>;
   form?: TeamPresetForm;
   formError?: string | null;
+  installedSkills?: BackendChatSkill[];
+  runtimes?: AgentRuntimeStatus[];
   saving?: boolean;
+  saveStatus?: string | null;
   selectedEditableMemberId?: string | null;
   usingTemplate: boolean;
   onBack: () => void;
@@ -1648,9 +2048,14 @@ function TemplateDetailView({
   const [readonlySelectedMemberId, setReadonlySelectedMemberId] = useState<
     string | null
   >(null);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const isEditing = Boolean(editorMode && form);
   const viewDetail = isEditing && form ? formToPreviewDetail(form) : detail;
   const controlsDisabled = saving || deleting;
+
+  useEffect(() => {
+    if (!isEditing) setMoreMenuOpen(false);
+  }, [isEditing]);
   const selectedMemberId = isEditing
     ? (selectedEditableMemberId ?? viewDetail?.members[0]?.id ?? null)
     : readonlySelectedMemberId;
@@ -1827,61 +2232,71 @@ function TemplateDetailView({
   };
 
   return (
-    <div className="mx-auto grid h-auto min-h-full w-full max-w-[1280px] grid-cols-1 lg:h-full lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_minmax(420px,40vw)] 2xl:grid-cols-[minmax(0,1fr)_540px]">
+    <div
+      className={[
+        "mx-auto grid h-auto min-h-full w-full max-w-[1280px] grid-cols-1 lg:h-full lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_minmax(420px,40vw)] 2xl:grid-cols-[minmax(0,1fr)_540px]",
+        isEditing ? "team-template-compact-editor text-[13px]" : "",
+      ].join(" ")}
+    >
       <div className="team-template-scrollbar min-w-0 p-5 md:p-7 lg:min-h-0 lg:overflow-y-auto lg:p-8">
       <button
         type="button"
         onClick={isEditing ? (onCancel ?? onBack) : onBack}
         className="mb-5 flex items-center gap-2 text-[12px] font-medium text-[var(--team-template-muted)] transition-colors duration-150 hover:text-[var(--team-template-title)]"
       >
-        <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.2} /> 返回模板
+        <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.2} />{" "}
+        {isEditing ? "退出" : "返回模板"}
       </button>
 
-      <header className="border-b border-[var(--team-template-border)] pb-6">
-        <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
+      <header
+        className={[
+          "relative border-b border-[var(--team-template-border)]",
+          isEditing ? "pb-4" : "pb-6",
+        ].join(" ")}
+      >
+        <div className="flex min-w-0 flex-col gap-5 md:flex-row md:items-start md:justify-between">
           <div className="flex min-w-0 items-start gap-3">
-            <div className="flex h-6 w-6 shrink-0 items-center justify-center text-[var(--team-template-icon)]">
-              <DetailCategoryIcon className="h-4 w-4" strokeWidth={1.2} />
+            <div
+              className={[
+                "flex shrink-0 items-center justify-center text-[var(--team-template-icon)]",
+                isEditing ? "mt-0.5 h-8 w-8" : "h-6 w-6",
+              ].join(" ")}
+            >
+              <DetailCategoryIcon
+                className={isEditing ? "h-5 w-5" : "h-4 w-4"}
+                strokeWidth={1.2}
+              />
             </div>
             <div className="min-w-0 flex-1">
               {isEditing && form ? (
-                <div className="space-y-3">
-                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
-                    <FormInput
-                      disabled={controlsDisabled}
-                      error={fieldErrors["team:name"]}
-                      label="团队名"
-                      value={form.name}
-                      onChange={(name) => onFormChange?.({ ...form, name })}
-                    />
-                    <FormInput
-                      disabled={saving || editorMode === "edit"}
-                      label="模板 ID"
-                      value={form.id}
-                      onChange={(id) => onFormChange?.({ ...form, id })}
-                    />
-                  </div>
-                  <FormTextarea
+                <div className="team-template-document-head min-w-0 max-w-3xl pr-28 md:pr-40">
+                  <input
                     disabled={controlsDisabled}
-                    label="描述"
-                    rows={2}
+                    value={form.name}
+                    placeholder="Untitled template"
+                    onChange={(event) =>
+                      onFormChange?.({ ...form, name: event.target.value })
+                    }
+                    className={[
+                      "team-template-document-title -mx-1 w-full rounded-[4px] border-0 bg-transparent px-1 py-0.5 text-[26px] font-semibold leading-tight text-[var(--team-template-title)] outline-none transition-colors duration-150 placeholder:text-[var(--team-template-muted)] hover:bg-white/[0.04] focus:bg-white/[0.05] disabled:cursor-not-allowed disabled:opacity-60",
+                      fieldErrors["team:name"]
+                        ? "bg-red-500/10 text-red-200"
+                        : "",
+                    ].join(" ")}
+                  />
+                  {fieldErrors["team:name"] && (
+                    <p className="mt-1 text-[11px] text-red-400">
+                      {fieldErrors["team:name"]}
+                    </p>
+                  )}
+                  <AutoGrowingTextarea
+                    disabled={controlsDisabled}
+                    placeholder="Add a description..."
                     value={form.description}
                     onChange={(description) =>
                       onFormChange?.({ ...form, description })
                     }
                   />
-                  <label className="flex cursor-pointer items-center gap-2 text-[12px] font-medium text-[var(--team-template-title)]">
-                    <input
-                      type="checkbox"
-                      disabled={controlsDisabled}
-                      checked={form.enabled}
-                      onChange={(event) =>
-                        onFormChange?.({ ...form, enabled: event.target.checked })
-                      }
-                      className="h-4 w-4 rounded border-[var(--team-template-border-strong)] bg-[var(--team-template-surface)] text-[var(--primary)] focus:ring-[var(--primary)] disabled:opacity-60"
-                    />
-                    Enabled in picker
-                  </label>
                 </div>
               ) : (
                 <>
@@ -1902,14 +2317,77 @@ function TemplateDetailView({
             </div>
           </div>
 
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <div
+            className={[
+              isEditing
+                ? "absolute right-0 top-0 z-20 flex shrink-0 items-start justify-end"
+                : "flex shrink-0 flex-wrap items-center gap-2",
+            ].join(" ")}
+          >
+            {isEditing && (
+              <div className="flex flex-col items-end gap-2">
+                {formError && (
+                  <p className="max-w-[360px] text-right text-[12px] leading-snug text-red-400">
+                    {formError}
+                  </p>
+                )}
+                <div className="flex items-center gap-2">
+                  {saveStatus && (
+                    <span className="font-mono text-[10px] font-medium text-[var(--team-template-aux)] opacity-80">
+                      {saveStatus}
+                    </span>
+                  )}
+                  {editorMode === "create" && (
+                    <button
+                      type="button"
+                      disabled={controlsDisabled}
+                      onClick={onSave ?? (() => undefined)}
+                      className="inline-flex h-8 items-center gap-1.5 rounded-[4px] border border-white/10 bg-[#ededed] px-3.5 text-[12px] font-medium text-[#08090a] shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] transition-all duration-150 ease-out hover:bg-white disabled:opacity-60"
+                    >
+                      <Save aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={1.5} />
+                      {saving ? "Saving..." : "Create"}
+                    </button>
+                  )}
+                  {editorMode === "edit" && (
+                    <div className="relative">
+                      <button
+                        type="button"
+                        disabled={controlsDisabled}
+                        onClick={() => setMoreMenuOpen((open) => !open)}
+                        className="flex h-7 w-7 items-center justify-center rounded-[4px] text-[var(--team-template-aux)] transition-colors duration-150 hover:bg-[var(--team-template-row-hover)] hover:text-[var(--team-template-title)] disabled:cursor-not-allowed disabled:opacity-50"
+                        aria-label="More actions"
+                        aria-expanded={moreMenuOpen}
+                      >
+                        <MoreHorizontal aria-hidden="true" className="h-4 w-4" strokeWidth={1.6} />
+                      </button>
+                      {moreMenuOpen && (
+                        <div className="absolute right-0 top-full z-40 mt-2 w-44 overflow-hidden rounded-[8px] border border-[var(--team-template-border-strong)] bg-[var(--team-template-surface)] p-1 shadow-2xl">
+                          <button
+                            type="button"
+                            disabled={controlsDisabled}
+                            onClick={() => {
+                              setMoreMenuOpen(false);
+                              onDelete();
+                            }}
+                            className="flex h-8 w-full items-center gap-2 rounded-[6px] px-2.5 text-left text-[12px] font-medium text-red-300/90 transition-colors duration-150 hover:bg-red-500/10 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <Trash2 aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={1.4} />
+                            {deleting ? "Deleting..." : "Delete template"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
             {canEdit && !isEditing && (
               <>
                 <button
                   type="button"
                   disabled={deleting}
                   onClick={onEdit}
-                  className={`${quietButtonClassName} h-8 gap-1.5 px-3 text-[12px] font-medium disabled:opacity-50`}
+                  className="inline-flex h-8 items-center justify-center gap-1.5 bg-transparent px-2 text-[12px] font-medium text-[var(--team-template-muted)] transition-colors duration-150 hover:text-[var(--team-template-title)] disabled:opacity-50"
                 >
                   <Pencil aria-hidden="true" className="h-3.5 w-3.5 text-[var(--team-template-muted)]" strokeWidth={1.2} />
                   编辑
@@ -1918,7 +2396,7 @@ function TemplateDetailView({
                   type="button"
                   disabled={deleting}
                   onClick={onDelete}
-                  className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-3 text-[12px] font-medium text-red-300 ${hairlineSurfaceClassName} transition-all duration-150 ease-out hover:-translate-y-px hover:border-red-400/30 hover:bg-red-500/10 disabled:opacity-50`}
+                  className={`${dangerGhostButtonClassName} h-8 gap-1.5 px-3 text-[12px] font-medium`}
                 >
                   <Trash2 aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={1.2} />
                   {deleting ? "Deleting..." : "Delete"}
@@ -1942,7 +2420,12 @@ function TemplateDetailView({
         </div>
       </header>
 
-      <div className="grid gap-12 lg:grid-cols-[minmax(220px,0.9fr)_minmax(0,2fr)]">
+      <div
+        className={[
+          "grid lg:grid-cols-[minmax(220px,0.9fr)_minmax(0,2fr)]",
+          isEditing ? "gap-8" : "gap-12",
+        ].join(" ")}
+      >
         <WorkflowPreview
           disabled={controlsDisabled}
           editable={isEditing}
@@ -1952,8 +2435,12 @@ function TemplateDetailView({
           }}
         />
 
-        <section className="border-t border-[var(--team-template-border)] pt-5">
-          <header className="mb-3 flex items-center justify-between gap-3">
+        <section
+          className={
+            isEditing ? "pt-3" : "border-t border-[var(--team-template-border)] pt-4"
+          }
+        >
+          <header className="mb-2 flex min-h-7 items-center justify-between gap-3">
             <h2 className="text-[12px] font-medium tracking-[0.02em] text-[var(--team-template-muted)]">
               成员信息
             </h2>
@@ -1977,7 +2464,7 @@ function TemplateDetailView({
 
           <div>
               {viewDetail.members.length === 0 && (
-                <p className="rounded-md border border-dashed border-[var(--team-template-border)] px-3 py-4 text-[12px] text-[var(--team-template-muted)]">
+                <p className="rounded-[4px] border border-dashed border-[var(--team-template-border)] px-3 py-4 text-[12px] text-[var(--team-template-muted)]">
                   No members added yet.
                 </p>
               )}
@@ -1991,9 +2478,9 @@ function TemplateDetailView({
                   "No role description.";
 
                 const rowClassName = [
-                  "team-template-member-row group grid min-h-[48px] w-full grid-cols-1 gap-1.5 border-b border-[var(--team-template-border)] px-2 py-2 text-left transition-colors duration-150 last:border-b-0 md:grid-cols-[minmax(150px,0.78fr)_minmax(0,1fr)_auto] md:items-center md:gap-3",
+                  "team-template-member-row group grid min-h-[38px] w-full grid-cols-1 gap-1 border-b border-[var(--team-template-border)] px-1.5 py-1.5 text-left text-[13px] transition-colors duration-150 last:border-b-0 md:grid-cols-[minmax(140px,0.72fr)_minmax(0,1fr)_auto] md:items-center md:gap-2",
                   active
-                    ? "bg-[var(--team-template-row-hover)]"
+                    ? "bg-[var(--team-template-row-active)] shadow-[inset_2px_0_0_var(--team-template-border-strong)]"
                     : "hover:bg-[var(--team-template-row-hover)]",
                 ].join(" ");
                 const rowContent = (
@@ -2013,18 +2500,19 @@ function TemplateDetailView({
                             commitFormChange({ ...form, leadMemberId: member.id });
                           }}
                           onClick={(event) => event.stopPropagation()}
-                          className="h-3.5 w-3.5 shrink-0 border-[var(--team-template-border-strong)] bg-[var(--team-template-surface)] text-[var(--primary)] focus:ring-[var(--primary)] disabled:opacity-60"
+                          className="h-3.5 w-3.5 shrink-0 border-[var(--team-template-border-strong)] bg-[var(--team-template-field-surface)] text-[var(--primary)] focus:ring-[var(--primary)] disabled:opacity-60"
                           aria-label="Set lead member"
                         />
                       ) : null}
                       <span
-                        className={`min-w-0 truncate rounded-[4px] border px-1.5 py-0.5 font-mono text-[11px] font-semibold leading-none text-[var(--team-template-code-text)] transition-colors duration-150 group-hover:text-[var(--team-template-title)] ${getMemberRoleToneClassName(member, index)}`}
+                        className={`min-w-0 truncate font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--team-template-code-text)] transition-colors duration-150 group-hover:text-[var(--team-template-title)] ${getMemberRoleToneClassName(member, index)}`}
                         title={roleKey}
                       >
                         {roleKey}
                       </span>
                       {isLead && (
-                        <span className="font-mono text-[10px] font-medium text-[var(--team-template-muted)]">
+                        <span className="inline-flex items-center gap-1 font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--team-template-muted)]">
+                          <span className="h-1 w-1 rounded-full bg-current opacity-70" />
                           Lead
                         </span>
                       )}
@@ -2055,7 +2543,7 @@ function TemplateDetailView({
                             event.stopPropagation();
                             removeFormMember(member.id);
                           }}
-                          className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--team-template-muted)] transition-colors duration-150 hover:bg-red-500/10 hover:text-red-300 disabled:opacity-40"
+                          className="pointer-events-none flex h-6 w-6 items-center justify-center rounded-[4px] text-[var(--team-template-muted)] opacity-0 transition-all duration-150 hover:bg-red-500/10 hover:text-red-300 group-hover:pointer-events-auto group-hover:opacity-100 focus:pointer-events-auto focus:opacity-100 disabled:opacity-40"
                           aria-label="Remove member"
                         >
                           <Trash2 aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={1.4} />
@@ -2127,46 +2615,9 @@ function TemplateDetailView({
           </div>
         </section>
       )}
-      {isEditing && (
-        <div className="mt-8 flex flex-wrap items-center justify-end gap-3 border-t border-[var(--team-template-border)] pt-5">
-          {formError && (
-            <p className="mr-auto max-w-xl text-[13px] text-red-400">
-              {formError}
-            </p>
-          )}
-          {editorMode === "edit" && (
-            <button
-              type="button"
-              disabled={controlsDisabled}
-              onClick={onDelete}
-              className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-md px-3 text-[13px] font-medium text-red-300 ${hairlineSurfaceClassName} transition-all duration-150 ease-out hover:-translate-y-px hover:border-red-400/30 hover:bg-red-500/10 disabled:opacity-50`}
-            >
-              <Trash2 aria-hidden="true" className="h-4 w-4" strokeWidth={1.4} />
-              {deleting ? "Deleting..." : "Delete"}
-            </button>
-          )}
-          <button
-            type="button"
-            disabled={controlsDisabled}
-            onClick={onCancel}
-            className={`${quietButtonClassName} h-9 px-4 text-[13px] font-medium disabled:opacity-50`}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            disabled={controlsDisabled}
-            onClick={onSave ?? (() => undefined)}
-            className="inline-flex h-9 items-center gap-2 rounded-md border border-white/10 bg-[#ededed] px-5 text-[13px] font-medium text-[#08090a] shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] transition-all duration-150 ease-out hover:-translate-y-px hover:bg-white disabled:opacity-60"
-          >
-            <Save aria-hidden="true" className="h-4 w-4" strokeWidth={1.5} />
-            {saving ? "Saving..." : "Save"}
-          </button>
-        </div>
-      )}
       </div>
 
-      <aside className="min-h-0 border-t border-[var(--team-template-border)] p-4 lg:h-full lg:border-l lg:border-t-0 lg:p-5">
+      <aside className="min-h-0 border-t border-[var(--team-template-grid-line-strong)] p-4 lg:h-full lg:border-l lg:border-t-0 lg:p-5">
         {selectedMember && (
           <TemplateMemberInfoPage
             disabled={controlsDisabled}
@@ -2174,12 +2625,91 @@ function TemplateDetailView({
             fieldErrors={fieldErrors}
             formMember={selectedFormMember ?? undefined}
             index={selectedMemberIndex}
+            installedSkills={installedSkills}
             isLead={selectedMember.id === viewDetail.lead_member_id}
             member={selectedMember}
             onMemberChange={updateSelectedFormMember}
+            runtimes={runtimes}
           />
         )}
       </aside>
+    </div>
+  );
+}
+
+function UnsavedEditorExitDialog({
+  saving,
+  onCancel,
+  onDiscard,
+  onSave,
+}: {
+  saving: boolean;
+  onCancel: () => void;
+  onDiscard: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="unsaved-template-title"
+    >
+      <div className="w-full max-w-[420px] rounded-[12px] border border-[var(--team-template-border-strong)] bg-[var(--team-template-surface)] p-4 shadow-2xl">
+        <div className="flex items-start gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] border border-[var(--team-template-border)] text-[var(--team-template-icon)]">
+            <Save aria-hidden="true" className="h-4 w-4" strokeWidth={1.4} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2
+              id="unsaved-template-title"
+              className="text-[15px] font-semibold text-[var(--team-template-title)]"
+            >
+              保存修改后退出？
+            </h2>
+            <p className="mt-1 text-[13px] leading-relaxed text-[var(--team-template-muted)]">
+              当前模板有未保存的修改。可以先保存，或丢弃修改直接退出编辑状态。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={saving}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] text-[var(--team-template-muted)] transition hover:bg-[var(--team-template-row-hover)] hover:text-[var(--team-template-title)] disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label="继续编辑"
+            title="继续编辑"
+          >
+            <X aria-hidden="true" className="h-3.5 w-3.5" />
+          </button>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onDiscard}
+            disabled={saving}
+            className={`${dangerGhostButtonClassName} h-8 px-3 text-[12px] font-medium disabled:cursor-not-allowed`}
+          >
+            丢弃修改
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={saving}
+            className={`${quietButtonClassName} h-8 px-3 text-[12px] font-medium disabled:cursor-not-allowed disabled:opacity-60`}
+          >
+            继续编辑
+          </button>
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={saving}
+            className="inline-flex h-8 items-center justify-center rounded-[6px] border border-white/20 bg-[#f4f4f5] px-3 text-[12px] font-semibold text-[#08090a] shadow-[inset_0_1px_0_rgba(255,255,255,0.9),inset_0_-1px_0_rgba(0,0,0,0.08),0_1px_0_rgba(0,0,0,0.35),0_2px_0_rgba(0,0,0,0.16)] transition-all duration-150 ease-out hover:-translate-y-px hover:bg-white disabled:cursor-not-allowed disabled:translate-y-0 disabled:opacity-70"
+          >
+            {saving ? "保存中..." : "保存并退出"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -2324,6 +2854,7 @@ export function TeamTemplatesPage() {
     refreshMembers,
     refreshSessions,
     showToast,
+    skills,
   } = useWorkspace();
   const [templates, setTemplates] = useState<TeamPresetSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -2338,6 +2869,7 @@ export function TeamTemplatesPage() {
   const [form, setForm] = useState<TeamPresetForm>(blankForm);
   const [formError, setFormError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [showExitPrompt, setShowExitPrompt] = useState(false);
   const [editorSelectedMemberId, setEditorSelectedMemberId] = useState<
     string | null
   >(null);
@@ -2351,6 +2883,7 @@ export function TeamTemplatesPage() {
   >([]);
   const [projectTemplateMembersLoaded, setProjectTemplateMembersLoaded] =
     useState(false);
+  const [runtimes, setRuntimes] = useState<AgentRuntimeStatus[]>([]);
 
   const loadTemplates = useCallback(async () => {
     setLoading(true);
@@ -2386,6 +2919,22 @@ export function TeamTemplatesPage() {
   useEffect(() => {
     void loadTemplates();
   }, [loadTemplates]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void agentRuntimeApi
+      .list()
+      .then((response) => {
+        if (!cancelled) setRuntimes(response.runners);
+      })
+      .catch(() => {
+        if (!cancelled) setRuntimes([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!selectedId) {
@@ -2437,6 +2986,24 @@ export function TeamTemplatesPage() {
       selectedDetail.id === selectedId &&
       !selectedDetail.is_builtin,
   );
+  const editorBaselineForm = useMemo(() => {
+    if (!editorMode) return null;
+    if (editorMode === "edit") {
+      return selectedDetailForView ? detailToForm(selectedDetailForView) : null;
+    }
+    return blankForm();
+  }, [editorMode, selectedDetailForView]);
+  const hasUnsavedEditorChanges = Boolean(
+    editorMode &&
+      editorBaselineForm &&
+      formDirtySnapshot(form) !== formDirtySnapshot(editorBaselineForm),
+  );
+  const editorSaveStatus =
+    editorMode === "edit"
+      ? saving || hasUnsavedEditorChanges
+        ? "Saving..."
+        : "Saved"
+      : null;
 
   const openTemplateDetail = (teamId: string) => {
     setDetailError(null);
@@ -2449,6 +3016,7 @@ export function TeamTemplatesPage() {
     setForm(draft);
     setFormError(null);
     setFieldErrors({});
+    setShowExitPrompt(false);
     setEditorSelectedMemberId(draft.members[0]?.id ?? null);
     setEditorMode("create");
     setSelectedId(null);
@@ -2460,13 +3028,14 @@ export function TeamTemplatesPage() {
     setForm(draft);
     setFormError(null);
     setFieldErrors({});
+    setShowExitPrompt(false);
     setEditorSelectedMemberId(
       draft.leadMemberId || draft.members[0]?.id || null,
     );
     setEditorMode("edit");
   };
 
-  const saveTemplate = async () => {
+  const saveTemplate = async (): Promise<boolean> => {
     setFormError(null);
     setFieldErrors({});
     const validation = validateTeamPresetForm(form);
@@ -2478,7 +3047,7 @@ export function TeamTemplatesPage() {
       if (validation.issue.memberId) {
         setEditorSelectedMemberId(validation.issue.memberId);
       }
-      return;
+      return false;
     }
 
     setSaving(true);
@@ -2491,12 +3060,36 @@ export function TeamTemplatesPage() {
       await loadTemplates();
       setSelectedDetail(saved);
       setSelectedId(saved.id);
+      setShowExitPrompt(false);
+      return true;
     } catch (error) {
       const errorMessage = errorText(error, "Failed to save template.");
       setFormError(errorMessage);
-      return;
+      return false;
     } finally {
       setSaving(false);
+    }
+  };
+
+  const closeEditor = () => {
+    setShowExitPrompt(false);
+    setEditorMode(null);
+    setFieldErrors({});
+    setFormError(null);
+  };
+
+  const requestExitEditor = () => {
+    if (hasUnsavedEditorChanges) {
+      setShowExitPrompt(true);
+      return;
+    }
+    closeEditor();
+  };
+
+  const saveAndExitEditor = async () => {
+    const saved = await saveTemplate();
+    if (!saved) {
+      setShowExitPrompt(false);
     }
   };
 
@@ -2530,6 +3123,30 @@ export function TeamTemplatesPage() {
     },
     [editorMode, loadTemplates, saving],
   );
+
+  useEffect(() => {
+    if (
+      editorMode !== "edit" ||
+      !hasUnsavedEditorChanges ||
+      saving ||
+      deleting
+    ) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void autoSaveTemplate(form);
+    }, 700);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [
+    autoSaveTemplate,
+    deleting,
+    editorMode,
+    form,
+    hasUnsavedEditorChanges,
+    saving,
+  ]);
 
   const validateMemberToolsOnBlur = useCallback(
     (draft: TeamPresetForm, memberId: string) => {
@@ -2575,6 +3192,7 @@ export function TeamTemplatesPage() {
     setDeleting(true);
     try {
       await teamPresetsApi.delete(selectedDetailForView.id);
+      setShowExitPrompt(false);
       setEditorMode(null);
       setFieldErrors({});
       setFormError(null);
@@ -2811,16 +3429,15 @@ export function TeamTemplatesPage() {
             fieldErrors={fieldErrors}
             form={form}
             formError={formError}
+            installedSkills={skills}
+            runtimes={runtimes}
             saving={saving}
+            saveStatus={editorSaveStatus}
             selectedEditableMemberId={editorSelectedMemberId}
             usingTemplate={false}
             onAutoSave={(draft) => void autoSaveTemplate(draft)}
-            onBack={() => setEditorMode(null)}
-            onCancel={() => {
-              setEditorMode(null);
-              setFieldErrors({});
-              setFormError(null);
-            }}
+            onBack={requestExitEditor}
+            onCancel={requestExitEditor}
             onDelete={() => void deleteSelected()}
             onEdit={() => undefined}
             onEditableMemberSelect={setEditorSelectedMemberId}
@@ -2848,6 +3465,8 @@ export function TeamTemplatesPage() {
             detailError={detailError}
             detailLoading={detailViewLoading}
             deleting={deleting}
+            installedSkills={skills}
+            runtimes={runtimes}
             usingTemplate={applyingTemplate}
             onBack={() => setSelectedId(null)}
             onDelete={() => void deleteSelected()}
@@ -2973,6 +3592,14 @@ export function TeamTemplatesPage() {
               }
             }}
             onConfirm={() => void applyTemplateToProject()}
+          />
+        )}
+        {showExitPrompt && (
+          <UnsavedEditorExitDialog
+            saving={saving}
+            onCancel={() => setShowExitPrompt(false)}
+            onDiscard={closeEditor}
+            onSave={() => void saveAndExitEditor()}
           />
         )}
       </main>
