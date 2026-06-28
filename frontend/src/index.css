@@ -412,17 +412,17 @@ body[data-mode="light"] .animate-shimmer::after {
 }
 
 .team-template-page {
-  --team-template-canvas: #080808;
-  --team-template-border: rgba(255, 255, 255, 0.06);
-  --team-template-border-strong: rgba(255, 255, 255, 0.09);
+  --team-template-canvas: #070708;
+  --team-template-border: rgba(255, 255, 255, 0.08);
+  --team-template-border-strong: rgba(255, 255, 255, 0.16);
   --team-template-grid-line: var(--team-template-border);
   --team-template-grid-line-strong: var(--team-template-border-strong);
-  --team-template-surface: #0c0c0d;
-  --team-template-surface-top: #101011;
-  --team-template-surface-hover: #111112;
-  --team-template-active-surface: #0f0f10;
+  --team-template-surface: #09090a;
+  --team-template-surface-top: #0b0b0c;
+  --team-template-surface-hover: rgba(255, 255, 255, 0.035);
+  --team-template-active-surface: rgba(255, 255, 255, 0.025);
   --team-template-inner-stroke: rgba(255, 255, 255, 0.06);
-  --team-template-inner-stroke-strong: rgba(255, 255, 255, 0.08);
+  --team-template-inner-stroke-strong: rgba(255, 255, 255, 0.12);
   --team-template-tag-surface: rgba(255, 255, 255, 0.03);
   --team-template-avatar-surface: rgba(255, 255, 255, 0.035);
   --team-template-pipeline-track: rgba(255, 255, 255, 0.07);
@@ -430,14 +430,19 @@ body[data-mode="light"] .animate-shimmer::after {
   --team-template-pipeline-dot: #d8d9dc;
   --team-template-pipeline-dot-muted: rgba(255, 255, 255, 0.28);
   --team-template-pipeline-dot-glow: rgba(216, 217, 220, 0.34);
-  --team-template-code-surface: rgba(255, 255, 255, 0.03);
-  --team-template-code-border: rgba(255, 255, 255, 0.08);
+  --team-template-code-surface: #070708;
+  --team-template-code-border: rgba(255, 255, 255, 0.1);
   --team-template-code-text: #a7aaaf;
   --team-template-index: rgba(138, 141, 145, 0.45);
   --team-template-disabled: rgba(138, 141, 145, 0.36);
   --team-template-ghost-badge-border: rgba(255, 255, 255, 0.07);
-  --team-template-row-hover: rgba(255, 255, 255, 0.03);
-  --team-template-member-description: #8a8d91;
+  --team-template-row-hover: rgba(255, 255, 255, 0.025);
+  --team-template-row-active: rgba(255, 255, 255, 0.035);
+  --team-template-field-surface: #080809;
+  --team-template-field-highlight: rgba(255, 255, 255, 0.035);
+  --team-template-field-focus: rgba(255, 255, 255, 0.78);
+  --team-template-step-surface: rgba(255, 255, 255, 0.016);
+  --team-template-member-description: #8a8f98;
   --team-template-primary-button-top: rgba(244, 245, 246, 0.96);
   --team-template-primary-button-bottom: rgba(214, 218, 226, 0.92);
   --team-template-primary-button-text: #08090a;
@@ -449,17 +454,17 @@ body[data-mode="light"] .animate-shimmer::after {
   --team-template-primary-button-kbd-border: rgba(8, 9, 10, 0.14);
   --team-template-primary-button-kbd-text: rgba(8, 9, 10, 0.62);
   --team-template-hover: var(--team-template-surface-hover);
-  --team-template-top-highlight: rgba(255, 255, 255, 0.1);
-  --team-template-top-highlight-strong: rgba(255, 255, 255, 0.13);
+  --team-template-top-highlight: rgba(255, 255, 255, 0.055);
+  --team-template-top-highlight-strong: rgba(255, 255, 255, 0.095);
   --team-template-top-glow: linear-gradient(
     90deg,
     transparent 0%,
     rgba(255, 255, 255, 0.08) 50%,
     transparent 100%
   );
-  --team-template-title: #eeeeee;
-  --team-template-muted: #8a8d91;
-  --team-template-aux: #62656b;
+  --team-template-title: #ffffff;
+  --team-template-muted: #8a8f98;
+  --team-template-aux: #6f747c;
   --team-template-icon-strong: #8a8f98;
   --team-template-accent: var(--primary-hover);
   --team-template-accent-glow: color-mix(in srgb, var(--primary-hover) 34%, transparent);
@@ -494,6 +499,11 @@ body[data-mode="light"] .team-template-page {
   --team-template-disabled: rgba(98, 102, 109, 0.42);
   --team-template-ghost-badge-border: rgba(15, 23, 42, 0.1);
   --team-template-row-hover: rgba(15, 23, 42, 0.03);
+  --team-template-row-active: rgba(15, 23, 42, 0.045);
+  --team-template-field-surface: #fbfbfc;
+  --team-template-field-highlight: rgba(255, 255, 255, 0.65);
+  --team-template-field-focus: rgba(15, 23, 42, 0.72);
+  --team-template-step-surface: rgba(15, 23, 42, 0.018);
   --team-template-member-description: #62666d;
   --team-template-primary-button-top: #171b24;
   --team-template-primary-button-bottom: #0d1118;

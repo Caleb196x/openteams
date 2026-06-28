@@ -28,6 +28,7 @@ const check = (label: string, cond: boolean, detail?: unknown) => {
 };
 
 const source = readFileSync(new URL('./TeamTemplatesPage.tsx', import.meta.url), 'utf8');
+const styleSource = readFileSync(new URL('../index.css', import.meta.url), 'utf8');
 
 console.log('TeamTemplatesPage');
 
@@ -35,6 +36,7 @@ const draft = createTeamPresetDraft();
 check(
   'new entry creates an aggregate draft',
   draft.leadMemberId === 'lead' &&
+    draft.id.startsWith('custom_') &&
     draft.members.length === 1 &&
     Array.isArray(draft.workflowSteps),
   draft,
@@ -145,7 +147,14 @@ check('keeps built-in templates read-only', source.includes('selectedDetail.is_b
 check('supports create, update, and delete flows', source.includes('teamPresetsApi.create') && source.includes('teamPresetsApi.update') && source.includes('teamPresetsApi.delete'));
 check('confirms deletion before mutating', source.includes('window.confirm'));
 check('preserves form input on save failure', source.includes('setFormError(errorMessage') && source.includes('return;'));
+check('confirms unsaved editor exit before leaving edit mode', source.includes('UnsavedEditorExitDialog') && source.includes('hasUnsavedEditorChanges') && source.includes('保存并退出') && source.includes('丢弃修改') && source.includes('{isEditing ? "退出" : "返回模板"}'));
+check('auto-generates template ids and hides low-value toggles in the editor', source.includes('createUniqueTemplateId') && !source.includes('label="模板 ID"') && !source.includes('Enabled in picker'));
+check('uses content-as-ui document header in edit mode', source.includes('team-template-document-head') && source.includes('team-template-document-title') && source.includes('team-template-document-description') && source.includes('absolute right-0 top-0') && !source.includes('label="团队名"') && !source.includes('label="描述"'));
+check('uses edit-mode auto-save with a subtle saved status', source.includes('editorSaveStatus') && source.includes('autoSaveTemplate(form)') && source.includes('Saved') && source.includes('window.setTimeout'));
+check('folds edit-mode delete into the more menu', source.includes('MoreHorizontal') && source.includes('Delete template') && source.includes('setMoreMenuOpen') && !source.includes('mt-8 flex flex-wrap items-center justify-end gap-3 border-t'));
 check('shows member skills and role prompt details', source.includes('selected_skill_ids') && source.includes('system_prompt'));
+check('uses shared DropdownSelect for member runtime and model picking', source.includes('DropdownSelect') && source.includes('runtimeOptions') && source.includes('modelOptions') && source.includes('setRuntimes(response.runners)'));
+check('uses shared DropdownSelect for runtime-specific skill picking', source.includes('selectionMode="multiple"') && source.includes('listNative(effectiveRunnerType)') && source.includes('runtimeSkills') && source.includes('skillPlaceholder') && !source.includes('技能 ID（逗号分隔）'));
 check('keeps Linear visual refinement hooks', source.includes('team-template-card') && source.includes('team-template-member-row') && source.includes('team-template-field'));
 check('uses aggregate draft workflow steps', source.includes('workflowSteps') && source.includes('normalizeWorkflowSteps'));
 check('supports editable markdown fields rendered with AgentMarkdown', source.includes('function MarkdownEditableField') && source.includes('<AgentMarkdown content={value}'));
@@ -155,6 +164,12 @@ check('blocks invalid MCP JSON before payload submission', source.includes('Inva
 check('MCP blur validation sets visible member tool errors', source.includes('validateMemberToolsOnBlur') && source.includes('setFormError(issue.message)') && source.includes('setEditorSelectedMemberId(issue.memberId)'));
 check('MCP blur uses member-scoped validation instead of whole-form validation', source.includes('{ validateTools: true }') && source.includes('onValidateMemberTools?.(nextForm, selectedFormMember.id)'));
 check('workflow step edit keys stay stable while title changes', source.includes('key={`workflow-step-${index}`}') && !source.includes('key={`${index}-${step.title}`}'));
+check('workflow edit fields use the sharper deboxed timeline treatment', source.includes('variant="bare"') && source.includes('team-template-deboxed-workflow') && source.includes('team-template-compact-workflow-step'));
+check('edit detail uses compact Linear density and hover-revealed actions', source.includes('team-template-compact-editor') && source.includes('team-template-compact-field') && source.includes('variant="inline"') && source.includes('group-hover:pointer-events-auto') && source.includes('compact'));
+check('edit detail removes the large title-to-content spacer but keeps title breathing room', source.includes('editable ? "pt-3"') && source.includes('isEditing ? "pt-3"') && source.includes('isEditing ? "gap-8" : "gap-12"') && !source.includes('mt-8 gap-8') && !source.includes('isEditing ? "pb-8"'));
+check('workflow and member headings align on the same row height', source.includes('mb-3 flex min-h-7 items-center justify-between gap-3') && source.includes('mb-2 flex min-h-7 items-center justify-between gap-3'));
+check('editable MCP JSON uses code editor visual treatment', source.includes('pl-10 pr-3 font-mono') && styleSource.includes('--team-template-code-surface: #070708'));
+check('new/edit detail uses sharp field focus tokens', source.includes('focus:border-[var(--team-template-field-focus)]') && styleSource.includes('--team-template-field-surface'));
 check('delete actions expose deleting state', source.includes('Deleting...') && source.includes('deleting={deleting}') && source.includes('setEditorMode(null);'));
 check('reuses TemplateDetailView for create and edit mode', !source.includes('<TemplateEditor') && source.includes('editorMode={editorMode}'));
 check('adds and auto-selects custom member drafts', source.includes('addCustomMember') && source.includes('setSelectedMemberId(nextMember.id)'));
