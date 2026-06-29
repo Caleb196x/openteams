@@ -153,6 +153,7 @@ const hasRunningSessionActivity = (session: Session): boolean =>
 
 const hasSidebarPrioritySessionActivity = (session: Session): boolean =>
   hasRunningSessionActivity(session) ||
+  Boolean(session.hasUnreadAgentCompletion) ||
   Boolean(session.hasPendingWorkflowInput) ||
   Boolean(session.hasPendingWorkflowReview);
 
