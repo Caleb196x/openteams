@@ -60,6 +60,7 @@ import {
   projectDisplayDescription,
   projectDisplayName,
 } from "@/lib/projectDisplay";
+import { sanitizeProjectName } from "@/lib/projectName";
 import type { ShellOptionsMock } from "@/mockApiData";
 import type {
   ChatTeamPreset,
@@ -105,7 +106,7 @@ interface ProjectSidebarProps {
   onDeleteSession?: (sessionId: string) => Promise<void>;
   onCreateProject?: (
     data: CreateProjectRequest,
-    options?: { teamId?: string },
+    options?: { teamId?: string; openSessionComposer?: boolean },
   ) => Promise<unknown>;
   onUpdateProject?: (projectId: string, data: UpdateProject) => Promise<void>;
   onDeleteProject?: (projectId: string) => Promise<void>;
@@ -226,6 +227,16 @@ const getParentPath = (path: string): string => {
 
 const directoryEntryTime = (entry: DirectoryEntry): number =>
   typeof entry.last_modified === "number" ? entry.last_modified : 0;
+
+const sortWorkspaceDirectoryEntries = (
+  entries: DirectoryEntry[],
+): DirectoryEntry[] =>
+  [...entries].sort((a, b) => {
+    if (a.is_directory !== b.is_directory) {
+      return a.is_directory ? -1 : 1;
+    }
+    return a.name.localeCompare(b.name);
+  });
 
 function SidebarSection({
   title,
@@ -392,6 +403,15 @@ export function ProjectSidebar({
   const [workspaceCurrentPath, setWorkspaceCurrentPath] = useState("");
   const [workspaceBrowserLoading, setWorkspaceBrowserLoading] = useState(false);
   const [workspaceBrowserError, setWorkspaceBrowserError] = useState<
+    string | null
+  >(null);
+  const [workspaceDirectoryMutating, setWorkspaceDirectoryMutating] =
+    useState(false);
+  const [renamingWorkspacePath, setRenamingWorkspacePath] = useState<
+    string | null
+  >(null);
+  const [renameWorkspaceName, setRenameWorkspaceName] = useState("");
+  const [renameWorkspaceError, setRenameWorkspaceError] = useState<
     string | null
   >(null);
   const [workspaceBrowserScrolling, setWorkspaceBrowserScrolling] =
@@ -647,15 +667,12 @@ export function ProjectSidebar({
       const response = await filesystemApi.listDirectory(
         path?.trim() || undefined,
       );
-      const sortedEntries = [...response.entries].sort((a, b) => {
-        if (a.is_directory !== b.is_directory) {
-          return a.is_directory ? -1 : 1;
-        }
-        return a.name.localeCompare(b.name);
-      });
-      setWorkspaceEntries(sortedEntries);
+      setWorkspaceEntries(sortWorkspaceDirectoryEntries(response.entries));
       setWorkspaceCurrentPath(response.current_path);
       setProjectWorkspacePath(response.current_path);
+      setRenamingWorkspacePath(null);
+      setRenameWorkspaceName("");
+      setRenameWorkspaceError(null);
     } catch (err) {
       setWorkspaceBrowserError(
         err instanceof Error
@@ -677,6 +694,9 @@ export function ProjectSidebar({
       const roots = await filesystemApi.listRoots();
       setWorkspaceEntries(roots);
       setWorkspaceCurrentPath("");
+      setRenamingWorkspacePath(null);
+      setRenameWorkspaceName("");
+      setRenameWorkspaceError(null);
     } catch (err) {
       setWorkspaceBrowserError(
         err instanceof Error
@@ -690,6 +710,105 @@ export function ProjectSidebar({
       setWorkspaceBrowserLoading(false);
     }
   }, []);
+
+  const resetWorkspaceDirectoryRename = () => {
+    setRenamingWorkspacePath(null);
+    setRenameWorkspaceName("");
+    setRenameWorkspaceError(null);
+  };
+
+  const startWorkspaceDirectoryRename = (entry: DirectoryEntry) => {
+    setRenamingWorkspacePath(entry.path);
+    setRenameWorkspaceName(entry.name);
+    setRenameWorkspaceError(null);
+  };
+
+  const createWorkspaceDirectory = async () => {
+    const parentPath = workspaceCurrentPath.trim();
+    if (!parentPath || workspaceDirectoryMutating) return;
+
+    setWorkspaceDirectoryMutating(true);
+    setWorkspaceBrowserError(null);
+    setRenameWorkspaceError(null);
+    try {
+      const created = await filesystemApi.createDirectory({
+        parent_path: parentPath,
+        name: translate("sidebar.newFolderName", "New Folder"),
+      });
+      await loadWorkspaceDirectory(parentPath);
+      setProjectWorkspacePath(created.path);
+      setRenamingWorkspacePath(created.path);
+      setRenameWorkspaceName(created.name);
+    } catch (err) {
+      setWorkspaceBrowserError(
+        err instanceof Error
+          ? err.message
+          : translate(
+              "sidebar.createFolderFailed",
+              "Folder creation failed",
+            ),
+      );
+    } finally {
+      setWorkspaceDirectoryMutating(false);
+    }
+  };
+
+  const commitWorkspaceDirectoryRename = async () => {
+    const targetPath = renamingWorkspacePath;
+    const nextName = renameWorkspaceName.trim();
+    if (!targetPath || workspaceDirectoryMutating) return;
+    if (!nextName) {
+      setRenameWorkspaceError(
+        translate("sidebar.folderNameRequired", "Folder name is required"),
+      );
+      return;
+    }
+
+    const originalEntry = workspaceEntries.find(
+      (entry) => entry.path === targetPath,
+    );
+    if (originalEntry?.name === nextName) {
+      resetWorkspaceDirectoryRename();
+      return;
+    }
+
+    setWorkspaceDirectoryMutating(true);
+    setRenameWorkspaceError(null);
+    try {
+      const renamed = await filesystemApi.renameDirectory({
+        path: targetPath,
+        name: nextName,
+      });
+      const parentPath = getParentPath(renamed.path) || workspaceCurrentPath;
+      await loadWorkspaceDirectory(parentPath);
+      setProjectWorkspacePath(renamed.path);
+      resetWorkspaceDirectoryRename();
+    } catch (err) {
+      setRenameWorkspaceError(
+        err instanceof Error
+          ? err.message
+          : translate("sidebar.renameFolderFailed", "Folder rename failed"),
+      );
+    } finally {
+      setWorkspaceDirectoryMutating(false);
+    }
+  };
+
+  const handleWorkspaceRenameKeyDown = (
+    event: React.KeyboardEvent<HTMLInputElement>,
+  ) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      event.stopPropagation();
+      void commitWorkspaceDirectoryRename();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      resetWorkspaceDirectoryRename();
+    }
+  };
 
   const updateProjectSwitcherPosition = useCallback(() => {
     const trigger = projectSwitcherTriggerRef.current;
@@ -922,6 +1041,7 @@ export function ProjectSidebar({
     setProjectWorkspacePath(draft.defaultWorkspacePath ?? "");
     setCreateError(null);
     setWorkspaceBrowserOpen(false);
+    resetWorkspaceDirectoryRename();
     setCreateFormOpen(true);
     closeProjectMenus();
   };
@@ -963,6 +1083,15 @@ export function ProjectSidebar({
     setProjectName("");
     setProjectWorkspacePath("");
     setEditingProject(null);
+    resetWorkspaceDirectoryRename();
+  };
+
+  const closeProjectForm = () => {
+    setCreateFormOpen(false);
+    setCreateError(null);
+    setWorkspaceBrowserOpen(false);
+    setEditingProject(null);
+    resetWorkspaceDirectoryRename();
   };
 
   useLayoutEffect(() => {
@@ -1070,10 +1199,7 @@ export function ProjectSidebar({
     if (!createFormOpen) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setCreateFormOpen(false);
-        setCreateError(null);
-        setWorkspaceBrowserOpen(false);
-        setEditingProject(null);
+        closeProjectForm();
       }
     };
     document.addEventListener("keydown", handleKeyDown);
@@ -1107,7 +1233,9 @@ export function ProjectSidebar({
     event: React.FormEvent<HTMLFormElement>,
   ) => {
     event.preventDefault();
-    const name = projectName.trim();
+    const name = editingProject
+      ? projectName.trim()
+      : sanitizeProjectName(projectName);
     if (!name || (!editingProject && !onCreateProject)) return;
 
     setCreatingProject(true);
@@ -1133,7 +1261,10 @@ export function ProjectSidebar({
             default_workspace_path: projectWorkspacePath.trim() || null,
             active_repo_id: null,
           },
-          { teamId: selectedTeamId || blankTeamId },
+          {
+            teamId: selectedTeamId || blankTeamId,
+            openSessionComposer: true,
+          },
         );
       }
       resetProjectForm();
@@ -1359,22 +1490,12 @@ export function ProjectSidebar({
           >
             <div
               className="absolute inset-0 bg-black/70"
-              onClick={() => {
-                setCreateFormOpen(false);
-                setCreateError(null);
-                setWorkspaceBrowserOpen(false);
-                setEditingProject(null);
-              }}
+              onClick={closeProjectForm}
             />
             <button
               type="button"
               className="sr-only"
-              onClick={() => {
-                setCreateFormOpen(false);
-                setCreateError(null);
-                setWorkspaceBrowserOpen(false);
-                setEditingProject(null);
-              }}
+              onClick={closeProjectForm}
             >
               {translate("sidebar.cancel", "Cancel")}
             </button>
@@ -1396,12 +1517,7 @@ export function ProjectSidebar({
                 <button
                   type="button"
                   className="rounded-md p-1 text-[var(--ink-tertiary)] transition hover:bg-[rgba(255,255,255,0.06)] hover:text-[var(--ink)]"
-                  onClick={() => {
-                    setCreateFormOpen(false);
-                    setCreateError(null);
-                    setWorkspaceBrowserOpen(false);
-                    setEditingProject(null);
-                  }}
+                  onClick={closeProjectForm}
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -1414,7 +1530,13 @@ export function ProjectSidebar({
                   <input
                     className={`${createProjectFieldBaseClass} text-[14px]`}
                     value={projectName}
-                    onChange={(event) => setProjectName(event.target.value)}
+                    onChange={(event) =>
+                      setProjectName(
+                        editingProject
+                          ? event.target.value
+                          : sanitizeProjectName(event.target.value),
+                      )
+                    }
                     placeholder={translate(
                       "sidebar.projectName",
                       "Project name",
@@ -1516,6 +1638,23 @@ export function ProjectSidebar({
                         </button>
                         <button
                           type="button"
+                          disabled={
+                            !workspaceCurrentPath ||
+                            workspaceBrowserLoading ||
+                            workspaceDirectoryMutating
+                          }
+                          className="flex h-6 w-6 items-center justify-center rounded-[4px] text-[var(--ink-tertiary)] transition hover:bg-[rgba(255,255,255,0.06)] hover:text-[var(--ink)] disabled:cursor-not-allowed disabled:opacity-35"
+                          onClick={() => void createWorkspaceDirectory()}
+                          aria-label={translate(
+                            "sidebar.newFolder",
+                            "New folder",
+                          )}
+                          title={translate("sidebar.newFolder", "New folder")}
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
                           className="flex h-6 w-6 items-center justify-center rounded-[4px] text-[var(--ink-tertiary)] transition hover:bg-[rgba(255,255,255,0.06)] hover:text-[var(--ink)]"
                           onClick={() =>
                             void loadWorkspaceDirectory(projectWorkspacePath)
@@ -1532,6 +1671,11 @@ export function ProjectSidebar({
                       {workspaceBrowserError && (
                         <div className="px-3 py-2 text-[12px] text-red-400">
                           {workspaceBrowserError}
+                        </div>
+                      )}
+                      {renameWorkspaceError && (
+                        <div className="px-3 py-2 text-[12px] text-red-400">
+                          {renameWorkspaceError}
                         </div>
                       )}
                       <div
@@ -1561,6 +1705,8 @@ export function ProjectSidebar({
                             const Icon = entry.is_directory ? Folder : FileText;
                             const selected =
                               entry.path === projectWorkspacePath.trim();
+                            const isRenaming =
+                              renamingWorkspacePath === entry.path;
                             return (
                               <div
                                 key={`${entry.path}-${directoryEntryTime(entry)}`}
@@ -1568,60 +1714,146 @@ export function ProjectSidebar({
                                   selected
                                     ? "bg-[rgba(255,255,255,0.08)] before:absolute before:bottom-1.5 before:left-0 before:top-1.5 before:w-[2px] before:rounded-full before:bg-[var(--primary)]"
                                     : ""
-                                }`}
-                              >
-                                <button
-                                  type="button"
-                                  disabled={!entry.is_directory}
-                                  className={`flex min-h-7 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-[rgba(255,255,255,0.04)] disabled:cursor-default disabled:opacity-55 ${
-                                    selected
-                                      ? "text-white"
-                                      : "text-[#8A8F98] hover:text-[#D1D5DB]"
                                   }`}
-                                  onClick={() => {
-                                    if (entry.is_directory) {
-                                      void loadWorkspaceDirectory(entry.path);
-                                    }
-                                  }}
-                                >
-                                  <Icon
-                                    className={`h-4 w-4 shrink-0 ${
-                                      selected
-                                        ? "text-white"
-                                        : entry.is_git_repo
-                                          ? "text-[#8A94FA]"
-                                          : "text-[#8A8F98]"
-                                    }`}
-                                  />
-                                  <span className="min-w-0 flex-1 truncate font-mono text-[12px]">
-                                    {entry.name}
-                                  </span>
-                                  {entry.is_git_repo && (
-                                    <span className="rounded-[4px] bg-[rgba(94,106,210,0.15)] px-1.5 py-px font-mono text-[10px] font-semibold text-[#8A94FA]">
-                                      GIT
-                                    </span>
-                                  )}
-                                </button>
-                                {entry.is_directory && (
-                                  <button
-                                    type="button"
-                                    className={`mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] text-[var(--ink-tertiary)] opacity-0 transition hover:bg-[rgba(255,255,255,0.06)] hover:text-[var(--ink)] group-hover/workspace-entry:opacity-100 ${
-                                      selected ? "!opacity-100" : ""
-                                    }`}
-                                    onClick={() =>
-                                      setProjectWorkspacePath(entry.path)
-                                    }
-                                    aria-label={translate(
-                                      "sidebar.selectWorkspace",
-                                      "Select workspace",
+                              >
+                                {isRenaming ? (
+                                  <>
+                                    <div className="flex min-h-7 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1">
+                                      <Folder className="h-4 w-4 shrink-0 text-[#8A94FA]" />
+                                      <input
+                                        className="h-6 min-w-0 flex-1 rounded-[4px] border border-[rgba(130,143,255,0.58)] bg-[rgba(255,255,255,0.06)] px-2 font-mono text-[12px] text-white outline-none"
+                                        value={renameWorkspaceName}
+                                        onChange={(event) =>
+                                          setRenameWorkspaceName(
+                                            event.target.value,
+                                          )
+                                        }
+                                        onKeyDown={handleWorkspaceRenameKeyDown}
+                                        onClick={(event) =>
+                                          event.stopPropagation()
+                                        }
+                                        disabled={workspaceDirectoryMutating}
+                                        aria-label={translate(
+                                          "sidebar.folderName",
+                                          "Folder name",
+                                        )}
+                                        autoFocus
+                                      />
+                                    </div>
+                                    <button
+                                      type="button"
+                                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] text-[var(--ink-tertiary)] transition hover:bg-[rgba(255,255,255,0.06)] hover:text-[var(--ink)] disabled:cursor-not-allowed disabled:opacity-45"
+                                      onClick={() =>
+                                        void commitWorkspaceDirectoryRename()
+                                      }
+                                      disabled={workspaceDirectoryMutating}
+                                      aria-label={translate(
+                                        "sidebar.saveFolderName",
+                                        "Save folder name",
+                                      )}
+                                      title={translate(
+                                        "sidebar.saveFolderName",
+                                        "Save folder name",
+                                      )}
+                                    >
+                                      <Check className="h-3.5 w-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] text-[var(--ink-tertiary)] transition hover:bg-[rgba(255,255,255,0.06)] hover:text-[var(--ink)] disabled:cursor-not-allowed disabled:opacity-45"
+                                      onClick={resetWorkspaceDirectoryRename}
+                                      disabled={workspaceDirectoryMutating}
+                                      aria-label={translate(
+                                        "sidebar.cancelFolderRename",
+                                        "Cancel folder rename",
+                                      )}
+                                      title={translate(
+                                        "sidebar.cancelFolderRename",
+                                        "Cancel folder rename",
+                                      )}
+                                    >
+                                      <X className="h-3.5 w-3.5" />
+                                    </button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <button
+                                      type="button"
+                                      disabled={!entry.is_directory}
+                                      className={`flex min-h-7 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-[rgba(255,255,255,0.04)] disabled:cursor-default disabled:opacity-55 ${
+                                        selected
+                                          ? "text-white"
+                                          : "text-[#8A8F98] hover:text-[#D1D5DB]"
+                                      }`}
+                                      onClick={() => {
+                                        if (entry.is_directory) {
+                                          void loadWorkspaceDirectory(
+                                            entry.path,
+                                          );
+                                        }
+                                      }}
+                                    >
+                                      <Icon
+                                        className={`h-4 w-4 shrink-0 ${
+                                          selected
+                                            ? "text-white"
+                                            : entry.is_git_repo
+                                              ? "text-[#8A94FA]"
+                                              : "text-[#8A8F98]"
+                                        }`}
+                                      />
+                                      <span className="min-w-0 flex-1 truncate font-mono text-[12px]">
+                                        {entry.name}
+                                      </span>
+                                      {entry.is_git_repo && (
+                                        <span className="rounded-[4px] bg-[rgba(94,106,210,0.15)] px-1.5 py-px font-mono text-[10px] font-semibold text-[#8A94FA]">
+                                          GIT
+                                        </span>
+                                      )}
+                                    </button>
+                                    {entry.is_directory && (
+                                      <>
+                                        <button
+                                          type="button"
+                                          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] text-[var(--ink-tertiary)] opacity-0 transition hover:bg-[rgba(255,255,255,0.06)] hover:text-[var(--ink)] group-hover/workspace-entry:opacity-100 ${
+                                            selected ? "!opacity-100" : ""
+                                          }`}
+                                          onClick={() =>
+                                            startWorkspaceDirectoryRename(entry)
+                                          }
+                                          aria-label={translate(
+                                            "sidebar.renameFolder",
+                                            "Rename folder",
+                                          )}
+                                          title={translate(
+                                            "sidebar.renameFolder",
+                                            "Rename folder",
+                                          )}
+                                        >
+                                          <Pencil className="h-3.5 w-3.5" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className={`mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] text-[var(--ink-tertiary)] opacity-0 transition hover:bg-[rgba(255,255,255,0.06)] hover:text-[var(--ink)] group-hover/workspace-entry:opacity-100 ${
+                                            selected ? "!opacity-100" : ""
+                                          }`}
+                                          onClick={() =>
+                                            setProjectWorkspacePath(entry.path)
+                                          }
+                                          aria-label={translate(
+                                            "sidebar.selectWorkspace",
+                                            "Select workspace",
+                                          )}
+                                          title={translate(
+                                            "sidebar.selectWorkspace",
+                                            "Select workspace",
+                                          )}
+                                        >
+                                          <Check className="h-3.5 w-3.5" />
+                                        </button>
+                                      </>
                                     )}
-                                    title={translate(
-                                      "sidebar.selectWorkspace",
-                                      "Select workspace",
-                                    )}
-                                  >
-                                    <Check className="h-3.5 w-3.5" />
-                                  </button>
+                                  </>
                                 )}
                               </div>
                             );
@@ -1645,12 +1877,7 @@ export function ProjectSidebar({
                     <button
                       type="button"
                       className="cursor-pointer rounded-md px-2.5 py-1.5 text-[13px] font-medium text-[var(--ink-tertiary)] transition hover:bg-[rgba(255,255,255,0.055)] hover:text-[var(--ink)]"
-                      onClick={() => {
-                        setCreateFormOpen(false);
-                        setCreateError(null);
-                        setWorkspaceBrowserOpen(false);
-                        setEditingProject(null);
-                      }}
+                      onClick={closeProjectForm}
                     >
                       {translate("sidebar.cancel", "Cancel")}
                     </button>

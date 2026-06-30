@@ -299,6 +299,32 @@ impl ChatSessionAgent {
         .await
     }
 
+    pub async fn update_execution_config_for_next_run(
+        pool: &SqlitePool,
+        id: Uuid,
+        project_member_id: Option<Uuid>,
+        execution_config: MemberExecutionConfig,
+    ) -> Result<Self, sqlx::Error> {
+        sqlx::query_as::<_, ChatSessionAgent>(&format!(
+            r#"
+            UPDATE chat_session_agents
+            SET project_member_id = COALESCE(?2, project_member_id),
+                execution_config = ?3,
+                agent_session_id = NULL,
+                agent_message_id = NULL,
+                updated_at = datetime('now', 'subsec')
+            WHERE id = ?1
+              AND state IN ('idle', 'dead')
+            {CHAT_SESSION_AGENT_RETURNING}
+            "#
+        ))
+        .bind(id)
+        .bind(project_member_id)
+        .bind(Json(execution_config.normalized()))
+        .fetch_one(pool)
+        .await
+    }
+
     pub async fn sync_execution_config_for_project_member(
         pool: &SqlitePool,
         project_member_id: Uuid,

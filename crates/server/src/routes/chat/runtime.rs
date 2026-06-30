@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use services::services::{
     chat::should_include_message_in_history,
     chat_runner::ChatRunActivityLine,
+    member_execution::resolve_effective_member_execution_config,
     queued_message::{MemberQueueSnapshot, QueuedMessageService},
 };
 use tokio::fs;
@@ -176,7 +177,7 @@ pub async fn build_session_runtime_snapshot(
             agent_name,
             display_name: ensure_agent_handle(&display_name),
             avatar: monogram_from_name(&display_name),
-            model: agent.and_then(|agent| agent.model_name.clone()),
+            model: active_run_model(agent, session_agent),
             status,
             source_message_id,
             client_message_id,
@@ -217,6 +218,24 @@ fn active_run_status(state: &ChatSessionAgentState) -> Option<ChatActiveRunStatu
         ChatSessionAgentState::Stopping => Some(ChatActiveRunStatus::Stopping),
         ChatSessionAgentState::WaitingApproval => Some(ChatActiveRunStatus::WaitingApproval),
         ChatSessionAgentState::Idle | ChatSessionAgentState::Dead => None,
+    }
+}
+
+fn active_run_model(agent: Option<&ChatAgent>, session_agent: &ChatSessionAgent) -> Option<String> {
+    let Some(agent) = agent else {
+        return None;
+    };
+    match resolve_effective_member_execution_config(agent, session_agent) {
+        Ok(config) => config.model_name,
+        Err(err) => {
+            tracing::warn!(
+                agent_id = %agent.id,
+                session_agent_id = %session_agent.id,
+                error = %err,
+                "Failed to resolve active run model from member execution config"
+            );
+            agent.model_name.clone()
+        }
     }
 }
 

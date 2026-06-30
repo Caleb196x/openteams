@@ -114,9 +114,10 @@ check(
   source,
 );
 check(
-  "creates a blank session after project creation",
-  source.includes("projectApi.createSession(project.id") &&
-    source.includes("replaceActiveTab(createSessionTab(session.id))"),
+  "does not create an untitled session after project creation",
+  !source.includes("projectApi.createSession(project.id") &&
+    source.includes("openSessionComposer?: boolean") &&
+    source.includes("if (options?.openSessionComposer)"),
   source,
 );
 check(
@@ -134,15 +135,16 @@ check(
     source.includes("buildTemplateMemberSpecs") &&
     source.includes("teamPresets.find") &&
     source.includes("for (const spec of memberSpecs)") &&
-    source.includes("toast.projectCreatedWithTeam"),
+    source.includes("toast.projectCreatedWithTeam") &&
+    source.includes("setPendingProjectSessionProtocol"),
   source,
 );
 check(
   "onboarding creates a real project before opening the existing composer",
   source.includes("handleCreateOnboardingProject") &&
     source.includes("onCreateProjectFromOnboarding={handleCreateOnboardingProject}") &&
-    source.includes("return { project, session }") &&
-    source.includes("return { projectId: project.id, sessionId: session?.id ?? null }") &&
+    source.includes("return { project }") &&
+    source.includes("return { projectId: project.id, sessionId: null }") &&
     source.includes("setIsCreateSessionModalOpen(true)"),
   source,
 );

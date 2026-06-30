@@ -605,6 +605,12 @@ check(
   componentSource,
 );
 check(
+  "create project modal sanitizes project names before submit",
+  componentSource.includes("sanitizeProjectName(projectName)") &&
+    componentSource.includes("sanitizeProjectName(event.target.value)"),
+  componentSource,
+);
+check(
   "project switcher create row inherits menu background at rest",
   componentSource.includes("cursor-pointer border-none bg-transparent"),
   componentSource,
@@ -622,6 +628,11 @@ check(
   componentSource,
 );
 check(
+  "opens the new session composer after normal project creation",
+  componentSource.includes("openSessionComposer: true"),
+  componentSource,
+);
+check(
   "create project modal uses searchable team select",
   componentSource.includes("<DropdownSelect") &&
     componentSource.includes('selectionMode="single"') &&
@@ -633,7 +644,8 @@ check(
   componentSource.includes('const blankTeamId = "blank_team"') &&
     componentSource.includes('label: "Blank team"') &&
     componentSource.includes('description: "One starter AI member"') &&
-    componentSource.includes("{ teamId: selectedTeamId || blankTeamId }") &&
+    componentSource.includes("teamId: selectedTeamId || blankTeamId") &&
+    componentSource.includes("openSessionComposer: true") &&
     !componentSource.includes("fullstack_delivery"),
   componentSource,
 );
@@ -666,6 +678,15 @@ check(
     componentSource.includes("<RefreshCw className=\"h-3.5 w-3.5\"") &&
     componentSource.includes("before:w-[2px]") &&
     componentSource.includes("GIT"),
+  componentSource,
+);
+check(
+  "create project workspace browser can create and rename folders",
+  componentSource.includes("filesystemApi.createDirectory") &&
+    componentSource.includes("filesystemApi.renameDirectory") &&
+    componentSource.includes('translate("sidebar.newFolder"') &&
+    componentSource.includes('"sidebar.renameFolder"') &&
+    componentSource.includes("commitWorkspaceDirectoryRename()"),
   componentSource,
 );
 check(

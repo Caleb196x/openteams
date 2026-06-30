@@ -146,6 +146,7 @@ type ChatStreamEvent =
       session_agent_id: string;
       agent_id: string;
       agent_name: string;
+      model: string | null;
       run_id: string;
       source_message_id: string;
       client_message_id: string | null;
@@ -3136,7 +3137,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
           agent_name: event.agent_name,
           display_name: displayName,
           avatar: monogramFromName(event.agent_name),
-          model: agentModelsByIdRef.current[event.agent_id] ?? null,
+          model: event.model ?? agentModelsByIdRef.current[event.agent_id] ?? null,
           status: 'running',
           source_message_id: event.source_message_id,
           client_message_id: event.client_message_id ?? null,

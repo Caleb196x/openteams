@@ -199,6 +199,12 @@ type OnboardingOverlay =
 
 type CreateProjectOptions = {
   teamId?: string;
+  openSessionComposer?: boolean;
+};
+
+type PendingProjectSessionProtocol = {
+  projectId: string;
+  teamProtocol: string;
 };
 
 type ChatPresetConfigView = {
@@ -418,6 +424,8 @@ function WorkspaceLayout() {
     null,
   );
   const [leadMember, setLeadMember] = useState<Member | null>(null);
+  const [pendingProjectSessionProtocol, setPendingProjectSessionProtocol] =
+    useState<PendingProjectSessionProtocol | null>(null);
   const [createSessionWorkspaceLookup, setCreateSessionWorkspaceLookup] =
     useState<CreateSessionWorkspaceLookup>({
       workflowWorkspacePath: null,
@@ -1178,6 +1186,10 @@ function WorkspaceLayout() {
         },
       );
       let sessionForUi = backendSession;
+      const pendingTeamProtocol =
+        pendingProjectSessionProtocol?.projectId === selectedProjectId
+          ? pendingProjectSessionProtocol.teamProtocol
+          : null;
 
       if (options.taskMode === 'workflow') {
         await chatSessionsApi
@@ -1194,11 +1206,36 @@ function WorkspaceLayout() {
             team_protocol_enabled: null,
             default_workspace_path: null,
             chat_input_mode: 'workflow',
+            ...(pendingTeamProtocol
+              ? {
+                  team_protocol: pendingTeamProtocol,
+                  team_protocol_enabled: true,
+                }
+              : {}),
           })
           .then((updatedSession) => {
             sessionForUi = updatedSession;
           })
           .catch(() => undefined);
+      } else if (pendingTeamProtocol) {
+        await chatSessionsApi
+          .update(
+            backendSession.id,
+            chatSessionUpdatePayload({
+              team_protocol: pendingTeamProtocol,
+              team_protocol_enabled: true,
+            }),
+          )
+          .then((updatedSession) => {
+            sessionForUi = updatedSession;
+          })
+          .catch(() => undefined);
+      }
+
+      if (pendingTeamProtocol) {
+        setPendingProjectSessionProtocol((current) =>
+          current?.projectId === selectedProjectId ? null : current,
+        );
       }
 
       const nextChatInputMode =
@@ -1363,14 +1400,11 @@ function WorkspaceLayout() {
     options?: CreateProjectOptions,
   ) => {
     const project = await createProject(data);
-    let session = await projectApi.createSession(project.id, {
-      title: null,
-      workspace_path: data.default_workspace_path,
-    });
     const selectedTeamId = options?.teamId || blankTeamId;
     const selectedTeamPreset = teamPresets.find(
       (preset) => preset.id === selectedTeamId,
     );
+    const selectedTeamProtocol = selectedTeamPreset?.team_protocol?.trim() ?? "";
     const runtimes = await loadRuntimeStatuses();
     let starterMemberCreated = false;
     let templateMemberCount: number | null = null;
@@ -1386,16 +1420,6 @@ function WorkspaceLayout() {
         );
         if (templateMemberCount === 0) {
           teamSetupFailed = true;
-        }
-        const teamProtocol = selectedTeamPreset.team_protocol?.trim() ?? "";
-        if (teamProtocol) {
-          session = await chatSessionsApi.update(
-            session.id,
-            chatSessionUpdatePayload({
-              team_protocol: teamProtocol,
-              team_protocol_enabled: true,
-            }),
-          );
         }
       } catch (err) {
         teamSetupFailed = true;
@@ -1413,17 +1437,14 @@ function WorkspaceLayout() {
         teamSetupFailed = true;
       }
     }
-    const mappedSession = mapSession(session, {
-      activeSessionId: session.id,
-    });
-    setSessions((currentSessions) => [
-      mappedSession,
-      ...currentSessions
-        .filter((item) => item.id !== mappedSession.id)
-        .map((item) => ({ ...item, active: false })),
-    ]);
-    replaceActiveTab(createSessionTab(session.id));
-    setActiveSessionId(session.id);
+    setPendingProjectSessionProtocol(
+      selectedTeamProtocol
+        ? {
+            projectId: project.id,
+            teamProtocol: selectedTeamProtocol,
+          }
+        : null,
+    );
     const createdProjectToast = teamSetupFailed
       ? translate(
           "toast.projectCreatedTeamSetupFailed",
@@ -1454,8 +1475,11 @@ function WorkspaceLayout() {
               name: project.name,
             });
     showToast(createdProjectToast);
+    if (options?.openSessionComposer) {
+      setIsCreateSessionModalOpen(true);
+    }
     closeMobileSidebar();
-    return { project, session };
+    return { project };
   };
 
   const handleUpdateProject = async (
@@ -1509,7 +1533,7 @@ function WorkspaceLayout() {
     path: string;
     teamId: string | null;
   }) => {
-    const { project, session } = await handleCreateProject(
+    const { project } = await handleCreateProject(
       {
         name,
         repositories: [],
@@ -1520,7 +1544,7 @@ function WorkspaceLayout() {
       },
       { teamId: teamId ?? blankTeamId },
     );
-    return { projectId: project.id, sessionId: session?.id ?? null };
+    return { projectId: project.id, sessionId: null };
   };
 
   const handleOnboardingPreviewAppearanceChange = (
@@ -1542,6 +1566,9 @@ function WorkspaceLayout() {
 
   const handleOnboardingStateChange = (nextState: OnboardingState) => {
     setOnboardingState(nextState);
+    setOnboardingOverlay((current) =>
+      current ? { ...current, state: nextState } : current,
+    );
   };
 
   const handleUpgradeRead = (nextState: OnboardingState) => {

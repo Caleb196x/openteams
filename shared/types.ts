@@ -496,7 +496,7 @@ export type AgentRuntimeRefreshResponse = { runners: Array<AgentRuntimeStatus>, 
 
 export type AgentRuntimeDiagnostics = { runner_type: BaseCodingAgent, installed: boolean, executable: boolean, availability: AvailabilityInfo, config_path: string, install_indicator_path: string | null, discovered_models: Array<string>, model_source: AgentRuntimeModelSource, version: string | null, last_checked_at: string | null, last_error: string | null, run_mode: AgentRunMode, env_summary: Array<AgentRuntimeEnvSummary>, executor_options: JsonValue, };
 
-export type ChatStreamEvent = { "type": "message_new", message: ChatMessage, } | { "type": "message_updated", message: ChatMessage, } | { "type": "work_item_new", work_item: ChatWorkItem, } | { "type": "agent_delta", session_id: string, session_agent_id: string, agent_id: string, run_id: string, stream_type: ChatStreamDeltaType, content: string, delta: boolean, is_final: boolean, } | { "type": "agent_run_started", session_id: string, session_agent_id: string, agent_id: string, agent_name: string, run_id: string,
+export type ChatStreamEvent = { "type": "message_new", message: ChatMessage, } | { "type": "message_updated", message: ChatMessage, } | { "type": "work_item_new", work_item: ChatWorkItem, } | { "type": "agent_delta", session_id: string, session_agent_id: string, agent_id: string, run_id: string, stream_type: ChatStreamDeltaType, content: string, delta: boolean, is_final: boolean, } | { "type": "agent_run_started", session_id: string, session_agent_id: string, agent_id: string, agent_name: string, model: string | null, run_id: string,
 /**
  * User (or upstream) message whose processing triggered this run.
  */

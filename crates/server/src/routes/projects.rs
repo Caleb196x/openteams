@@ -264,15 +264,28 @@ async fn effective_member_runner(
     }
 }
 
-fn create_project_payload(payload: CreateProjectRequest) -> CreateProject {
-    CreateProject {
-        name: payload.name,
+fn sanitize_project_name(name: &str) -> String {
+    name.chars()
+        .filter(|character| character.is_alphanumeric())
+        .collect()
+}
+
+fn create_project_payload(payload: CreateProjectRequest) -> Result<CreateProject, ApiError> {
+    let name = sanitize_project_name(&payload.name);
+    if name.is_empty() {
+        return Err(ApiError::BadRequest(
+            "Project name is required after removing spaces and special characters.".to_string(),
+        ));
+    }
+
+    Ok(CreateProject {
+        name,
         repositories: payload.repositories,
         description: payload.description,
         status: payload.status,
         default_workspace_path: payload.default_workspace_path,
         active_repo_id: payload.active_repo_id,
-    }
+    })
 }
 
 async fn create_project_session_payload(
@@ -334,12 +347,13 @@ pub async fn create_project(
     State(deployment): State<DeploymentImpl>,
     Json(payload): Json<CreateProjectRequest>,
 ) -> Result<ResponseJson<ApiResponse<Project>>, ApiError> {
+    let payload = create_project_payload(payload)?;
     let project = deployment
         .project()
         .create_project(
             &deployment.db().pool,
             deployment.repo(),
-            create_project_payload(payload),
+            payload,
             deployment.user_id(),
         )
         .await?;
@@ -587,7 +601,7 @@ mod tests {
         CreateProjectRequest, CreateProjectSessionRequest, ProjectStatsQuery,
         create_project_payload, create_project_session_payload, stats_period,
     };
-    use crate::routes::chat;
+    use crate::{error::ApiError, routes::chat};
 
     async fn setup_pool() -> SqlitePool {
         let pool = SqlitePool::connect("sqlite::memory:")
@@ -717,7 +731,8 @@ mod tests {
             status: None,
             default_workspace_path: Some("E:/workspace".to_string()),
             active_repo_id: None,
-        });
+        })
+        .expect("create project payload");
 
         assert_eq!(payload.name, "Project");
         assert!(payload.repositories.is_empty());
@@ -725,6 +740,36 @@ mod tests {
             payload.default_workspace_path.as_deref(),
             Some("E:/workspace")
         );
+    }
+
+    #[test]
+    fn create_project_payload_removes_spaces_and_special_characters_from_name() {
+        let payload = create_project_payload(CreateProjectRequest {
+            name: " My 项目 - 01! ".to_string(),
+            repositories: Vec::new(),
+            description: None,
+            status: None,
+            default_workspace_path: None,
+            active_repo_id: None,
+        })
+        .expect("create project payload");
+
+        assert_eq!(payload.name, "My项目01");
+    }
+
+    #[test]
+    fn create_project_payload_rejects_empty_sanitized_name() {
+        let error = create_project_payload(CreateProjectRequest {
+            name: " - ! ".to_string(),
+            repositories: Vec::new(),
+            description: None,
+            status: None,
+            default_workspace_path: None,
+            active_repo_id: None,
+        })
+        .expect_err("reject empty sanitized name");
+
+        assert!(matches!(error, ApiError::BadRequest(_)));
     }
 
     #[tokio::test]
