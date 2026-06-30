@@ -260,6 +260,42 @@ const buildCreateSessionWorkspaceLookup = (
   };
 };
 
+const buildCreateSessionMembers = (
+  projectMembers: ProjectMemberWithRuntime[],
+  agents: Awaited<ReturnType<typeof chatAgentsApi.list>>,
+): Member[] => {
+  const agentById = new Map(agents.map((agent) => [agent.id, agent]));
+  return projectMembers
+    .filter(
+      (member) =>
+        member.member_type === ProjectMemberType.agent && member.agent_id,
+    )
+    .map((projectMember) => {
+      const agent = agentById.get(projectMember.agent_id as string);
+      const displayName =
+        projectMember.member_name?.trim() ||
+        agent?.name?.trim() ||
+        "agent";
+      const name = displayName.startsWith("@") ? displayName : `@${displayName}`;
+      const runnerLabel =
+        projectMember.execution_config?.runner_type ??
+        agent?.runner_type ??
+        "agent";
+      const modelName =
+        projectMember.execution_config?.model_name ??
+        agent?.model_name ??
+        runnerLabel;
+      return {
+        id: projectMember.id,
+        avatar: monogramFromName(displayName),
+        status: "on",
+        name,
+        roleDetail: modelName,
+        modelName,
+      };
+    });
+};
+
 const clampSidebarWidth = (width: number) =>
   Math.min(maxSidebarWidth, Math.max(minSidebarWidth, width));
 
@@ -424,6 +460,9 @@ function WorkspaceLayout() {
     null,
   );
   const [leadMember, setLeadMember] = useState<Member | null>(null);
+  const [createSessionMembers, setCreateSessionMembers] = useState<Member[]>(
+    [],
+  );
   const [pendingProjectSessionProtocol, setPendingProjectSessionProtocol] =
     useState<PendingProjectSessionProtocol | null>(null);
   const [createSessionWorkspaceLookup, setCreateSessionWorkspaceLookup] =
@@ -483,9 +522,21 @@ function WorkspaceLayout() {
     [],
   );
 
+  const loadCreateSessionMembers = useCallback(
+    async (projectId: string): Promise<Member[]> => {
+      const [projectMembers, agents] = await Promise.all([
+        projectApi.listMembers(projectId),
+        chatAgentsApi.list({ projectId }).catch(() => []),
+      ]);
+      return buildCreateSessionMembers(projectMembers, agents);
+    },
+    [],
+  );
+
   useEffect(() => {
     if (!selectedProjectId) {
       setLeadMember(null);
+      setCreateSessionMembers([]);
       setCreateSessionWorkspaceLookup({
         workflowWorkspacePath: null,
         memberWorkspacePaths: {},
@@ -493,6 +544,7 @@ function WorkspaceLayout() {
       return;
     }
     setLeadMember(null);
+    setCreateSessionMembers([]);
     let cancelled = false;
     void loadLeadMember(selectedProjectId)
       .then((nextLeadMember) => {
@@ -510,6 +562,13 @@ function WorkspaceLayout() {
     if (!isCreateSessionModalOpen || !selectedProjectId) return;
     let cancelled = false;
     void refreshMembers().catch(() => undefined);
+    void loadCreateSessionMembers(selectedProjectId)
+      .then((nextMembers) => {
+        if (!cancelled) setCreateSessionMembers(nextMembers);
+      })
+      .catch(() => {
+        if (!cancelled) setCreateSessionMembers([]);
+      });
     void loadCreateSessionWorkspaceLookup(selectedProjectId)
       .then((lookup) => {
         if (!cancelled) setCreateSessionWorkspaceLookup(lookup);
@@ -534,6 +593,7 @@ function WorkspaceLayout() {
     };
   }, [
     isCreateSessionModalOpen,
+    loadCreateSessionMembers,
     loadCreateSessionWorkspaceLookup,
     loadLeadMember,
     refreshMembers,
@@ -1626,7 +1686,7 @@ function WorkspaceLayout() {
           activeProjectWorkspacePath
         }
         memberWorkspacePaths={createSessionWorkspaceLookup.memberWorkspacePaths}
-        members={members}
+        members={createSessionMembers}
         leadMember={leadMember}
         t={t}
         onClose={() => setIsCreateSessionModalOpen(false)}

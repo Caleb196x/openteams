@@ -197,8 +197,16 @@ check(
   source,
 );
 check(
-  "passes workspace members into create-agent modal",
-  source.includes("members={members}"),
+  "passes project members into create-agent modal",
+  source.includes("members={createSessionMembers}") &&
+    source.includes("loadCreateSessionMembers"),
+  source,
+);
+check(
+  "create-agent project member list shows configured model names",
+  source.includes("const modelName =") &&
+    source.includes("projectMember.execution_config?.model_name") &&
+    source.includes("roleDetail: modelName"),
   source,
 );
 check(
@@ -222,6 +230,7 @@ check(
   "refreshes create-agent modal member data when opened",
   source.includes("if (!isCreateSessionModalOpen || !selectedProjectId) return") &&
     source.includes("void refreshMembers().catch(() => undefined)") &&
+    source.includes("void loadCreateSessionMembers(selectedProjectId)") &&
     source.includes("void loadCreateSessionWorkspaceLookup(selectedProjectId)") &&
     source.includes("void loadLeadMember(selectedProjectId)"),
   source,
