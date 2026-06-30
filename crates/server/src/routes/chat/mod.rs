@@ -3,6 +3,7 @@ pub mod messages;
 pub mod presets;
 pub mod queues;
 pub mod runs;
+pub mod runtime;
 pub mod sessions;
 pub mod skills;
 pub mod work_items;
@@ -29,6 +30,7 @@ pub fn router(deployment: &DeploymentImpl) -> Router<DeploymentImpl> {
         .route("/pin", axum::routing::post(sessions::pin_session))
         .route("/unpin", axum::routing::post(sessions::unpin_session))
         .route("/stream", get(sessions::stream_session_ws))
+        .route("/runtime", get(runtime::get_session_runtime_snapshot))
         .route("/workspaces", get(sessions::get_session_workspaces))
         .route(
             "/workspaces/changes",

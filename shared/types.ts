@@ -641,6 +641,14 @@ include_diff: boolean | null, };
 
 export type ChatRunFilesResponse = { run_id: string, workspace_path: string | null, is_git_repo: boolean, changes: WorkspaceChanges, error: string | null, };
 
+export type ChatActiveRunStatus = "starting" | "running" | "stopping" | "waiting_approval";
+
+export type ChatActiveRun = { run_id: string, session_id: string, session_agent_id: string, agent_id: string, agent_name: string, display_name: string, avatar: string, model: string | null, status: ChatActiveRunStatus, source_message_id: string | null, client_message_id: string | null, activity_lines: Array<ChatRunActivityLine>, created_at: string, };
+
+export type ChatSessionRuntimeSnapshot = { session_id: string, messages: Array<ChatMessage> | null, active_runs: Array<ChatActiveRun>, queues: Array<MemberQueueSnapshot>, };
+
+export type ChatSessionRuntimeQuery = { include_messages: boolean | null, };
+
 export type UpdateNativeSkillRequest = { enabled: boolean, };
 
 export type ExecutePlanReviewOverride = { stepId: string, leadReview: boolean | null, userReview: boolean | null, };
@@ -669,6 +677,8 @@ path: string, content?: string | null, use_stage?: ConflictResolutionSide, delet
 export type ContinueMergeRequest = { commit_message?: string | null, };
 
 export type CreateChatMessageRequest = { sender_type: ChatSenderType, sender_id: string | null, content: string, meta: JsonValue | null, };
+
+export type CreateChatMessageResponse = { message: ChatMessage, runtime: ChatSessionRuntimeSnapshot, };
 
 export type UserReviewResponseRequest = { review_id: string, action: string, feedback: string | null, expected_step_id: string | null, };
 

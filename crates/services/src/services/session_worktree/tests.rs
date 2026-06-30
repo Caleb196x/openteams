@@ -14,7 +14,7 @@ use super::{
     EnsureOutcome, EnsureWorktreeInput, MAX_CONFLICT_TEXT_BYTES, SessionWorktreeError,
     SessionWorktreeService, branch_name_for_session, conflict_content_part, detect_git_repo_path,
     is_safe_for_auto_cleanup, parse_unmerged_porcelain, short_session_id, validate_conflict_path,
-    validate_transition, workspace_dirty_status_args, worktree_path_for_session,
+    validate_transition, worktree_path_for_session,
 };
 
 fn git(repo: &Path, args: &[&str]) -> String {
@@ -248,17 +248,6 @@ fn detect_git_repo_path_walks_up_to_find_dot_git() {
     let outside = tempfile::TempDir::new().unwrap();
     let outside_root = outside.path().canonicalize().unwrap();
     assert_eq!(detect_git_repo_path(&outside_root), None);
-}
-
-#[test]
-fn workspace_dirty_status_args_ignore_submodules() {
-    let args = workspace_dirty_status_args();
-    assert!(
-        args.contains(&"--ignore-submodules=all"),
-        "submodule dirtiness must not block worktree merge"
-    );
-    assert!(args.contains(&"--untracked-files=all"));
-    assert!(args.contains(&":(exclude).openteams"));
 }
 
 // ---------------------------------------------------------------------------
@@ -1025,6 +1014,169 @@ async fn perform_merge_preserves_session_branch_commit_in_base_history() {
     assert!(
         git_fails(&base, &["rev-parse", "--verify", &worktree.branch_name]),
         "discard should delete the session worktree branch"
+    );
+}
+
+#[tokio::test]
+async fn perform_merge_allows_untracked_files_in_base_workspace() {
+    let pool = setup_pool().await;
+    let service = SessionWorktreeService::new(pool.clone());
+    let session_id = Uuid::new_v4();
+    let tmp = tempfile::TempDir::new().expect("temp dir");
+    let base = tmp.path().join("base");
+    init_git_repo(&base);
+
+    let worktree = match service
+        .ensure_for_session(EnsureWorktreeInput::new(session_id, base.clone()))
+        .await
+        .expect("create session worktree")
+    {
+        EnsureOutcome::Created(row) | EnsureOutcome::Existing(row) => row,
+    };
+
+    let worktree_path = PathBuf::from(&worktree.worktree_path);
+    std::fs::write(worktree_path.join("feature.txt"), "from session\n")
+        .expect("write worktree change");
+    git(&worktree_path, &["add", "feature.txt"]);
+    git(&worktree_path, &["commit", "-m", "session branch commit"]);
+
+    std::fs::write(base.join("local-note.txt"), "local scratch\n")
+        .expect("write untracked base file");
+
+    service
+        .perform_merge(
+            session_id,
+            SessionWorktreeMergeOperation::Merge,
+            None,
+            Some("Merge session branch".to_string()),
+        )
+        .await
+        .expect("merge worktree with untracked base file");
+
+    assert!(
+        base.join("feature.txt").exists(),
+        "committed session change should be merged"
+    );
+    assert!(
+        base.join("local-note.txt").exists(),
+        "untracked base file should remain untouched"
+    );
+}
+
+#[tokio::test]
+async fn perform_merge_allows_uncommitted_base_changes_when_git_can_merge() {
+    let pool = setup_pool().await;
+    let service = SessionWorktreeService::new(pool.clone());
+    let session_id = Uuid::new_v4();
+    let tmp = tempfile::TempDir::new().expect("temp dir");
+    let base = tmp.path().join("base");
+    init_git_repo(&base);
+    std::fs::write(base.join("base-only.txt"), "base\n").expect("write base file");
+    git(&base, &["add", "base-only.txt"]);
+    git(&base, &["commit", "-m", "add base-only file"]);
+
+    let worktree = match service
+        .ensure_for_session(EnsureWorktreeInput::new(session_id, base.clone()))
+        .await
+        .expect("create session worktree")
+    {
+        EnsureOutcome::Created(row) | EnsureOutcome::Existing(row) => row,
+    };
+
+    let worktree_path = PathBuf::from(&worktree.worktree_path);
+    std::fs::write(worktree_path.join("feature.txt"), "from session\n")
+        .expect("write worktree change");
+    git(&worktree_path, &["add", "feature.txt"]);
+    git(&worktree_path, &["commit", "-m", "session branch commit"]);
+
+    std::fs::write(base.join("base-only.txt"), "local edit\n").expect("dirty base file");
+
+    service
+        .perform_merge(
+            session_id,
+            SessionWorktreeMergeOperation::Merge,
+            None,
+            Some("Merge session branch".to_string()),
+        )
+        .await
+        .expect("merge worktree with unrelated dirty base file");
+
+    assert!(
+        base.join("feature.txt").exists(),
+        "committed session change should be merged"
+    );
+    assert_eq!(
+        std::fs::read_to_string(base.join("base-only.txt")).expect("read base file"),
+        "local edit\n",
+        "unrelated base workspace edits should be preserved"
+    );
+    let status = git(&base, &["status", "--porcelain", "--untracked-files=no"]);
+    assert!(
+        status.contains("M base-only.txt"),
+        "base workspace edit should remain uncommitted"
+    );
+    assert_eq!(
+        git(&base, &["show", "HEAD:base-only.txt"]),
+        "base",
+        "merge commit should not include pre-existing base workspace edits"
+    );
+}
+
+#[tokio::test]
+async fn perform_merge_surfaces_git_failure_for_overlapping_dirty_base_changes() {
+    let pool = setup_pool().await;
+    let service = SessionWorktreeService::new(pool.clone());
+    let session_id = Uuid::new_v4();
+    let tmp = tempfile::TempDir::new().expect("temp dir");
+    let base = tmp.path().join("base");
+    init_git_repo(&base);
+
+    let worktree = match service
+        .ensure_for_session(EnsureWorktreeInput::new(session_id, base.clone()))
+        .await
+        .expect("create session worktree")
+    {
+        EnsureOutcome::Created(row) | EnsureOutcome::Existing(row) => row,
+    };
+
+    let worktree_path = PathBuf::from(&worktree.worktree_path);
+    std::fs::write(worktree_path.join("README.md"), "from session\n")
+        .expect("write worktree change");
+    git(&worktree_path, &["add", "README.md"]);
+    git(&worktree_path, &["commit", "-m", "session readme change"]);
+
+    std::fs::write(base.join("README.md"), "local edit\n").expect("dirty base readme");
+
+    let err = service
+        .perform_merge(
+            session_id,
+            SessionWorktreeMergeOperation::Merge,
+            None,
+            Some("Merge session branch".to_string()),
+        )
+        .await
+        .expect_err("git should reject overlapping dirty base file");
+
+    match err {
+        SessionWorktreeError::GitCommand(message) => {
+            assert!(
+                message.contains("README.md"),
+                "git failure should include the affected file: {message}"
+            );
+        }
+        other => panic!("expected git failure, got {other:?}"),
+    }
+
+    let latest = service
+        .get_latest_for_session(session_id)
+        .await
+        .expect("refresh worktree")
+        .expect("worktree row");
+    assert_eq!(latest.status, SessionWorktreeStatus::Dirty);
+    assert_eq!(
+        std::fs::read_to_string(base.join("README.md")).expect("read base file"),
+        "local edit\n",
+        "failed merge should preserve local base workspace edits"
     );
 }
 

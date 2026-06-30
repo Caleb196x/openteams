@@ -20,7 +20,7 @@ use db::models::{
     workflow_types::WorkflowPlanJson,
 };
 use deployment::Deployment;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use services::services::{
     chat::{ChatAttachmentMeta, emit_user_message_workflow_analytics},
     workflow::{
@@ -37,6 +37,7 @@ use ts_rs::TS;
 use utils::{assets::asset_dir, response::ApiResponse};
 use uuid::Uuid;
 
+use super::runtime::{ChatSessionRuntimeSnapshot, build_session_runtime_snapshot};
 use crate::{DeploymentImpl, error::ApiError};
 
 const ALLOWED_TEXT_EXTENSIONS: &[&str] = &[
@@ -59,6 +60,13 @@ pub struct CreateChatMessageRequest {
     pub sender_id: Option<Uuid>,
     pub content: String,
     pub meta: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize, TS)]
+#[ts(export)]
+pub struct CreateChatMessageResponse {
+    pub message: ChatMessage,
+    pub runtime: ChatSessionRuntimeSnapshot,
 }
 
 #[derive(Debug, Deserialize, TS)]
@@ -175,7 +183,7 @@ pub async fn create_message(
     Extension(session): Extension<ChatSession>,
     State(deployment): State<DeploymentImpl>,
     Json(payload): Json<CreateChatMessageRequest>,
-) -> Result<ResponseJson<ApiResponse<ChatMessage>>, ApiError> {
+) -> Result<ResponseJson<ApiResponse<CreateChatMessageResponse>>, ApiError> {
     let message = services::services::chat::create_message(
         &deployment.db().pool,
         session.id,
@@ -201,14 +209,19 @@ pub async fn create_message(
         .handle_message(&session, &message)
         .await;
 
-    Ok(ResponseJson(ApiResponse::success(message)))
+    let runtime =
+        build_session_runtime_snapshot(&deployment, &session, false, Some(&message)).await?;
+
+    Ok(ResponseJson(ApiResponse::success(
+        CreateChatMessageResponse { message, runtime },
+    )))
 }
 
 pub async fn upload_message_attachments(
     Extension(session): Extension<ChatSession>,
     State(deployment): State<DeploymentImpl>,
     mut multipart: Multipart,
-) -> Result<ResponseJson<ApiResponse<ChatMessage>>, ApiError> {
+) -> Result<ResponseJson<ApiResponse<CreateChatMessageResponse>>, ApiError> {
     let message_id = Uuid::new_v4();
     let mut app_language: Option<String> = None;
     let mut content: Option<String> = None;
@@ -358,7 +371,12 @@ pub async fn upload_message_attachments(
         .handle_message(&session, &message)
         .await;
 
-    Ok(ResponseJson(ApiResponse::success(message)))
+    let runtime =
+        build_session_runtime_snapshot(&deployment, &session, false, Some(&message)).await?;
+
+    Ok(ResponseJson(ApiResponse::success(
+        CreateChatMessageResponse { message, runtime },
+    )))
 }
 
 pub async fn serve_message_attachment(

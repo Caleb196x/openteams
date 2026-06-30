@@ -591,21 +591,14 @@ impl ChatRunner {
                 continue;
             }
 
-            let runner = self.clone();
-            let message_clone = message.clone();
-            tokio::spawn(async move {
-                if let Err(err) = runner
-                    .run_agent_for_mention(session_id, &mention, &message_clone)
-                    .await
-                {
-                    tracing::warn!(
-                        error = %err,
-                        mention = mention,
-                        session_id = %session_id,
-                        "chat runner failed for mention"
-                    );
-                }
-            });
+            if let Err(err) = self.run_agent_for_mention(session_id, &mention, message).await {
+                tracing::warn!(
+                    error = %err,
+                    mention = mention,
+                    session_id = %session_id,
+                    "chat runner failed for mention"
+                );
+            }
         }
     }
 

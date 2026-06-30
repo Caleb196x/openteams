@@ -9,9 +9,13 @@
 import type { MemberQueueSnapshot } from '../../shared/types';
 
 export type {
+  ChatActiveRun,
+  ChatActiveRunStatus,
   ChatMemberQueueResponse,
   ChatQueueListResponse,
+  ChatSessionRuntimeSnapshot,
   ContinueQueuedMessageResponse,
+  CreateChatMessageResponse,
   DeleteQueuedMessageResponse,
   MemberQueueSnapshot,
   MemberQueueStatus,

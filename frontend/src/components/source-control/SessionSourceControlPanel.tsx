@@ -795,12 +795,12 @@ export const SessionSourceControlPanel: React.FC<
               </div>
             )}
             {actionError && (
-              <div className="rounded-lg border border-[color-mix(in_srgb,#f43f5e_20%,var(--hairline))] bg-[color-mix(in_srgb,var(--surface-1)_76%,var(--canvas))] px-2.5 py-2 text-[11px] text-rose-500">
+              <div className="select-text whitespace-pre-wrap break-words rounded-lg border border-[color-mix(in_srgb,#f43f5e_20%,var(--hairline))] bg-[color-mix(in_srgb,var(--surface-1)_76%,var(--canvas))] px-2.5 py-2 text-[11px] text-rose-500">
                 {actionError}
               </div>
             )}
             {worktreeActionError && (
-              <div className="rounded-lg border border-[color-mix(in_srgb,#f43f5e_20%,var(--hairline))] bg-[color-mix(in_srgb,var(--surface-1)_76%,var(--canvas))] px-2.5 py-2 text-[11px] text-rose-500">
+              <div className="select-text whitespace-pre-wrap break-words rounded-lg border border-[color-mix(in_srgb,#f43f5e_20%,var(--hairline))] bg-[color-mix(in_srgb,var(--surface-1)_76%,var(--canvas))] px-2.5 py-2 text-[11px] text-rose-500">
                 {worktreeActionError}
               </div>
             )}

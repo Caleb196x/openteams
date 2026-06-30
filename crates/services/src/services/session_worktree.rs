@@ -31,26 +31,7 @@ const SESSION_BRANCH_PREFIX: &str = "openteams/session/";
 /// app-managed worktree base dir.
 pub const SESSION_WORKTREE_NAMESPACE: &str = "sessions";
 
-const OPENTEAMS_RUNTIME_EXCLUDE_PATHSPECS: &[&str] = &[
-    ".",
-    ":(exclude).openteams",
-    ":(exclude).openteams/**",
-    ":(exclude)**/.openteams",
-    ":(exclude)**/.openteams/**",
-];
 const GIT_COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
-
-fn workspace_dirty_status_args() -> Vec<&'static str> {
-    let mut args = vec![
-        "status",
-        "--porcelain",
-        "--untracked-files=all",
-        "--ignore-submodules=all",
-        "--",
-    ];
-    args.extend_from_slice(OPENTEAMS_RUNTIME_EXCLUDE_PATHSPECS);
-    args
-}
 
 #[derive(Debug, Error)]
 pub enum SessionWorktreeError {
@@ -84,8 +65,6 @@ pub enum SessionWorktreeError {
     NotAGitRepo(PathBuf),
     #[error("base workspace is not on the expected branch '{expected}'; currently on '{actual}'")]
     BaseWorkspaceWrongBranch { expected: String, actual: String },
-    #[error("base workspace has uncommitted changes; commit or stash before merging")]
-    BaseWorkspaceDirty,
     #[error("a git merge or rebase is already in progress in the base workspace")]
     MergeOperationInProgress,
     #[error("session {0} has no merge in progress to continue or abort")]
@@ -864,8 +843,8 @@ impl SessionWorktreeService {
     ///
     /// Flow:
     /// 1. Transition to `merging` (via `merge_session_changes`).
-    /// 2. Verify the base workspace is on the base branch, is clean, and
-    ///    has no in-progress merge/rebase.
+    /// 2. Verify the base workspace is on the base branch and has no
+    ///    in-progress merge/rebase.
     /// 3. Run `git merge --no-ff --no-commit <session-branch>` in the base
     ///    workspace so the original session commits remain in history.
     /// 4. If conflicts are detected: transition to `needs_conflict_resolution`
@@ -880,12 +859,10 @@ impl SessionWorktreeService {
         target_branch: Option<String>,
         commit_message: Option<String>,
     ) -> Result<MergeResult, SessionWorktreeError> {
-        // 1. Load the active worktree row and run ALL preconditions BEFORE
-        //    transitioning to `merging`. This ensures that a precondition
-        //    failure (dirty base, merge in progress, wrong branch, not a
-        //    git repo) does NOT corrupt the worktree state — the row stays
-        //    in its current status (active/dirty) and the caller gets a
-        //    clear error.
+        // 1. Load the active worktree row and run preconditions BEFORE
+        //    transitioning to `merging`. We intentionally do not require a
+        //    clean base workspace; Git decides whether the local changes can
+        //    coexist with this merge and returns the actionable failure.
         let row = SessionWorktree::find_active_by_session(&self.pool, session_id)
             .await?
             .ok_or(SessionWorktreeError::NoActiveWorktree(session_id))?;
@@ -928,15 +905,9 @@ impl SessionWorktreeService {
         }
     }
 
-    /// Validate all merge preconditions against the base workspace BEFORE
-    /// transitioning the worktree to `merging`. Checking these upfront
-    /// ensures that a failure does not corrupt the worktree's state.
-    ///
-    /// Ordering: `has_operation_in_progress` is checked BEFORE
-    /// `is_workspace_dirty` because an in-progress merge/rebase typically
-    /// leaves unmerged paths in the working tree, which would trigger the
-    /// dirty check first and return a misleading `BaseWorkspaceDirty`
-    /// error instead of the more specific `MergeOperationInProgress`.
+    /// Validate merge preconditions that Git cannot resolve during the merge
+    /// itself. Base workspace changes are allowed through so unrelated local
+    /// work does not block merging a session branch.
     async fn validate_merge_preconditions(
         &self,
         row: &SessionWorktree,
@@ -956,15 +927,8 @@ impl SessionWorktreeService {
             });
         }
 
-        // Check merge/rebase in progress BEFORE dirty — an active merge
-        // leaves unmerged paths that look dirty, but the real issue is
-        // the in-progress operation.
         if self.has_operation_in_progress(&base_workspace).await? {
             return Err(SessionWorktreeError::MergeOperationInProgress);
-        }
-
-        if self.is_workspace_dirty(&base_workspace).await? {
-            return Err(SessionWorktreeError::BaseWorkspaceDirty);
         }
 
         Ok(())
@@ -981,6 +945,7 @@ impl SessionWorktreeService {
     ) -> Result<MergeOutcome, SessionWorktreeError> {
         let base_workspace = PathBuf::from(&row.base_workspace_path);
         let session_branch = &row.branch_name;
+        let pre_merge_dirty_paths = self.dirty_tracked_paths(&base_workspace).await?;
 
         let merge_result = self
             .run_git(
@@ -1007,6 +972,10 @@ impl SessionWorktreeService {
             .await
             .is_ok()
         {
+            // Git allows unrelated local edits during merge, but the merge
+            // commit must only contain session-branch changes.
+            self.unstage_pre_merge_dirty_paths(&base_workspace, &pre_merge_dirty_paths)
+                .await?;
             let message = commit_message.unwrap_or("Merge OpenTeams session changes");
             self.run_git(&base_workspace, &["commit", "-m", message])
                 .await?;
@@ -1301,14 +1270,48 @@ impl SessionWorktreeService {
         }
     }
 
-    /// Check if the workspace has any dirty source state: staged changes,
-    /// unstaged modifications, or untracked files. Submodules and OpenTeams
-    /// runtime files under `.openteams/` are ignored because they should not
-    /// block merging the session worktree into the base workspace.
-    async fn is_workspace_dirty(&self, repo_path: &Path) -> Result<bool, SessionWorktreeError> {
-        let args = workspace_dirty_status_args();
-        let output = self.run_git(repo_path, &args).await?;
-        Ok(!output.trim().is_empty())
+    async fn dirty_tracked_paths(
+        &self,
+        repo_path: &Path,
+    ) -> Result<Vec<String>, SessionWorktreeError> {
+        let mut paths = Vec::new();
+        for args in [
+            ["diff", "--name-only", "-z"].as_slice(),
+            ["diff", "--cached", "--name-only", "-z"].as_slice(),
+        ] {
+            for path in self.run_git_nul_paths(repo_path, args).await? {
+                if !paths.contains(&path) {
+                    paths.push(path);
+                }
+            }
+        }
+        Ok(paths)
+    }
+
+    async fn run_git_nul_paths(
+        &self,
+        repo_path: &Path,
+        args: &[&str],
+    ) -> Result<Vec<String>, SessionWorktreeError> {
+        let output = self.run_git_bytes(repo_path, args).await?;
+        Ok(output
+            .split(|byte| *byte == 0)
+            .filter(|part| !part.is_empty())
+            .map(|part| String::from_utf8_lossy(part).to_string())
+            .collect())
+    }
+
+    async fn unstage_pre_merge_dirty_paths(
+        &self,
+        repo_path: &Path,
+        paths: &[String],
+    ) -> Result<(), SessionWorktreeError> {
+        if paths.is_empty() {
+            return Ok(());
+        }
+        let mut args = vec!["reset", "-q", "HEAD", "--"];
+        args.extend(paths.iter().map(String::as_str));
+        self.run_git(repo_path, &args).await.map(|_| ())
     }
 
     async fn has_operation_in_progress(

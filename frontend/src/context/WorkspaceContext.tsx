@@ -16,8 +16,9 @@ import {
   BackendChatMessage,
   BackendChatSession,
   BackendChatSessionAgent,
+  ChatActiveRun,
   ChatRunActivityLine,
-  ChatRunRetentionInfo,
+  ChatSessionRuntimeSnapshot,
   QuotedMessageReference,
   Provider,
   Strategy,
@@ -39,7 +40,7 @@ import {
   chatAgentsApi,
   chatMessagesApi,
   chatQueuesApi,
-  chatRunsApi,
+  chatRuntimeApi,
   chatSessionsApi,
   cliConfigApi,
   projectApi,
@@ -76,6 +77,9 @@ type ListUpdater<T> = T[] | ((prev: T[]) => T[]);
 
 type ChatInputMode = 'free' | 'workflow';
 const DEFAULT_CHAT_INPUT_MODE: ChatInputMode = 'free';
+type RuntimeActiveRun = Omit<ChatActiveRun, 'activity_lines'> & {
+  activity_lines: ChatRunActivityLine[];
+};
 
 const resolveChatInputMode = (
   value: string | null | undefined,
@@ -900,53 +904,6 @@ const resolveProjectMainAgentName = (
   return displayName ? asAgentHandle(displayName) : null;
 };
 
-const makePendingAgentPlaceholder = (
-  text: string,
-  userMsgId: string,
-  members: Member[],
-  fallbackMention?: string | null,
-  sessionId?: string,
-  placeholderMember?: Pick<Member, 'avatar' | 'name' | 'modelName'> | null,
-): Message | null => {
-  const mentions = extractAgentMentions(text);
-  const effectiveMentions =
-    mentions.length > 0
-      ? mentions
-      : fallbackMention
-        ? [fallbackMention.replace(/^@/, '').toLowerCase()]
-        : [];
-  const mentionedMember = members.find((member) =>
-    effectiveMentions.includes(member.name.replace(/^@/, '').toLowerCase()),
-  );
-  const fallbackMember =
-    mentionedMember ??
-    (effectiveMentions.length === 0
-      ? (members.find((member) => member.status === 'run') ?? members[0])
-      : undefined);
-  const fallbackName = effectiveMentions[0]
-    ? asAgentHandle(effectiveMentions[0])
-    : '@agent';
-  const displayMember = fallbackMember ?? placeholderMember ?? null;
-  const sender = asAgentHandle(displayMember?.name ?? fallbackName);
-
-  return {
-    id: `${PENDING_AGENT_MESSAGE_PREFIX}${userMsgId}`,
-    sessionId,
-    avatar: displayMember?.avatar ?? monogramFromName(sender),
-    sender,
-    model: displayMember?.modelName,
-    time: 'just now',
-    createdAt: new Date().toISOString(),
-    text: '',
-    isThinking: true,
-    isAgentRunning: true,
-    clientMessageId: userMsgId,
-    sessionAgentId: fallbackMember?.id,
-    activityLines: [],
-    activityLoadState: 'loaded',
-  };
-};
-
 const summarizeQuotedContent = (content: string): string => {
   const normalized = content.trim().replace(/\s+/g, ' ');
   if (!normalized) return '';
@@ -1117,87 +1074,57 @@ const sortActivityLines = (
     return a.line_id.localeCompare(b.line_id);
   });
 
+const normalizeActivityLine = (
+  line: ChatActiveRun['activity_lines'][number] | ChatRunActivityLine,
+): ChatRunActivityLine => ({
+  ...line,
+  sequence: Number(line.sequence),
+});
+
+const normalizeActivityLines = (
+  lines: ReadonlyArray<ChatActiveRun['activity_lines'][number] | ChatRunActivityLine>,
+): ChatRunActivityLine[] => sortActivityLines(lines.map(normalizeActivityLine));
+
+const normalizeActiveRun = (run: ChatActiveRun): RuntimeActiveRun => ({
+  ...run,
+  activity_lines: normalizeActivityLines(run.activity_lines ?? []),
+});
+
+const activeRunToMessage = (run: RuntimeActiveRun): Message => {
+  const displayName = run.display_name?.trim() || run.agent_name || 'agent';
+  const sender = displayName.startsWith('@') ? displayName : `@${displayName}`;
+  return {
+    id: `run-${run.run_id}`,
+    sessionId: run.session_id,
+    avatar: run.avatar || monogramFromName(displayName),
+    sender,
+    model: run.model ?? undefined,
+    time: 'just now',
+    createdAt: run.created_at,
+    text: '',
+    isThinking: true,
+    isAgentRunning: true,
+    runId: run.run_id,
+    sessionAgentId: run.session_agent_id,
+    sourceMessageId: run.source_message_id ?? undefined,
+    clientMessageId: run.client_message_id ?? undefined,
+    activityLines: sortActivityLines(run.activity_lines ?? []),
+    activityLoadState: 'idle',
+  };
+};
+
+const activeRunMessagesForSession = (
+  activeRunsByRunId: Record<string, RuntimeActiveRun>,
+  sessionId: string,
+): Message[] =>
+  Object.values(activeRunsByRunId)
+    .filter((run) => run.session_id === sessionId)
+    .map(activeRunToMessage);
+
 const liveDeltaActivityLineId = (
   runId: string,
   streamType: ChatRunActivityLine['stream_type'],
 ) => `${LIVE_DELTA_ACTIVITY_LINE_PREFIX}${runId}-${streamType}`;
-
-const latestRunsBySessionAgent = (
-  runs: ChatRunRetentionInfo[],
-): Map<string, ChatRunRetentionInfo> => {
-  const latest = new Map<string, ChatRunRetentionInfo>();
-  for (const run of runs) {
-    const existing = latest.get(run.session_agent_id);
-    if (
-      !existing ||
-      Date.parse(run.created_at) > Date.parse(existing.created_at)
-    ) {
-      latest.set(run.session_agent_id, run);
-    }
-  }
-  return latest;
-};
-
-const hydrateRunningAgentPlaceholders = async (
-  sessionAgents: BackendChatSessionAgent[],
-  agents: BackendChatAgent[],
-  runs: ChatRunRetentionInfo[],
-  projectMembers: ProjectMemberWithRuntime[] = [],
-): Promise<Message[]> => {
-  const agentById = new Map(agents.map((agent) => [agent.id, agent]));
-  const projectMemberById = new Map(projectMembers.map((m) => [m.id, m]));
-  const projectMemberByAgentId = new Map(
-    projectMembers
-      .filter((m) => m.agent_id)
-      .map((m) => [m.agent_id as string, m]),
-  );
-  const latestRunBySessionAgentId = latestRunsBySessionAgent(runs);
-  const runningSessionAgents = sessionAgents.filter((sessionAgent) =>
-    ['running', 'stopping'].includes(sessionAgent.state),
-  );
-
-  const placeholders: Array<Message | null> = await Promise.all(
-    runningSessionAgents.map(async (sessionAgent): Promise<Message | null> => {
-      const run = latestRunBySessionAgentId.get(sessionAgent.id);
-      const agent = agentById.get(sessionAgent.agent_id);
-      const projectMember =
-        (sessionAgent.project_member_id
-          ? projectMemberById.get(sessionAgent.project_member_id)
-          : undefined) ?? projectMemberByAgentId.get(sessionAgent.agent_id);
-      const agentName =
-        projectMember?.member_name?.trim() || agent?.name || sessionAgent.agent_id;
-      const activityLines = run
-        ? await chatRunsApi
-            .getActivity(run.run_id, { offset: 0, limit: 1000 })
-            .then((response) => sortActivityLines(response.lines))
-            .catch(() => [])
-        : [];
-
-      return {
-        id: run
-          ? `run-${run.run_id}`
-          : `${PENDING_AGENT_MESSAGE_PREFIX}running-${sessionAgent.id}`,
-        sessionId: sessionAgent.session_id,
-        avatar: monogramFromName(agentName),
-        sender: asAgentHandle(agentName),
-        model: effectiveSessionAgentModelName(agent, sessionAgent) ?? undefined,
-        time: 'just now',
-        createdAt: run?.created_at ?? sessionAgent.updated_at,
-        text: '',
-        isThinking: true,
-        isAgentRunning: true,
-        runId: run?.run_id,
-        sessionAgentId: sessionAgent.id,
-        activityLines,
-        activityLoadState: 'idle',
-      };
-    }),
-  );
-
-  return placeholders.filter(
-    (placeholder): placeholder is Message => placeholder !== null,
-  );
-};
 
 interface WorkspaceContextProps {
   theme: Theme;
@@ -1256,11 +1183,6 @@ interface WorkspaceContextProps {
   // Active Simulation Utilities
   sendMessage: (text: string, options?: SendMessageOptions) => void;
   sendMessageToSession: (
-    sessionId: string,
-    text: string,
-    options?: SendMessageOptions,
-  ) => void;
-  stagePendingAgentPlaceholder: (
     sessionId: string,
     text: string,
     options?: SendMessageOptions,
@@ -1398,6 +1320,9 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
   const allMessagesRef = useRef<Record<string, Message[]>>({});
   const [memberQueuesBySessionAgentId, setMemberQueuesBySessionAgentId] =
     useState<MemberQueuesBySessionAgentId>({});
+  const [activeRunsByRunId, setActiveRunsByRunId] = useState<
+    Record<string, RuntimeActiveRun>
+  >({});
   const [workflowRuntimeLinesByExecution, setWorkflowRuntimeLinesByExecution] =
     useState<Record<string, WorkflowRuntimeLine[]>>({});
   const [messagesAsync, setMessagesAsync] = useState<
@@ -1649,18 +1574,27 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
           allMessagesRef.current[activeSessionId] ?? [],
         )
       : [];
+    const sessionActiveRunMessages = activeSessionId
+      ? activeRunMessagesForSession(activeRunsByRunId, activeSessionId)
+      : [];
+    const sessionSnapshot = activeSessionId
+      ? orderMessagesForConversation([
+          ...sessionMessages.filter((message) => !message.isAgentRunning),
+          ...sessionActiveRunMessages,
+        ])
+      : [];
     setMessagesAsync(
       succeed(
         activeSessionId
           ? filterQueuedUserMessagesFromSnapshot(
-              sessionMessages,
+              sessionSnapshot,
               sessionQueues,
               activeSessionId,
             )
           : [],
       ),
     );
-  }, [activeSessionId, memberQueuesBySessionAgentId]);
+  }, [activeRunsByRunId, activeSessionId, memberQueuesBySessionAgentId]);
 
   // Keep the cached workspace path in sync with the active session so the
   // WebSocket `file_change_refresh` handler always refreshes the right path.
@@ -1772,6 +1706,47 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
       });
     },
     [syncSessionAgentActivityIndicator],
+  );
+  const applyChatRuntimeSnapshot = useCallback(
+    (snapshot: ChatSessionRuntimeSnapshot) => {
+      const sid = snapshot.session_id;
+      setMemberQueuesBySessionAgentId((prev) => {
+        const next = { ...prev };
+        for (const [sessionAgentId, queue] of Object.entries(next)) {
+          if (queue.session_id === sid) {
+            delete next[sessionAgentId];
+          }
+        }
+        for (const queue of snapshot.queues) {
+          next[queue.session_agent_id] = queue;
+        }
+        return next;
+      });
+      setActiveRunsByRunId((prev) => {
+        const next = { ...prev };
+        for (const [runId, run] of Object.entries(next)) {
+          if (run.session_id === sid) {
+            delete next[runId];
+          }
+        }
+        for (const run of snapshot.active_runs) {
+          next[run.run_id] = normalizeActiveRun(run);
+        }
+        return next;
+      });
+      setSessionRunningIndicator(sid, snapshot.active_runs.length > 0);
+      if (snapshot.messages) {
+        const mapped = mapMessages(snapshot.messages as unknown as BackendChatMessage[], {
+          agentNamesById: agentNamesByIdRef.current,
+          agentModelsById: agentModelsByIdRef.current,
+        });
+        setAllMessages((prev) => ({
+          ...prev,
+          [sid]: resolveQuotedMessageReferences(mapped),
+        }));
+      }
+    },
+    [setSessionRunningIndicator],
   );
   const setSessionWorkflowRunningIndicator = useCallback(
     (sessionId: string, hasRunningWorkflow: boolean) => {
@@ -2283,44 +2258,26 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
     setMessagesAsync(beginLoad);
     try {
       const projectId = selectedProjectIdRef.current;
-      const ignoredSessionAgentIds = new Set(
-        optimisticallyStoppedSessionAgentIdsRef.current,
-      );
       const [
         backendMsgs,
         backendAgents,
-        sessionAgents,
-        retention,
         projectMembers,
-        queueResponse,
+        runtimeSnapshot,
       ] =
         await Promise.all([
           chatMessagesApi.list(sid),
           chatAgentsApi
             .list(projectId ? { projectId } : undefined)
             .catch(() => []),
-          sessionAgentsApi.list(sid).catch(() => []),
-          chatRunsApi.listSessionRetention(sid, { limit: 100 }).catch(() => ({
-            runs: [],
-          })),
           projectId ? projectApi.listMembers(projectId).catch(() => []) : [],
-          chatQueuesApi.listSession(sid).catch(() => ({
+          chatRuntimeApi.getSnapshot(sid).catch(() => ({
             session_id: sid,
-            members: [],
+            messages: null,
+            active_runs: [],
+            queues: [],
           })),
         ]);
-      setMemberQueuesBySessionAgentId((prev) => {
-        const next = { ...prev };
-        for (const [sessionAgentId, queue] of Object.entries(next)) {
-          if (queue.session_id === sid) {
-            delete next[sessionAgentId];
-          }
-        }
-        for (const queue of queueResponse.members) {
-          next[queue.session_agent_id] = queue;
-        }
-        return next;
-      });
+      applyChatRuntimeSnapshot(runtimeSnapshot);
       const projectMemberNameByAgentId = new Map(
         projectMembers
           .filter((member) => member.agent_id && member.member_name?.trim())
@@ -2331,18 +2288,9 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
       );
       const agentNamesById: Record<string, string> = {};
       const agentModelsById: Record<string, string | null> = {};
-      const sessionAgentByAgentId = new Map(
-        sessionAgents.map((sessionAgent) => [
-          sessionAgent.agent_id,
-          sessionAgent,
-        ]),
-      );
       for (const a of backendAgents) {
         agentNamesById[a.id] = projectMemberNameByAgentId.get(a.id) ?? a.name;
-        agentModelsById[a.id] = effectiveSessionAgentModelName(
-          a,
-          sessionAgentByAgentId.get(a.id),
-        );
+        agentModelsById[a.id] = a.model_name ?? null;
       }
       agentNamesByIdRef.current = agentNamesById;
       agentModelsByIdRef.current = agentModelsById;
@@ -2350,52 +2298,29 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
         agentNamesById,
         agentModelsById,
       });
-      // Stop-requested agents keep their current placeholder visible, but REST
-      // hydration must not create an additional running placeholder for the
-      // same stopping run.
-      const suppressedStoppedIds =
-        optimisticallyStoppedSessionAgentIdsRef.current;
-      setSessionRunningIndicator(
-        sid,
-        hasRunningSessionAgent(sessionAgents, ignoredSessionAgentIds),
-      );
-      const runningPlaceholders = (
-        await hydrateRunningAgentPlaceholders(
-          sessionAgents,
-          backendAgents,
-          retention.runs,
-          projectMembers,
-        )
-      ).filter(
-        (placeholder) =>
-          !placeholder.sessionAgentId ||
-          !suppressedStoppedIds.has(placeholder.sessionAgentId),
-      );
-      const activeSessionAgentIds = new Set(
-        sessionAgents
-          .filter(
-            (sessionAgent) =>
-              isActiveAgentState(sessionAgent.state) ||
-              suppressedStoppedIds.has(sessionAgent.id),
-          )
-          .map((sessionAgent) => sessionAgent.id),
-      );
       setAllMessages((prev) => {
         const current = filterMessagesForSession(sid, prev[sid] ?? []);
+        const currentWithoutAgentRuntime = current.filter(
+          (message) => !message.isAgentRunning,
+        );
         const next = resolveQuotedMessageReferences(
           mergePersistedWithRunningPlaceholders(
             mapped,
-            current,
-            activeSessionAgentIds,
-            runningPlaceholders,
+            currentWithoutAgentRuntime,
+            new Set<string>(),
+            [],
           ),
         );
+        const nextWithRuntime = orderMessagesForConversation([
+          ...next,
+          ...runtimeSnapshot.active_runs.map(normalizeActiveRun).map(activeRunToMessage),
+        ]);
         if (shouldUpdateActiveMessages()) {
           setMessagesAsync(
             succeed(
               filterQueuedUserMessagesFromSnapshot(
-                next,
-                queueResponse.members,
+                nextWithRuntime,
+                runtimeSnapshot.queues,
                 sid,
               ),
             ),
@@ -2412,7 +2337,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
         setMessagesAsync((prev) => fail(prev, err, mock));
       }
     }
-  }, [setSessionRunningIndicator]);
+  }, [applyChatRuntimeSnapshot]);
 
   // Mark a session agent as stop-requested without removing its visible
   // placeholder. The placeholder should switch directly to the backend's
@@ -3048,56 +2973,9 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
   );
 
   const appendStreamActivityLine = useCallback((line: ChatRunActivityLine) => {
-    setAllMessages((prev) => {
-      const current = filterMessagesForSession(
-        line.session_id,
-        prev[line.session_id] ?? [],
-      );
-      const existingIndex = current.findIndex(
-        (message) => message.runId === line.run_id,
-      );
-      const mergeLine = (message: Message): Message => {
-        const liveLineId =
-          line.line_type === 'thinking'
-            ? liveDeltaActivityLineId(line.run_id, line.stream_type)
-            : null;
-        const originalLines = message.activityLines ?? [];
-        const lines = liveLineId
-          ? originalLines.filter((item) => item.line_id !== liveLineId)
-          : originalLines;
-        if (lines.some((item) => item.line_id === line.line_id)) {
-          if (lines.length !== originalLines.length) {
-            return {
-              ...message,
-              activityLines: lines,
-              activityLoadState: 'idle',
-            };
-          }
-          return message;
-        }
-        const nextLines = [...lines, line].sort((a, b) => {
-          if (a.sequence !== b.sequence) return a.sequence - b.sequence;
-          return a.line_id.localeCompare(b.line_id);
-        });
-        return {
-          ...message,
-          activityLines: nextLines,
-          activityLoadState: 'idle',
-        };
-      };
-
-      if (existingIndex >= 0) {
-        const next = current.map((message, index) =>
-          index === existingIndex ? mergeLine(message) : message,
-        );
-        return { ...prev, [line.session_id]: next };
-      }
-
-      // Ignore trailing activity from a run the user just stopped: do not
-      // resurrect a running placeholder for an optimistically-stopped agent.
-      // A genuinely new run always emits agent_run_started first, which clears
-      // the suppression before its first activity line arrives.
+    setActiveRunsByRunId((prev) => {
       if (
+        !prev[line.run_id] &&
         optimisticallyStoppedSessionAgentIdsRef.current.has(
           line.session_agent_id,
         )
@@ -3105,49 +2983,65 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
         return prev;
       }
 
-      const agentName = line.agent_name.startsWith('@')
+      const existing = prev[line.run_id];
+      const mergeLines = (lines: ChatRunActivityLine[]) => {
+        const liveLineId =
+          line.line_type === 'thinking'
+            ? liveDeltaActivityLineId(line.run_id, line.stream_type)
+            : null;
+        const normalized = liveLineId
+          ? lines.filter((item) => item.line_id !== liveLineId)
+          : lines;
+        if (normalized.some((item) => item.line_id === line.line_id)) {
+          return normalized;
+        }
+        return sortActivityLines([...normalized, line]);
+      };
+      const activityLines = mergeLines(existing?.activity_lines ?? []);
+      if (
+        existing &&
+        activityLines.length === existing.activity_lines.length &&
+        activityLines.every(
+          (activityLine, index) =>
+            activityLine.line_id === existing.activity_lines[index]?.line_id,
+        )
+      ) {
+        return prev;
+      }
+
+      const displayName = line.agent_name.startsWith('@')
         ? line.agent_name
         : `@${line.agent_name}`;
-      const placeholder: Message = {
-        id: `run-${line.run_id}`,
-        sessionId: line.session_id,
+      const fallbackRun: RuntimeActiveRun = {
+        run_id: line.run_id,
+        session_id: line.session_id,
+        session_agent_id: line.session_agent_id,
+        agent_id: line.agent_id,
+        agent_name: line.agent_name,
+        display_name: displayName,
         avatar: monogramFromName(line.agent_name),
-        sender: agentName,
-        model: agentModelsByIdRef.current[line.agent_id] ?? undefined,
-        time: 'just now',
-        createdAt: line.created_at,
-        text: '',
-        isThinking: true,
-        isAgentRunning: true,
-        runId: line.run_id,
-        sessionAgentId: line.session_agent_id,
-        activityLines: [line],
-        activityLoadState: 'idle',
+        model: agentModelsByIdRef.current[line.agent_id] ?? null,
+        status: 'running',
+        source_message_id: null,
+        client_message_id: null,
+        activity_lines: [],
+        created_at: line.created_at,
       };
-      // Evict any stale running placeholder for a different run of the same
-      // agent before placing the new one (see evictStaleRunPlaceholders).
-      const pruned = evictStaleRunPlaceholders(
-        current,
-        line.session_agent_id,
-        line.run_id,
-      );
-      const pendingIndex = findPendingAgentPlaceholderIndex(
-        pruned,
-        { sessionAgentId: line.session_agent_id },
-      );
-      if (pendingIndex >= 0) {
-        const next = pruned.map((message, index) =>
-          index === pendingIndex ? placeholder : message,
-        );
-        return { ...prev, [line.session_id]: next };
+      const nextRun = {
+        ...(existing ?? fallbackRun),
+        activity_lines: activityLines,
+      };
+      const next = { ...prev };
+      for (const [runId, run] of Object.entries(next)) {
+        if (
+          run.session_agent_id === line.session_agent_id &&
+          runId !== line.run_id
+        ) {
+          delete next[runId];
+        }
       }
-      return {
-        ...prev,
-        [line.session_id]: orderMessagesForConversation([
-          ...pruned,
-          placeholder,
-        ]),
-      };
+      next[line.run_id] = nextRun;
+      return next;
     });
   }, []);
 
@@ -3157,64 +3051,65 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
         return;
       }
 
-      setAllMessages((prev) => {
-        const current = filterMessagesForSession(
-          event.session_id,
-          prev[event.session_id] ?? [],
+      setActiveRunsByRunId((prev) => {
+        const existing = prev[event.run_id];
+        const displayName =
+          agentNamesByIdRef.current[event.agent_id] ?? event.agent_id;
+        const lines = existing?.activity_lines ?? [];
+        const lineId = liveDeltaActivityLineId(
+          event.run_id,
+          event.stream_type,
         );
-        const existingIndex = current.findIndex(
-          (message) => message.runId === event.run_id,
+        const existingLine = lines.find((line) => line.line_id === lineId);
+        const content =
+          event.delta && existingLine
+            ? `${existingLine.content}${event.content}`
+            : event.content;
+        const maxSequence = lines.reduce(
+          (max, line) => Math.max(max, line.sequence),
+          -1,
         );
-        if (existingIndex < 0) {
-          return prev;
-        }
-
-        const next = current.map((message, index) => {
-          if (index !== existingIndex) return message;
-
-          const lines = message.activityLines ?? [];
-          const lineId = liveDeltaActivityLineId(
-            event.run_id,
-            event.stream_type,
-          );
-          const existingLine = lines.find((line) => line.line_id === lineId);
-          const content =
-            event.delta && existingLine
-              ? `${existingLine.content}${event.content}`
-              : event.content;
-          const maxSequence = lines.reduce(
-            (max, line) => Math.max(max, line.sequence),
-            -1,
-          );
-          const agentName = message.sender.startsWith('@')
-            ? message.sender.slice(1)
-            : message.sender || event.agent_id;
-          const liveLine: ChatRunActivityLine = {
-            line_id: lineId,
-            run_id: event.run_id,
-            session_id: event.session_id,
-            session_agent_id: event.session_agent_id,
-            agent_id: event.agent_id,
-            agent_name: agentName,
-            sequence: existingLine?.sequence ?? maxSequence + 1,
-            line_type: 'thinking',
-            stream_type: event.stream_type,
-            content,
-            created_at: existingLine?.created_at ?? new Date().toISOString(),
-          };
-          const nextLines = sortActivityLines([
-            ...lines.filter((line) => line.line_id !== lineId),
-            liveLine,
-          ]);
-
-          return {
-            ...message,
-            activityLines: nextLines,
-            activityLoadState: 'idle' as const,
-          };
-        });
-
-        return { ...prev, [event.session_id]: next };
+        const liveLine: ChatRunActivityLine = {
+          line_id: lineId,
+          run_id: event.run_id,
+          session_id: event.session_id,
+          session_agent_id: event.session_agent_id,
+          agent_id: event.agent_id,
+          agent_name: displayName.replace(/^@/, ''),
+          sequence: existingLine?.sequence ?? maxSequence + 1,
+          line_type: 'thinking',
+          stream_type: event.stream_type,
+          content,
+          created_at: existingLine?.created_at ?? new Date().toISOString(),
+        };
+        const activityLines = sortActivityLines([
+          ...lines.filter((line) => line.line_id !== lineId),
+          liveLine,
+        ]);
+        const fallbackRun: RuntimeActiveRun = {
+          run_id: event.run_id,
+          session_id: event.session_id,
+          session_agent_id: event.session_agent_id,
+          agent_id: event.agent_id,
+          agent_name: displayName.replace(/^@/, ''),
+          display_name: displayName.startsWith('@')
+            ? displayName
+            : `@${displayName}`,
+          avatar: monogramFromName(displayName),
+          model: agentModelsByIdRef.current[event.agent_id] ?? null,
+          status: 'running',
+          source_message_id: null,
+          client_message_id: null,
+          activity_lines: [],
+          created_at: liveLine.created_at,
+        };
+        return {
+          ...prev,
+          [event.run_id]: {
+            ...(existing ?? fallbackRun),
+            activity_lines: activityLines,
+          },
+        };
       });
     },
     [],
@@ -3228,64 +3123,37 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
       );
       setSessionRunningIndicator(event.session_id, true);
       void ensureQueuedRunSourceMessage(event);
-      setAllMessages((prev) => {
-        const current = filterMessagesForSession(
-          event.session_id,
-          prev[event.session_id] ?? [],
-        );
-        const currentWithoutQueuedSource = current;
-        const existingRunIndex = currentWithoutQueuedSource.findIndex(
-          (message) => message.runId === event.run_id,
-        );
-        if (existingRunIndex >= 0) {
-          return prev;
-        }
-        const agentName = event.agent_name.startsWith('@')
+      setActiveRunsByRunId((prev) => {
+        const displayName = event.agent_name.startsWith('@')
           ? event.agent_name
           : `@${event.agent_name}`;
-        const placeholder: Message = {
-          id: `run-${event.run_id}`,
-          sessionId: event.session_id,
+        const existing = prev[event.run_id];
+        const nextRun: RuntimeActiveRun = {
+          run_id: event.run_id,
+          session_id: event.session_id,
+          session_agent_id: event.session_agent_id,
+          agent_id: event.agent_id,
+          agent_name: event.agent_name,
+          display_name: displayName,
           avatar: monogramFromName(event.agent_name),
-          sender: agentName,
-          model: agentModelsByIdRef.current[event.agent_id] ?? undefined,
-          time: 'just now',
-          createdAt: event.started_at ?? new Date().toISOString(),
-          text: '',
-          isThinking: true,
-          isAgentRunning: true,
-          runId: event.run_id,
-          sessionAgentId: event.session_agent_id,
-          sourceMessageId: event.source_message_id,
-          clientMessageId: event.client_message_id ?? undefined,
-          activityLines: [],
-          activityLoadState: 'idle',
+          model: agentModelsByIdRef.current[event.agent_id] ?? null,
+          status: 'running',
+          source_message_id: event.source_message_id,
+          client_message_id: event.client_message_id ?? null,
+          activity_lines: existing?.activity_lines ?? [],
+          created_at: event.started_at ?? new Date().toISOString(),
         };
-        // Evict any stale running placeholder for a different run of the same
-        // agent before placing the new one (see evictStaleRunPlaceholders).
-        const pruned = evictStaleRunPlaceholders(
-          currentWithoutQueuedSource,
-          event.session_agent_id,
-          event.run_id,
-        );
-        const pendingIndex = findPendingAgentPlaceholderIndex(pruned, {
-          sessionAgentId: event.session_agent_id,
-          sourceMessageId: event.source_message_id,
-          clientMessageId: event.client_message_id,
-        });
-        if (pendingIndex >= 0) {
-          const next = pruned.map((message, index) =>
-            index === pendingIndex ? placeholder : message,
-          );
-          return { ...prev, [event.session_id]: next };
+        const next = { ...prev };
+        for (const [runId, run] of Object.entries(next)) {
+          if (
+            run.session_agent_id === event.session_agent_id &&
+            runId !== event.run_id
+          ) {
+            delete next[runId];
+          }
         }
-        return {
-          ...prev,
-          [event.session_id]: orderMessagesForConversation([
-            ...pruned,
-            placeholder,
-          ]),
-        };
+        next[event.run_id] = nextRun;
+        return next;
       });
     },
     [ensureQueuedRunSourceMessage, setSessionRunningIndicator],
@@ -3425,53 +3293,44 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
         }
         const incomingMessage = mapBackendChatMessage(parsed.message);
         upsertStreamedMessage(sid, incomingMessage);
+        if (incomingMessage.runId) {
+          setActiveRunsByRunId((prev) => {
+            if (!incomingMessage.runId || !prev[incomingMessage.runId]) {
+              return prev;
+            }
+            const next = { ...prev };
+            delete next[incomingMessage.runId];
+            return next;
+          });
+        }
         return;
       }
 
       if (parsed.type === 'agent_state') {
-        const wasStopRequested =
-          optimisticallyStoppedSessionAgentIdsRef.current.has(
-            parsed.session_agent_id,
-          );
         if (isRunningSessionAgentState(parsed.state)) {
           setSessionRunningIndicator(sid, true);
         } else {
-          const hasRemainingRunningAgent = (
-            allMessagesRef.current[sid] ?? []
-          ).some(
-            (message) =>
-              message.isAgentRunning &&
-              message.sessionAgentId !== parsed.session_agent_id &&
-              !isOptimisticPendingAgentPlaceholder(message),
-          );
-          setSessionRunningIndicator(sid, hasRemainingRunningAgent);
+          setActiveRunsByRunId((prev) => {
+            const next = { ...prev };
+            let changed = false;
+            for (const [runId, run] of Object.entries(next)) {
+              if (
+                run.session_agent_id === parsed.session_agent_id &&
+                (!parsed.run_id || runId === parsed.run_id)
+              ) {
+                delete next[runId];
+                changed = true;
+              }
+            }
+            const hasRemainingRunningAgent = Object.values(next).some(
+              (run) => run.session_id === sid,
+            );
+            setSessionRunningIndicator(sid, hasRemainingRunningAgent);
+            return changed ? next : prev;
+          });
           void refreshSessionRunningIndicators(sid);
         }
         void refreshMembers();
-
-        // When an agent leaves an active run state,
-        // clear only placeholders tied to that concrete run. Optimistic
-        // pending placeholders represent newly sent/queued messages and must
-        // survive stale idle/dead events from an earlier run.
-        if (!isActiveAgentState(parsed.state) && !wasStopRequested) {
-          setAllMessages((prev) => {
-            const current = filterMessagesForSession(sid, prev[sid] ?? []);
-            if (current.length === 0) return prev;
-            const updated = current.filter(
-              (msg) =>
-                !(
-                  msg.isAgentRunning &&
-                  msg.sessionAgentId === parsed.session_agent_id &&
-                  !isOptimisticPendingAgentPlaceholder(msg) &&
-                  (!parsed.run_id ||
-                    !msg.runId ||
-                    msg.runId === parsed.run_id)
-                ),
-            );
-            if (updated.length === current.length) return prev;
-            return { ...prev, [sid]: updated };
-          });
-        }
         return;
       }
 
@@ -3598,16 +3457,25 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
         allMessages[activeSessionId] ?? [],
       )
     : [];
+  const activeRunMessages = activeSessionId
+    ? activeRunMessagesForSession(activeRunsByRunId, activeSessionId)
+    : [];
+  const activeSessionMessageSnapshot = activeSessionId
+    ? orderMessagesForConversation([
+        ...activeSessionMessages.filter((message) => !message.isAgentRunning),
+        ...activeRunMessages,
+      ])
+    : [];
   const messages = activeSessionId
     ? filterQueuedUserMessagesFromSnapshot(
-        activeSessionMessages,
+        activeSessionMessageSnapshot,
         activeSessionQueues,
         activeSessionId,
       )
     : [];
   const queuedUserMessagesById = activeSessionId
     ? queuedUserMessagesByIdFromSnapshot(
-        activeSessionMessages,
+        activeSessionMessageSnapshot,
         activeSessionQueues,
         activeSessionId,
       )
@@ -3714,58 +3582,6 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
     }, 600);
   };
 
-  const stagePendingAgentPlaceholder = (
-    sessionId: string,
-    text: string,
-    options: SendMessageOptions = {},
-  ) => {
-    const shouldUseBackend =
-      sessionsAsync.source === 'api' || options.persistToBackend === true;
-    if (!sessionId || !shouldUseBackend) return;
-    const fallbackMention =
-      options.fallbackMention ??
-      (options.routeMentions && options.routeMentions.length > 0
-        ? options.routeMentions[0]
-        : null);
-    const pendingAgentMsg = makePendingAgentPlaceholder(
-      text,
-      `${OPTIMISTIC_USER_MESSAGE_PREFIX}${Date.now()}`,
-      sessionId === activeSessionIdRef.current ? membersAsync.data : [],
-      fallbackMention,
-      sessionId,
-      options.placeholderMember,
-    );
-    if (!pendingAgentMsg) return;
-
-    setAllMessages((prev) => {
-      const cur = filterMessagesForSession(
-        sessionId,
-        prev[sessionId] ?? [],
-      );
-      if (
-        cur.some(
-          (message) =>
-            message.isAgentRunning && !isPendingAgentPlaceholder(message),
-        )
-      ) {
-        return prev;
-      }
-      const withoutStalePending = pendingAgentMsg.sessionAgentId
-        ? cur.filter(
-            (message) =>
-              !(
-                isPendingAgentPlaceholder(message) &&
-                message.sessionAgentId === pendingAgentMsg.sessionAgentId
-              ),
-          )
-        : cur.filter((message) => !isPendingAgentPlaceholder(message));
-      return {
-        ...prev,
-        [sessionId]: [...withoutStalePending, pendingAgentMsg],
-      };
-    });
-  };
-
   const sendMessageToSession = (
     sessionId: string,
     text: string,
@@ -3801,13 +3617,6 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
       !hasRouteMentionOverride
         ? []
         : routeMentions;
-    const fallbackMention =
-      options.fallbackMention ??
-      (routeMentions.length > 0
-        ? routeMentions[0]
-        : !hasExplicitMentions
-          ? mainAgentMention
-          : null);
     const userMsgId = `msg-user-${Date.now()}`;
     const userMsg: Message = {
       id: userMsgId,
@@ -3825,65 +3634,13 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
     };
     const shouldPersistToBackend =
       sessionsAsync.source === 'api' || options.persistToBackend === true;
-    const pendingAgentMsg = shouldPersistToBackend
-      ? makePendingAgentPlaceholder(
-          text,
-          userMsgId,
-          sid === activeSessionIdRef.current ? membersAsync.data : [],
-          fallbackMention,
-          sid,
-          options.placeholderMember,
-        )
-      : null;
-    const existingQueue = pendingAgentMsg?.sessionAgentId
-      ? memberQueuesBySessionAgentId[pendingAgentMsg.sessionAgentId]
-      : undefined;
-    const targetMember = pendingAgentMsg?.sessionAgentId
-      ? membersAsync.data.find(
-          (member) => member.id === pendingAgentMsg.sessionAgentId,
-        )
-      : undefined;
-    const shouldQueueForMember = Boolean(
-      pendingAgentMsg?.sessionAgentId &&
-        (targetMember?.status === 'run' ||
-          existingQueue?.blocked ||
-          existingQueue?.paused ||
-          (existingQueue?.items.length ?? 0) > 0),
-    );
     setAllMessages((prev) => {
       const cur = filterMessagesForSession(sid, prev[sid] ?? []);
-      const withoutStalePending =
-        !shouldQueueForMember && pendingAgentMsg?.sessionAgentId
-          ? cur.filter(
-              (message) =>
-                !(
-                  isPendingAgentPlaceholder(message) &&
-                  message.sessionAgentId === pendingAgentMsg.sessionAgentId
-                ),
-            )
-          : !shouldQueueForMember && pendingAgentMsg
-            ? cur.filter(
-                (message) => !isPendingAgentPlaceholder(message),
-              )
-            : cur;
-      const messagesToAppend =
-        shouldQueueForMember
-          ? []
-          : pendingAgentMsg
-            ? [userMsg, pendingAgentMsg]
-            : [userMsg];
       return {
         ...prev,
-        [sid]: [...withoutStalePending, ...messagesToAppend],
+        [sid]: [...cur, userMsg],
       };
     });
-    if (shouldQueueForMember && pendingAgentMsg?.sessionAgentId) {
-      stageOptimisticQueuedMessage(
-        sid,
-        pendingAgentMsg.sessionAgentId,
-        userMsgId,
-      );
-    }
 
     // Mock-only session (e.g., backend offline): use the local cascade.
     if (!shouldPersistToBackend) {
@@ -3891,8 +3648,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
       return;
     }
 
-    // Real backend: keep the local running placeholder visible while the
-    // persisted message list and websocket stream catch up.
+    // Real backend: runtime state comes from the message response and stream.
     const meta: { [key: string]: JsonValue } = {
       app_language: locale,
     };
@@ -3929,65 +3685,12 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
     };
 
     persistMessage()
-      .then((message) => {
-        const incomingMessage = mapBackendChatMessage(message);
-        if (shouldQueueForMember) {
-          upsertStreamedMessage(sid, incomingMessage);
-          void refreshMessages();
-          void refreshMemberQueues();
-          return;
-        }
+      .then((response) => {
+        const incomingMessage = mapBackendChatMessage(response.message);
         upsertStreamedMessage(sid, incomingMessage);
-        void refreshMessages();
-        void refreshMemberQueues();
+        applyChatRuntimeSnapshot(response.runtime);
       })
       .catch((err) => {
-        if (shouldQueueForMember) {
-          const queuedSessionAgentId = pendingAgentMsg?.sessionAgentId;
-          if (queuedSessionAgentId) {
-            setMemberQueuesBySessionAgentId((prev) => {
-              const current = prev[queuedSessionAgentId];
-              if (!current || current.session_id !== sid) return prev;
-              const items = current.items.filter(
-                (item) => item.message.chat_message_id !== userMsg.id,
-              );
-              return {
-                ...prev,
-                [queuedSessionAgentId]: {
-                  ...current,
-                  status: items.length > 0 ? current.status : 'empty',
-                  queued_count: BigInt(
-                    items.filter(
-                      (item) => String(item.message.status) === 'queued',
-                    ).length,
-                  ),
-                  items,
-                },
-              };
-            });
-          }
-          setAllMessages((prev) => {
-            const cur = filterMessagesForSession(sid, prev[sid] ?? []);
-            if (
-              cur.some(
-                (message) =>
-                  userMessageClientId(message) === userMsg.clientMessageId,
-              )
-            ) {
-              return prev;
-            }
-            return { ...prev, [sid]: [...cur, userMsg] };
-          });
-        }
-        if (pendingAgentMsg) {
-          setAllMessages((prev) => {
-            const cur = filterMessagesForSession(sid, prev[sid] ?? []);
-            return {
-              ...prev,
-              [sid]: cur.filter((message) => message.id !== pendingAgentMsg.id),
-            };
-          });
-        }
         // Roll forward with mock cascade so the UI is never stuck silent.
         showToast(
           err instanceof Error
@@ -4090,7 +3793,6 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
 
         sendMessage,
         sendMessageToSession,
-        stagePendingAgentPlaceholder,
         addMemberToOrganization,
         addProviderToKeychain,
 

@@ -392,7 +392,6 @@ function WorkspaceLayout() {
     setActiveSessionId,
     setSessionChatInputMode,
     sendMessageToSession,
-    stagePendingAgentPlaceholder,
     weeklyCost,
     showToast,
     setActiveSettingsTab,
@@ -1245,9 +1244,6 @@ function WorkspaceLayout() {
           const shouldPersistRouteMentions =
             Boolean(routeMentions?.length) &&
             (nextChatInputMode !== 'workflow' || mentions.length > 0);
-          const placeholderText =
-            content.trim() || attachmentInitialMessage(attachedFiles);
-
           await chatMessagesApi.uploadAttachment(
             backendSession.id,
             attachedFiles,
@@ -1260,14 +1256,6 @@ function WorkspaceLayout() {
                 : undefined,
             },
           );
-          stagePendingAgentPlaceholder(backendSession.id, placeholderText, {
-            chatInputMode: nextChatInputMode,
-            routeMentions,
-            fallbackMention,
-            workflowLeadAgentId,
-            persistToBackend: true,
-            placeholderMember,
-          });
         } else {
           sendMessageToSession(backendSession.id, content, {
             chatInputMode: nextChatInputMode,

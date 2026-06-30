@@ -743,7 +743,6 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
     memberQueuesBySessionAgentId,
     queuedUserMessagesById,
     sendMessage,
-    stagePendingAgentPlaceholder,
     members,
     locale,
     chatInputMode,
@@ -858,7 +857,9 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
   const displayedMessages = selectedSidebarMember
     ? messages.filter((message) => {
         if (!message.isUser) {
-          return message.sender === selectedSidebarMember.name;
+          return message.sessionAgentId
+            ? message.sessionAgentId === selectedSidebarMember.id
+            : message.sender === selectedSidebarMember.name;
         }
 
         const matchedMemberMentions = extractMentionHandles(
@@ -1724,12 +1725,6 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
           appLanguage: locale,
           referenceMessageId: quotedMessage?.id,
         });
-        if (trimmedInput) {
-          stagePendingAgentPlaceholder(activeSessionId, messageText, {
-            chatInputMode,
-            ...(quotedMessage ? { quotedMessage } : {}),
-          });
-        }
         setInputTextDraft("");
         setQuotedMessage(null);
         setAttachedFiles([]);

@@ -28,6 +28,7 @@ import type {
   ChatQueueListResponse,
   ChatRunActivityResponse,
   ChatRunRetentionListResponse,
+  ChatSessionRuntimeSnapshot,
   ChatSessionStatus,
   ChatSessionWorktreeMode,
   Config,
@@ -116,6 +117,11 @@ import type {
   ValidateWorkspacePathResponse,
   WorkspaceChangesResponse,
 } from "@/types";
+
+export interface ChatMessageMutationResponse {
+  message: BackendChatMessage;
+  runtime: ChatSessionRuntimeSnapshot;
+}
 import type {
   AddProjectMemberRequest,
   ChatTeamPreset,
@@ -591,6 +597,21 @@ export const chatQueuesApi = {
   },
 };
 
+export const chatRuntimeApi = {
+  getSnapshot: async (
+    sessionId: string,
+    options?: { includeMessages?: boolean },
+  ): Promise<ChatSessionRuntimeSnapshot> => {
+    const r = await makeRequest(
+      `/api/chat/sessions/${encodeURIComponent(sessionId)}/runtime${qs({
+        include_messages: options?.includeMessages,
+      })}`,
+      { cache: "no-store" },
+    );
+    return handleApiResponse<ChatSessionRuntimeSnapshot>(r);
+  },
+};
+
 // -----------------------------------------------------------------------------
 // Chat messages
 // -----------------------------------------------------------------------------
@@ -608,12 +629,12 @@ export const chatMessagesApi = {
   send: async (
     sessionId: string,
     data: CreateChatMessageRequest,
-  ): Promise<BackendChatMessage> => {
+  ): Promise<ChatMessageMutationResponse> => {
     const r = await makeRequest(
       `/api/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
       { method: "POST", body: JSON.stringify(data) },
     );
-    return handleApiResponse<BackendChatMessage>(r);
+    return handleApiResponse<ChatMessageMutationResponse>(r);
   },
   get: async (messageId: string): Promise<BackendChatMessage> => {
     const r = await makeRequest(
@@ -659,7 +680,7 @@ export const chatMessagesApi = {
       referenceMessageId?: string;
       mentions?: string[];
     },
-  ): Promise<BackendChatMessage> => {
+  ): Promise<ChatMessageMutationResponse> => {
     const form = new FormData();
     for (const file of Array.isArray(files) ? files : [files]) {
       form.append("file", file, file.name);
@@ -683,7 +704,7 @@ export const chatMessagesApi = {
       `/api/chat/sessions/${encodeURIComponent(sessionId)}/messages/upload`,
       { method: "POST", body: form },
     );
-    return handleApiResponse<BackendChatMessage>(r);
+    return handleApiResponse<ChatMessageMutationResponse>(r);
   },
   attachmentUrl: (
     sessionId: string,
@@ -2187,6 +2208,7 @@ export const api = {
   filesystem: filesystemApi,
   chatSessions: chatSessionsApi,
   chatQueues: chatQueuesApi,
+  chatRuntime: chatRuntimeApi,
   chatMessages: chatMessagesApi,
   chatRuns: chatRunsApi,
   chatAgents: chatAgentsApi,
