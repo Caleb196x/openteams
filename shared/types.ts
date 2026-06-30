@@ -496,7 +496,7 @@ export type AgentRuntimeRefreshResponse = { runners: Array<AgentRuntimeStatus>, 
 
 export type AgentRuntimeDiagnostics = { runner_type: BaseCodingAgent, installed: boolean, executable: boolean, availability: AvailabilityInfo, config_path: string, install_indicator_path: string | null, discovered_models: Array<string>, model_source: AgentRuntimeModelSource, version: string | null, last_checked_at: string | null, last_error: string | null, run_mode: AgentRunMode, env_summary: Array<AgentRuntimeEnvSummary>, executor_options: JsonValue, };
 
-export type ChatStreamEvent = { "type": "message_new", message: ChatMessage, } | { "type": "message_updated", message: ChatMessage, } | { "type": "work_item_new", work_item: ChatWorkItem, } | { "type": "agent_delta", session_id: string, session_agent_id: string, agent_id: string, run_id: string, stream_type: ChatStreamDeltaType, content: string, delta: boolean, is_final: boolean, } | { "type": "agent_run_started", session_id: string, session_agent_id: string, agent_id: string, agent_name: string, run_id: string,
+export type ChatStreamEvent = { "type": "message_new", message: ChatMessage, } | { "type": "message_updated", message: ChatMessage, } | { "type": "work_item_new", work_item: ChatWorkItem, } | { "type": "agent_delta", session_id: string, session_agent_id: string, agent_id: string, run_id: string, stream_type: ChatStreamDeltaType, content: string, delta: boolean, is_final: boolean, } | { "type": "agent_run_started", session_id: string, session_agent_id: string, agent_id: string, agent_name: string, model: string | null, run_id: string,
 /**
  * User (or upstream) message whose processing triggered this run.
  */
@@ -641,6 +641,14 @@ include_diff: boolean | null, };
 
 export type ChatRunFilesResponse = { run_id: string, workspace_path: string | null, is_git_repo: boolean, changes: WorkspaceChanges, error: string | null, };
 
+export type ChatActiveRunStatus = "starting" | "running" | "stopping" | "waiting_approval";
+
+export type ChatActiveRun = { run_id: string, session_id: string, session_agent_id: string, agent_id: string, agent_name: string, display_name: string, avatar: string, model: string | null, status: ChatActiveRunStatus, source_message_id: string | null, client_message_id: string | null, activity_lines: Array<ChatRunActivityLine>, created_at: string, };
+
+export type ChatSessionRuntimeSnapshot = { session_id: string, messages: Array<ChatMessage> | null, active_runs: Array<ChatActiveRun>, queues: Array<MemberQueueSnapshot>, };
+
+export type ChatSessionRuntimeQuery = { include_messages: boolean | null, };
+
 export type UpdateNativeSkillRequest = { enabled: boolean, };
 
 export type ExecutePlanReviewOverride = { stepId: string, leadReview: boolean | null, userReview: boolean | null, };
@@ -669,6 +677,8 @@ path: string, content?: string | null, use_stage?: ConflictResolutionSide, delet
 export type ContinueMergeRequest = { commit_message?: string | null, };
 
 export type CreateChatMessageRequest = { sender_type: ChatSenderType, sender_id: string | null, content: string, meta: JsonValue | null, };
+
+export type CreateChatMessageResponse = { message: ChatMessage, runtime: ChatSessionRuntimeSnapshot, };
 
 export type UserReviewResponseRequest = { review_id: string, action: string, feedback: string | null, expected_step_id: string | null, };
 
@@ -794,7 +804,7 @@ export type UserIterationFeedbackDetail = { what_wrong: string, expected: string
 
 export type UserIterationFeedback = { execution_id: string, round_id: string, action: string, feedback: UserIterationFeedbackDetail | null, };
 
-export type Config = { config_version: string, theme: ThemeMode, executor_profile: ExecutorProfileId, disclaimer_acknowledged: boolean, onboarding_acknowledged: boolean, notifications: NotificationConfig, editor: EditorConfig, github: GitHubConfig, analytics_enabled: boolean, workspace_dir: string | null, last_app_version: string | null, show_release_notes: boolean, language: UiLanguage, git_branch_prefix: string, showcases: ShowcaseState, pr_auto_description_enabled: boolean, pr_auto_description_prompt: string | null, beta_workspaces: boolean, beta_workspaces_invitation_sent: boolean, commit_reminder_enabled: boolean, commit_reminder_prompt: string | null, send_message_shortcut: SendMessageShortcut,
+export type Config = { config_version: string, theme: ThemeMode, executor_profile: ExecutorProfileId, disclaimer_acknowledged: boolean, onboarding_acknowledged: boolean, notifications: NotificationConfig, editor: EditorConfig, github: GitHubConfig, analytics_enabled: boolean, workspace_dir: string | null, worktree_sessions_dir: string | null, last_app_version: string | null, show_release_notes: boolean, language: UiLanguage, git_branch_prefix: string, showcases: ShowcaseState, pr_auto_description_enabled: boolean, pr_auto_description_prompt: string | null, beta_workspaces: boolean, beta_workspaces_invitation_sent: boolean, commit_reminder_enabled: boolean, commit_reminder_prompt: string | null, send_message_shortcut: SendMessageShortcut,
 /**
  * Chat presets configuration (member and team templates)
  */

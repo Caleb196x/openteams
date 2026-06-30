@@ -28,6 +28,7 @@ import type {
   ChatQueueListResponse,
   ChatRunActivityResponse,
   ChatRunRetentionListResponse,
+  ChatSessionRuntimeSnapshot,
   ChatSessionStatus,
   ChatSessionWorktreeMode,
   Config,
@@ -116,6 +117,11 @@ import type {
   ValidateWorkspacePathResponse,
   WorkspaceChangesResponse,
 } from "@/types";
+
+export interface ChatMessageMutationResponse {
+  message: BackendChatMessage;
+  runtime: ChatSessionRuntimeSnapshot;
+}
 import type {
   AddProjectMemberRequest,
   ChatTeamPreset,
@@ -372,6 +378,26 @@ export const onboardingApi = {
 // Filesystem
 // -----------------------------------------------------------------------------
 
+export interface SelectDirectoryRequest {
+  title?: string;
+  initial_directory?: string;
+}
+
+export interface SelectDirectoryResponse {
+  path: string | null;
+  cancelled: boolean;
+}
+
+export interface CreateDirectoryRequest {
+  parent_path: string;
+  name?: string | null;
+}
+
+export interface RenameDirectoryRequest {
+  path: string;
+  name: string;
+}
+
 export const filesystemApi = {
   listRoots: async (): Promise<DirectoryEntry[]> => {
     const r = await makeRequest("/api/filesystem/roots");
@@ -381,9 +407,36 @@ export const filesystemApi = {
     const r = await makeRequest(`/api/filesystem/directory${qs({ path })}`);
     return handleApiResponse<DirectoryListResponse>(r);
   },
+  createDirectory: async (
+    data: CreateDirectoryRequest,
+  ): Promise<DirectoryEntry> => {
+    const r = await makeRequest("/api/filesystem/directory", {
+      method: "POST",
+      body: jsonBody(data),
+    });
+    return handleApiResponse<DirectoryEntry>(r);
+  },
+  renameDirectory: async (
+    data: RenameDirectoryRequest,
+  ): Promise<DirectoryEntry> => {
+    const r = await makeRequest("/api/filesystem/directory", {
+      method: "PUT",
+      body: jsonBody(data),
+    });
+    return handleApiResponse<DirectoryEntry>(r);
+  },
   listGitRepos: async (path?: string): Promise<DirectoryEntry[]> => {
     const r = await makeRequest(`/api/filesystem/git-repos${qs({ path })}`);
     return handleApiResponse<DirectoryEntry[]>(r);
+  },
+  selectDirectory: async (
+    data: SelectDirectoryRequest = {},
+  ): Promise<SelectDirectoryResponse> => {
+    const r = await makeRequest("/api/filesystem/select-directory", {
+      method: "POST",
+      body: jsonBody(data),
+    });
+    return handleApiResponse<SelectDirectoryResponse>(r);
   },
   openInExplorer: async (
     path: string,
@@ -591,6 +644,21 @@ export const chatQueuesApi = {
   },
 };
 
+export const chatRuntimeApi = {
+  getSnapshot: async (
+    sessionId: string,
+    options?: { includeMessages?: boolean },
+  ): Promise<ChatSessionRuntimeSnapshot> => {
+    const r = await makeRequest(
+      `/api/chat/sessions/${encodeURIComponent(sessionId)}/runtime${qs({
+        include_messages: options?.includeMessages,
+      })}`,
+      { cache: "no-store" },
+    );
+    return handleApiResponse<ChatSessionRuntimeSnapshot>(r);
+  },
+};
+
 // -----------------------------------------------------------------------------
 // Chat messages
 // -----------------------------------------------------------------------------
@@ -608,12 +676,12 @@ export const chatMessagesApi = {
   send: async (
     sessionId: string,
     data: CreateChatMessageRequest,
-  ): Promise<BackendChatMessage> => {
+  ): Promise<ChatMessageMutationResponse> => {
     const r = await makeRequest(
       `/api/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
       { method: "POST", body: JSON.stringify(data) },
     );
-    return handleApiResponse<BackendChatMessage>(r);
+    return handleApiResponse<ChatMessageMutationResponse>(r);
   },
   get: async (messageId: string): Promise<BackendChatMessage> => {
     const r = await makeRequest(
@@ -659,7 +727,7 @@ export const chatMessagesApi = {
       referenceMessageId?: string;
       mentions?: string[];
     },
-  ): Promise<BackendChatMessage> => {
+  ): Promise<ChatMessageMutationResponse> => {
     const form = new FormData();
     for (const file of Array.isArray(files) ? files : [files]) {
       form.append("file", file, file.name);
@@ -683,7 +751,7 @@ export const chatMessagesApi = {
       `/api/chat/sessions/${encodeURIComponent(sessionId)}/messages/upload`,
       { method: "POST", body: form },
     );
-    return handleApiResponse<BackendChatMessage>(r);
+    return handleApiResponse<ChatMessageMutationResponse>(r);
   },
   attachmentUrl: (
     sessionId: string,
@@ -2187,6 +2255,7 @@ export const api = {
   filesystem: filesystemApi,
   chatSessions: chatSessionsApi,
   chatQueues: chatQueuesApi,
+  chatRuntime: chatRuntimeApi,
   chatMessages: chatMessagesApi,
   chatRuns: chatRunsApi,
   chatAgents: chatAgentsApi,

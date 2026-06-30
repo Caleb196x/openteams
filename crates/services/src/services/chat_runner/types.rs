@@ -138,6 +138,7 @@ pub enum ChatStreamEvent {
         session_agent_id: Uuid,
         agent_id: Uuid,
         agent_name: String,
+        model: Option<String>,
         run_id: Uuid,
         /// User (or upstream) message whose processing triggered this run.
         source_message_id: Uuid,

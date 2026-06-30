@@ -105,6 +105,14 @@ check(
 );
 
 check(
+  'project names are sanitized before onboarding project creation',
+  guideSource.includes("import { sanitizeProjectName }") &&
+    guideSource.includes('const name = sanitizeProjectName(projectName)') &&
+    guideSource.includes('setProjectName(sanitizeProjectName(event.target.value))'),
+  guideSource,
+);
+
+check(
   'start now creates a real project, completes onboarding, then opens the existing session composer',
   guideSource.indexOf('await onCreateProjectFromOnboarding') <
     guideSource.indexOf('await onboardingApi.complete') &&
@@ -112,7 +120,7 @@ check(
     guideSource.includes('created_project_id: createdProject.projectId') &&
     guideSource.includes('onOpenCreateSession(state)') &&
     appSource.includes('onCreateProjectFromOnboarding={handleCreateOnboardingProject}') &&
-    appSource.includes('return { projectId: project.id, sessionId: session?.id ?? null }') &&
+    appSource.includes('return { projectId: project.id, sessionId: null }') &&
     appSource.includes('handleOnboardingCompleted') &&
     appSource.includes('setIsCreateSessionModalOpen(true)'),
   { guideSource, appSource },
@@ -126,6 +134,24 @@ check(
     appSource.includes('currentUpgradeVersion') &&
     appSource.includes('<OnboardingGuide'),
   appSource,
+);
+
+check(
+  'onboarding state changes keep the active overlay state synchronized',
+  appSource.includes('setOnboardingOverlay((current) =>') &&
+    appSource.includes('current ? { ...current, state: nextState } : current'),
+  appSource,
+);
+
+check(
+  'initialization effect does not reset the active step when runtimes templates locale or theme change',
+  guideSource.includes('const initializeFromState =') &&
+    guideSource.includes('useEffect(() => {') &&
+    guideSource.includes('initializeFromState(initialState);') &&
+    guideSource.includes('}, [initialState]);') &&
+    !guideSource.includes('buildTeamConfigForScenario,\n    initialState,\n    locale,') &&
+    !guideSource.includes('projectNameForScenario,\n    theme,'),
+  guideSource,
 );
 
 check(

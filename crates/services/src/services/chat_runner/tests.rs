@@ -323,6 +323,98 @@ async fn insert_test_project(pool: &SqlitePool, project_id: Uuid) {
     .expect("insert project");
 }
 
+#[tokio::test]
+async fn syncs_project_member_execution_config_immediately_before_run() {
+    let db = setup_chat_runner_db().await;
+    let runner = ChatRunner::new(db.clone());
+    let project_id = Uuid::new_v4();
+    let session_id = Uuid::new_v4();
+    insert_test_project(&db.pool, project_id).await;
+    let agent = insert_test_chat_agent(&db, "runner").await;
+    sqlx::query(
+        r#"
+        INSERT INTO chat_sessions (id, title, status, project_id)
+        VALUES (?1, ?2, ?3, ?4)
+        "#,
+    )
+    .bind(session_id)
+    .bind("project session")
+    .bind(ChatSessionStatus::Active)
+    .bind(project_id)
+    .execute(&db.pool)
+    .await
+    .expect("insert project chat session");
+
+    let member_config = MemberExecutionConfig {
+        runner_type: Some(executors::executors::BaseCodingAgent::Codex),
+        model_name: Some("new-model".to_string()),
+        thinking_effort: Some("high".to_string()),
+        model_variant: None,
+    };
+    let member = ProjectMember::create(
+        &db.pool,
+        project_id,
+        ProjectMemberType::Agent,
+        None,
+        Some(agent.id),
+        Some("runner".to_string()),
+        Some("member".to_string()),
+        1,
+        None,
+        Vec::new(),
+        member_config.clone(),
+        true,
+    )
+    .await
+    .expect("create project member");
+
+    let stale_agent = ChatSessionAgent::create(
+        &db.pool,
+        &db::models::chat_session_agent::CreateChatSessionAgent {
+            session_id,
+            agent_id: agent.id,
+            workspace_path: None,
+            allowed_skill_ids: Vec::new(),
+            project_member_id: Some(member.id),
+            execution_config: MemberExecutionConfig {
+                runner_type: Some(executors::executors::BaseCodingAgent::Codex),
+                model_name: Some("old-model".to_string()),
+                thinking_effort: None,
+                model_variant: None,
+            },
+        },
+        Uuid::new_v4(),
+    )
+    .await
+    .expect("create stale session agent");
+    sqlx::query(
+        r#"
+        UPDATE chat_session_agents
+        SET agent_session_id = 'old-session',
+            agent_message_id = 'old-message'
+        WHERE id = ?1
+        "#,
+    )
+    .bind(stale_agent.id)
+    .execute(&db.pool)
+    .await
+    .expect("seed stale upstream ids");
+    let stale_agent = ChatSessionAgent::find_by_id(&db.pool, stale_agent.id)
+        .await
+        .expect("read stale session agent")
+        .expect("stale session agent exists");
+
+    let synced = runner
+        .sync_session_agent_execution_config_before_run(session_id, stale_agent, agent.id)
+        .await
+        .expect("sync before run");
+
+    assert_eq!(synced.execution_config.0, member_config);
+    assert_eq!(synced.project_member_id, Some(member.id));
+    assert_eq!(synced.agent_session_id, None);
+    assert_eq!(synced.agent_message_id, None);
+}
+
 fn finished_count(msg_store: &MsgStore) -> usize {
     msg_store
         .get_history()

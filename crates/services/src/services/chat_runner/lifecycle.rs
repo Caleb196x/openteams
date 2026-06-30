@@ -591,21 +591,14 @@ impl ChatRunner {
                 continue;
             }
 
-            let runner = self.clone();
-            let message_clone = message.clone();
-            tokio::spawn(async move {
-                if let Err(err) = runner
-                    .run_agent_for_mention(session_id, &mention, &message_clone)
-                    .await
-                {
-                    tracing::warn!(
-                        error = %err,
-                        mention = mention,
-                        session_id = %session_id,
-                        "chat runner failed for mention"
-                    );
-                }
-            });
+            if let Err(err) = self.run_agent_for_mention(session_id, &mention, message).await {
+                tracing::warn!(
+                    error = %err,
+                    mention = mention,
+                    session_id = %session_id,
+                    "chat runner failed for mention"
+                );
+            }
         }
     }
 
@@ -1163,6 +1156,69 @@ impl ChatRunner {
             .await
     }
 
+    async fn project_member_for_session_agent(
+        &self,
+        session_id: Uuid,
+        session_agent: &ChatSessionAgent,
+        agent_id: Uuid,
+    ) -> Result<Option<ProjectMember>, ChatRunnerError> {
+        if let Some(project_member_id) = session_agent.project_member_id {
+            return Ok(ProjectMember::find_by_id(&self.db.pool, project_member_id).await?);
+        }
+
+        let Some(session) = ChatSession::find_by_id(&self.db.pool, session_id).await? else {
+            return Ok(None);
+        };
+        let Some(project_id) = session.project_id else {
+            return Ok(None);
+        };
+
+        Ok(ProjectMember::find_by_project(&self.db.pool, project_id)
+            .await?
+            .into_iter()
+            .find(|member| {
+                member.member_type == ProjectMemberType::Agent && member.agent_id == Some(agent_id)
+            }))
+    }
+
+    async fn sync_session_agent_execution_config_before_run(
+        &self,
+        session_id: Uuid,
+        session_agent: ChatSessionAgent,
+        agent_id: Uuid,
+    ) -> Result<ChatSessionAgent, ChatRunnerError> {
+        let Some(project_member) = self
+            .project_member_for_session_agent(session_id, &session_agent, agent_id)
+            .await?
+        else {
+            return Ok(session_agent);
+        };
+
+        let current_config = session_agent.execution_config.0.clone().normalized();
+        let next_config = project_member.execution_config.0.clone().normalized();
+        if current_config == next_config
+            && session_agent.project_member_id == Some(project_member.id)
+        {
+            return Ok(session_agent);
+        }
+
+        let updated = ChatSessionAgent::update_execution_config_for_next_run(
+            &self.db.pool,
+            session_agent.id,
+            Some(project_member.id),
+            next_config,
+        )
+        .await?;
+        tracing::info!(
+            session_id = %session_id,
+            session_agent_id = %session_agent.id,
+            agent_id = %agent_id,
+            project_member_id = %project_member.id,
+            "Synced project member execution config immediately before agent run"
+        );
+        Ok(updated)
+    }
+
     async fn run_agent_for_mention_internal(
         &self,
         session_id: Uuid,
@@ -1333,8 +1389,14 @@ impl ChatRunner {
             return Ok(());
         }
 
+        let session_agent = self
+            .sync_session_agent_execution_config_before_run(session_id, session_agent, agent.id)
+            .await?;
         let session_agent_id = session_agent.id;
         let agent_id = agent.id;
+        let run_model = resolve_effective_member_execution_config(&agent, &session_agent)
+            .map_err(|err| ChatRunnerError::Io(std::io::Error::other(err.to_string())))?
+            .model_name;
         let run_id = Uuid::new_v4();
         let startup_timing =
             Arc::new(startup_timing::RunStartupTiming::new(startup_timing::RunStartupIdentity {
@@ -1393,6 +1455,7 @@ impl ChatRunner {
                 session_agent_id,
                 agent_id,
                 agent_name: agent.name.clone(),
+                model: run_model,
                 run_id,
                 source_message_id: source_message.id,
                 client_message_id: client_message_id.clone(),

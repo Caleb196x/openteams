@@ -199,6 +199,12 @@ type OnboardingOverlay =
 
 type CreateProjectOptions = {
   teamId?: string;
+  openSessionComposer?: boolean;
+};
+
+type PendingProjectSessionProtocol = {
+  projectId: string;
+  teamProtocol: string;
 };
 
 type ChatPresetConfigView = {
@@ -252,6 +258,42 @@ const buildCreateSessionWorkspaceLookup = (
     workflowWorkspacePath: workflowProjectAgent?.default_workspace_path ?? null,
     memberWorkspacePaths,
   };
+};
+
+const buildCreateSessionMembers = (
+  projectMembers: ProjectMemberWithRuntime[],
+  agents: Awaited<ReturnType<typeof chatAgentsApi.list>>,
+): Member[] => {
+  const agentById = new Map(agents.map((agent) => [agent.id, agent]));
+  return projectMembers
+    .filter(
+      (member) =>
+        member.member_type === ProjectMemberType.agent && member.agent_id,
+    )
+    .map((projectMember) => {
+      const agent = agentById.get(projectMember.agent_id as string);
+      const displayName =
+        projectMember.member_name?.trim() ||
+        agent?.name?.trim() ||
+        "agent";
+      const name = displayName.startsWith("@") ? displayName : `@${displayName}`;
+      const runnerLabel =
+        projectMember.execution_config?.runner_type ??
+        agent?.runner_type ??
+        "agent";
+      const modelName =
+        projectMember.execution_config?.model_name ??
+        agent?.model_name ??
+        runnerLabel;
+      return {
+        id: projectMember.id,
+        avatar: monogramFromName(displayName),
+        status: "on",
+        name,
+        roleDetail: modelName,
+        modelName,
+      };
+    });
 };
 
 const clampSidebarWidth = (width: number) =>
@@ -392,7 +434,6 @@ function WorkspaceLayout() {
     setActiveSessionId,
     setSessionChatInputMode,
     sendMessageToSession,
-    stagePendingAgentPlaceholder,
     weeklyCost,
     showToast,
     setActiveSettingsTab,
@@ -419,6 +460,11 @@ function WorkspaceLayout() {
     null,
   );
   const [leadMember, setLeadMember] = useState<Member | null>(null);
+  const [createSessionMembers, setCreateSessionMembers] = useState<Member[]>(
+    [],
+  );
+  const [pendingProjectSessionProtocol, setPendingProjectSessionProtocol] =
+    useState<PendingProjectSessionProtocol | null>(null);
   const [createSessionWorkspaceLookup, setCreateSessionWorkspaceLookup] =
     useState<CreateSessionWorkspaceLookup>({
       workflowWorkspacePath: null,
@@ -476,9 +522,21 @@ function WorkspaceLayout() {
     [],
   );
 
+  const loadCreateSessionMembers = useCallback(
+    async (projectId: string): Promise<Member[]> => {
+      const [projectMembers, agents] = await Promise.all([
+        projectApi.listMembers(projectId),
+        chatAgentsApi.list({ projectId }).catch(() => []),
+      ]);
+      return buildCreateSessionMembers(projectMembers, agents);
+    },
+    [],
+  );
+
   useEffect(() => {
     if (!selectedProjectId) {
       setLeadMember(null);
+      setCreateSessionMembers([]);
       setCreateSessionWorkspaceLookup({
         workflowWorkspacePath: null,
         memberWorkspacePaths: {},
@@ -486,6 +544,7 @@ function WorkspaceLayout() {
       return;
     }
     setLeadMember(null);
+    setCreateSessionMembers([]);
     let cancelled = false;
     void loadLeadMember(selectedProjectId)
       .then((nextLeadMember) => {
@@ -503,6 +562,13 @@ function WorkspaceLayout() {
     if (!isCreateSessionModalOpen || !selectedProjectId) return;
     let cancelled = false;
     void refreshMembers().catch(() => undefined);
+    void loadCreateSessionMembers(selectedProjectId)
+      .then((nextMembers) => {
+        if (!cancelled) setCreateSessionMembers(nextMembers);
+      })
+      .catch(() => {
+        if (!cancelled) setCreateSessionMembers([]);
+      });
     void loadCreateSessionWorkspaceLookup(selectedProjectId)
       .then((lookup) => {
         if (!cancelled) setCreateSessionWorkspaceLookup(lookup);
@@ -527,6 +593,7 @@ function WorkspaceLayout() {
     };
   }, [
     isCreateSessionModalOpen,
+    loadCreateSessionMembers,
     loadCreateSessionWorkspaceLookup,
     loadLeadMember,
     refreshMembers,
@@ -1179,6 +1246,10 @@ function WorkspaceLayout() {
         },
       );
       let sessionForUi = backendSession;
+      const pendingTeamProtocol =
+        pendingProjectSessionProtocol?.projectId === selectedProjectId
+          ? pendingProjectSessionProtocol.teamProtocol
+          : null;
 
       if (options.taskMode === 'workflow') {
         await chatSessionsApi
@@ -1195,11 +1266,36 @@ function WorkspaceLayout() {
             team_protocol_enabled: null,
             default_workspace_path: null,
             chat_input_mode: 'workflow',
+            ...(pendingTeamProtocol
+              ? {
+                  team_protocol: pendingTeamProtocol,
+                  team_protocol_enabled: true,
+                }
+              : {}),
           })
           .then((updatedSession) => {
             sessionForUi = updatedSession;
           })
           .catch(() => undefined);
+      } else if (pendingTeamProtocol) {
+        await chatSessionsApi
+          .update(
+            backendSession.id,
+            chatSessionUpdatePayload({
+              team_protocol: pendingTeamProtocol,
+              team_protocol_enabled: true,
+            }),
+          )
+          .then((updatedSession) => {
+            sessionForUi = updatedSession;
+          })
+          .catch(() => undefined);
+      }
+
+      if (pendingTeamProtocol) {
+        setPendingProjectSessionProtocol((current) =>
+          current?.projectId === selectedProjectId ? null : current,
+        );
       }
 
       const nextChatInputMode =
@@ -1245,9 +1341,6 @@ function WorkspaceLayout() {
           const shouldPersistRouteMentions =
             Boolean(routeMentions?.length) &&
             (nextChatInputMode !== 'workflow' || mentions.length > 0);
-          const placeholderText =
-            content.trim() || attachmentInitialMessage(attachedFiles);
-
           await chatMessagesApi.uploadAttachment(
             backendSession.id,
             attachedFiles,
@@ -1260,14 +1353,6 @@ function WorkspaceLayout() {
                 : undefined,
             },
           );
-          stagePendingAgentPlaceholder(backendSession.id, placeholderText, {
-            chatInputMode: nextChatInputMode,
-            routeMentions,
-            fallbackMention,
-            workflowLeadAgentId,
-            persistToBackend: true,
-            placeholderMember,
-          });
         } else {
           sendMessageToSession(backendSession.id, content, {
             chatInputMode: nextChatInputMode,
@@ -1375,14 +1460,11 @@ function WorkspaceLayout() {
     options?: CreateProjectOptions,
   ) => {
     const project = await createProject(data);
-    let session = await projectApi.createSession(project.id, {
-      title: null,
-      workspace_path: data.default_workspace_path,
-    });
     const selectedTeamId = options?.teamId || blankTeamId;
     const selectedTeamPreset = teamPresets.find(
       (preset) => preset.id === selectedTeamId,
     );
+    const selectedTeamProtocol = selectedTeamPreset?.team_protocol?.trim() ?? "";
     const runtimes = await loadRuntimeStatuses();
     let starterMemberCreated = false;
     let templateMemberCount: number | null = null;
@@ -1398,16 +1480,6 @@ function WorkspaceLayout() {
         );
         if (templateMemberCount === 0) {
           teamSetupFailed = true;
-        }
-        const teamProtocol = selectedTeamPreset.team_protocol?.trim() ?? "";
-        if (teamProtocol) {
-          session = await chatSessionsApi.update(
-            session.id,
-            chatSessionUpdatePayload({
-              team_protocol: teamProtocol,
-              team_protocol_enabled: true,
-            }),
-          );
         }
       } catch (err) {
         teamSetupFailed = true;
@@ -1425,17 +1497,14 @@ function WorkspaceLayout() {
         teamSetupFailed = true;
       }
     }
-    const mappedSession = mapSession(session, {
-      activeSessionId: session.id,
-    });
-    setSessions((currentSessions) => [
-      mappedSession,
-      ...currentSessions
-        .filter((item) => item.id !== mappedSession.id)
-        .map((item) => ({ ...item, active: false })),
-    ]);
-    replaceActiveTab(createSessionTab(session.id));
-    setActiveSessionId(session.id);
+    setPendingProjectSessionProtocol(
+      selectedTeamProtocol
+        ? {
+            projectId: project.id,
+            teamProtocol: selectedTeamProtocol,
+          }
+        : null,
+    );
     const createdProjectToast = teamSetupFailed
       ? translate(
           "toast.projectCreatedTeamSetupFailed",
@@ -1466,8 +1535,11 @@ function WorkspaceLayout() {
               name: project.name,
             });
     showToast(createdProjectToast);
+    if (options?.openSessionComposer) {
+      setIsCreateSessionModalOpen(true);
+    }
     closeMobileSidebar();
-    return { project, session };
+    return { project };
   };
 
   const handleUpdateProject = async (
@@ -1521,7 +1593,7 @@ function WorkspaceLayout() {
     path: string;
     teamId: string | null;
   }) => {
-    const { project, session } = await handleCreateProject(
+    const { project } = await handleCreateProject(
       {
         name,
         repositories: [],
@@ -1532,7 +1604,7 @@ function WorkspaceLayout() {
       },
       { teamId: teamId ?? blankTeamId },
     );
-    return { projectId: project.id, sessionId: session?.id ?? null };
+    return { projectId: project.id, sessionId: null };
   };
 
   const handleOnboardingPreviewAppearanceChange = (
@@ -1554,6 +1626,9 @@ function WorkspaceLayout() {
 
   const handleOnboardingStateChange = (nextState: OnboardingState) => {
     setOnboardingState(nextState);
+    setOnboardingOverlay((current) =>
+      current ? { ...current, state: nextState } : current,
+    );
   };
 
   const handleUpgradeRead = (nextState: OnboardingState) => {
@@ -1611,7 +1686,7 @@ function WorkspaceLayout() {
           activeProjectWorkspacePath
         }
         memberWorkspacePaths={createSessionWorkspaceLookup.memberWorkspacePaths}
-        members={members}
+        members={createSessionMembers}
         leadMember={leadMember}
         t={t}
         onClose={() => setIsCreateSessionModalOpen(false)}

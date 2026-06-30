@@ -110,7 +110,8 @@ check(
 check(
   "displays worktree action errors alongside source-control errors",
   source.includes("worktreeActionError") &&
-    source.includes("viewModel.blockedReason || actionError || worktreeActionError"),
+    source.includes("viewModel.blockedReason || actionError || worktreeActionError") &&
+    source.includes("select-text whitespace-pre-wrap break-words"),
   source,
 );
 

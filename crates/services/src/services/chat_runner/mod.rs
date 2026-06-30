@@ -60,7 +60,9 @@ use utils::{
 use uuid::Uuid;
 
 use crate::services::{
-    member_execution::build_effective_member_executor,
+    member_execution::{
+        build_effective_member_executor, resolve_effective_member_execution_config,
+    },
     queued_message::{
         CreateQueuedMessage, MemberQueueSnapshot, QueuedMessage, QueuedMessageService,
     },
