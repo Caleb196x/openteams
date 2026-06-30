@@ -25,6 +25,7 @@ import {
   onboardingApi,
 } from '@/lib/api';
 import { recommendOnboardingTeamTemplate } from '@/lib/onboardingTemplateRecommendations';
+import { sanitizeProjectName } from '@/lib/projectName';
 import { buildTemplateMemberSpecs } from '@/lib/teamTemplateRuntime';
 import {
   getRunnerLabel,
@@ -418,7 +419,7 @@ export function OnboardingGuide({
       const scenario =
         scenarios.find((candidate) => candidate.key === scenarioKey) ??
         currentScenario;
-      return `${scenario.title} workspace`;
+      return sanitizeProjectName(`${scenario.title} workspace`);
     },
     [currentScenario, scenarios],
   );
@@ -446,51 +447,51 @@ export function OnboardingGuide({
     [runtimes, teamPresets],
   );
 
-  useEffect(() => {
-    setState(initialState);
+  const initializeFromState = (nextInitialState: OnboardingState | null) => {
+    setState(nextInitialState);
     setActiveStepKey(
-      initialState?.welcome_seen_at
-        ? stepFromBackend(initialState.current_step)
+      nextInitialState?.welcome_seen_at
+        ? stepFromBackend(nextInitialState.current_step)
         : welcomeStepKey,
     );
-    const nextScenario = scenarioFromState(initialState?.selected_scenario);
+    const nextScenario = scenarioFromState(nextInitialState?.selected_scenario);
     setSelectedScenario(nextScenario);
     setTeamConfig(
-      initialState?.team_config?.length
-        ? initialState.team_config
+      nextInitialState?.team_config?.length
+        ? nextInitialState.team_config
         : buildTeamConfigForScenario(nextScenario),
     );
     setProjectName((current) =>
-      initialState?.project_name ??
-      (current.trim() ? current : projectNameForScenario(nextScenario)),
+      sanitizeProjectName(
+        nextInitialState?.project_name ??
+          (current.trim() ? current : projectNameForScenario(nextScenario)),
+      ),
     );
     setProjectNameTouched((current) =>
-      Boolean(initialState?.project_name?.trim()) || current,
+      Boolean(nextInitialState?.project_name?.trim()) || current,
     );
-    setProjectPath(initialState?.project_path ?? '');
+    setProjectPath(nextInitialState?.project_path ?? '');
     setProjectStatus(
-      initialState?.project_path
+      nextInitialState?.project_path
         ? {
             valid: true,
-            is_git_repo: initialState.project_path_is_git,
+            is_git_repo: nextInitialState.project_path_is_git,
             error: null,
           }
         : null,
     );
-    setSelectedLocale(onboardingLanguageToLocale(initialState?.language, locale));
+    setSelectedLocale(onboardingLanguageToLocale(nextInitialState?.language, locale));
     setSelectedAppearance(
-      initialState?.appearance ??
+      nextInitialState?.appearance ??
         (theme === 'light'
           ? OnboardingAppearance.light
           : OnboardingAppearance.dark),
     );
-  }, [
-    buildTeamConfigForScenario,
-    initialState,
-    locale,
-    projectNameForScenario,
-    theme,
-  ]);
+  };
+
+  useEffect(() => {
+    initializeFromState(initialState);
+  }, [initialState]);
 
   useEffect(() => {
     if (mode !== 'onboarding') return;
@@ -565,7 +566,7 @@ export function OnboardingGuide({
     recommended_team_name: recommendedTeamName,
     team_config: teamConfig,
     project_path: projectPath.trim() || undefined,
-    project_name: projectName.trim() || undefined,
+    project_name: sanitizeProjectName(projectName) || undefined,
     created_project_id: state?.created_project_id ?? undefined,
     language: localeToOnboardingLanguage[selectedLocale],
     appearance: selectedAppearance,
@@ -579,11 +580,12 @@ export function OnboardingGuide({
   };
 
   const validateProjectDraft = async () => {
-    const name = projectName.trim();
+    const name = sanitizeProjectName(projectName);
     if (!name) {
       setError(t('onboarding.project.nameRequired'));
       return null;
     }
+    setProjectName(name);
 
     const path = projectPath.trim();
     if (!path) {
@@ -1040,7 +1042,7 @@ export function OnboardingGuide({
           <input
             value={projectName}
             onChange={(event) => {
-              setProjectName(event.target.value);
+              setProjectName(sanitizeProjectName(event.target.value));
               setProjectNameTouched(true);
             }}
             className="mt-2 h-9 w-full rounded-md border border-[var(--hairline)] bg-[var(--surface-2)] px-3 text-[13px] text-[var(--ink)] outline-none transition placeholder:text-[var(--ink-tertiary)] focus:border-[var(--primary)]"

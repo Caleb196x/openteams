@@ -388,6 +388,16 @@ export interface SelectDirectoryResponse {
   cancelled: boolean;
 }
 
+export interface CreateDirectoryRequest {
+  parent_path: string;
+  name?: string | null;
+}
+
+export interface RenameDirectoryRequest {
+  path: string;
+  name: string;
+}
+
 export const filesystemApi = {
   listRoots: async (): Promise<DirectoryEntry[]> => {
     const r = await makeRequest("/api/filesystem/roots");
@@ -396,6 +406,24 @@ export const filesystemApi = {
   listDirectory: async (path?: string): Promise<DirectoryListResponse> => {
     const r = await makeRequest(`/api/filesystem/directory${qs({ path })}`);
     return handleApiResponse<DirectoryListResponse>(r);
+  },
+  createDirectory: async (
+    data: CreateDirectoryRequest,
+  ): Promise<DirectoryEntry> => {
+    const r = await makeRequest("/api/filesystem/directory", {
+      method: "POST",
+      body: jsonBody(data),
+    });
+    return handleApiResponse<DirectoryEntry>(r);
+  },
+  renameDirectory: async (
+    data: RenameDirectoryRequest,
+  ): Promise<DirectoryEntry> => {
+    const r = await makeRequest("/api/filesystem/directory", {
+      method: "PUT",
+      body: jsonBody(data),
+    });
+    return handleApiResponse<DirectoryEntry>(r);
   },
   listGitRepos: async (path?: string): Promise<DirectoryEntry[]> => {
     const r = await makeRequest(`/api/filesystem/git-repos${qs({ path })}`);

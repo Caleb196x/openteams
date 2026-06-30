@@ -22,6 +22,14 @@ pub enum FilesystemError {
     DirectoryDoesNotExist,
     #[error("Path is not a directory")]
     PathIsNotDirectory,
+    #[error("Directory name is required")]
+    DirectoryNameRequired,
+    #[error("Directory name contains invalid characters")]
+    InvalidDirectoryName,
+    #[error("Directory already exists")]
+    DirectoryAlreadyExists,
+    #[error("Directory has no parent directory")]
+    DirectoryHasNoParent,
     #[error("Failed to read directory: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -347,6 +355,136 @@ impl FilesystemService {
         Ok(())
     }
 
+    fn validate_directory_name(name: &str) -> Result<String, FilesystemError> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err(FilesystemError::DirectoryNameRequired);
+        }
+        if trimmed == "."
+            || trimmed == ".."
+            || trimmed.contains('/')
+            || trimmed.contains('\\')
+            || trimmed.contains('\0')
+        {
+            return Err(FilesystemError::InvalidDirectoryName);
+        }
+
+        #[cfg(windows)]
+        {
+            let has_invalid_windows_char = trimmed
+                .chars()
+                .any(|ch| ch.is_control() || matches!(ch, '<' | '>' | ':' | '"' | '|' | '?' | '*'));
+            let stem = trimmed
+                .split('.')
+                .next()
+                .unwrap_or(trimmed)
+                .to_ascii_uppercase();
+            let reserved = matches!(
+                stem.as_str(),
+                "CON"
+                    | "PRN"
+                    | "AUX"
+                    | "NUL"
+                    | "COM1"
+                    | "COM2"
+                    | "COM3"
+                    | "COM4"
+                    | "COM5"
+                    | "COM6"
+                    | "COM7"
+                    | "COM8"
+                    | "COM9"
+                    | "LPT1"
+                    | "LPT2"
+                    | "LPT3"
+                    | "LPT4"
+                    | "LPT5"
+                    | "LPT6"
+                    | "LPT7"
+                    | "LPT8"
+                    | "LPT9"
+            );
+            if has_invalid_windows_char || reserved || trimmed.ends_with('.') {
+                return Err(FilesystemError::InvalidDirectoryName);
+            }
+        }
+
+        Ok(trimmed.to_string())
+    }
+
+    fn directory_entry_for_path(path: PathBuf) -> Result<DirectoryEntry, FilesystemError> {
+        Self::verify_directory(&path)?;
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| path.to_string_lossy().to_string());
+
+        Ok(DirectoryEntry {
+            name,
+            is_git_repo: path.join(".git").exists(),
+            path,
+            is_directory: true,
+            last_modified: None,
+        })
+    }
+
+    pub async fn create_directory(
+        &self,
+        parent_path: String,
+        name: Option<String>,
+    ) -> Result<DirectoryEntry, FilesystemError> {
+        if parent_path.trim().is_empty() {
+            return Err(FilesystemError::DirectoryDoesNotExist);
+        }
+        let parent_path = PathBuf::from(parent_path.trim());
+        Self::verify_directory(&parent_path)?;
+        let base_name = Self::validate_directory_name(name.as_deref().unwrap_or("New Folder"))?;
+
+        for index in 0..1000 {
+            let candidate_name = if index == 0 {
+                base_name.clone()
+            } else {
+                format!("{base_name} {}", index + 1)
+            };
+            let target_path = parent_path.join(candidate_name);
+            match fs::create_dir(&target_path) {
+                Ok(()) => return Self::directory_entry_for_path(target_path),
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(err) => return Err(FilesystemError::Io(err)),
+            }
+        }
+
+        Err(FilesystemError::DirectoryAlreadyExists)
+    }
+
+    pub async fn rename_directory(
+        &self,
+        path: String,
+        name: String,
+    ) -> Result<DirectoryEntry, FilesystemError> {
+        if path.trim().is_empty() {
+            return Err(FilesystemError::DirectoryDoesNotExist);
+        }
+        let source_path = PathBuf::from(path.trim());
+        Self::verify_directory(&source_path)?;
+        let new_name = Self::validate_directory_name(&name)?;
+        let parent_path = source_path
+            .parent()
+            .ok_or(FilesystemError::DirectoryHasNoParent)?;
+        let target_path = parent_path.join(new_name);
+
+        if source_path == target_path {
+            return Self::directory_entry_for_path(source_path);
+        }
+        if target_path.exists() {
+            return Err(FilesystemError::DirectoryAlreadyExists);
+        }
+
+        fs::rename(&source_path, &target_path)?;
+        Self::directory_entry_for_path(target_path)
+    }
+
     pub async fn list_directory(
         &self,
         path: Option<String>,
@@ -395,5 +533,58 @@ impl FilesystemService {
             entries: directory_entries,
             current_path: path.to_string_lossy().to_string(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn create_directory_uses_unique_default_name() {
+        let tempdir = tempfile::tempdir().expect("create temp directory");
+        fs::create_dir(tempdir.path().join("New Folder")).expect("seed directory");
+        let service = FilesystemService::new();
+
+        let entry = service
+            .create_directory(tempdir.path().to_string_lossy().to_string(), None)
+            .await
+            .expect("create unique directory");
+
+        assert_eq!(entry.name, "New Folder 2");
+        assert!(entry.path.is_dir());
+    }
+
+    #[tokio::test]
+    async fn rename_directory_keeps_target_in_same_parent() {
+        let tempdir = tempfile::tempdir().expect("create temp directory");
+        let source = tempdir.path().join("draft");
+        fs::create_dir(&source).expect("create source directory");
+        let service = FilesystemService::new();
+
+        let entry = service
+            .rename_directory(source.to_string_lossy().to_string(), "final".to_string())
+            .await
+            .expect("rename directory");
+
+        assert_eq!(entry.name, "final");
+        assert!(tempdir.path().join("final").is_dir());
+        assert!(!source.exists());
+    }
+
+    #[tokio::test]
+    async fn rename_directory_rejects_path_separators() {
+        let tempdir = tempfile::tempdir().expect("create temp directory");
+        let source = tempdir.path().join("draft");
+        fs::create_dir(&source).expect("create source directory");
+        let service = FilesystemService::new();
+
+        let error = service
+            .rename_directory(source.to_string_lossy().to_string(), "../final".to_string())
+            .await
+            .expect_err("reject nested name");
+
+        assert!(matches!(error, FilesystemError::InvalidDirectoryName));
+        assert!(source.is_dir());
     }
 }

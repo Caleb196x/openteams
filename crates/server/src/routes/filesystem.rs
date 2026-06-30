@@ -23,6 +23,19 @@ pub struct ListDirectoryQuery {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct CreateDirectoryRequest {
+    pub parent_path: String,
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RenameDirectoryRequest {
+    pub path: String,
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct OpenInExplorerRequest {
     pub path: String,
     #[serde(default)]
@@ -54,6 +67,27 @@ pub struct SelectDirectoryResponse {
 
 fn open_in_explorer_response(ok: bool, error: Option<String>) -> Json<OpenInExplorerResponse> {
     Json(OpenInExplorerResponse { ok, error })
+}
+
+fn filesystem_error_message(operation: &str, error: FilesystemError) -> String {
+    match error {
+        FilesystemError::DirectoryDoesNotExist => "Directory does not exist".to_string(),
+        FilesystemError::PathIsNotDirectory => "Path is not a directory".to_string(),
+        FilesystemError::Io(error) => {
+            tracing::error!("Failed to {}: {}", operation, error);
+            format!("Failed to {operation}: {error}")
+        }
+        other => other.to_string(),
+    }
+}
+
+fn filesystem_error_response<T>(
+    operation: &str,
+    error: FilesystemError,
+) -> ResponseJson<ApiResponse<T>> {
+    ResponseJson(ApiResponse::error(&filesystem_error_message(
+        operation, error,
+    )))
 }
 
 fn clean_optional_string(value: Option<String>) -> Option<String> {
@@ -606,19 +640,35 @@ pub async fn list_directory(
 ) -> Result<ResponseJson<ApiResponse<DirectoryListResponse>>, ApiError> {
     match deployment.filesystem().list_directory(query.path).await {
         Ok(response) => Ok(ResponseJson(ApiResponse::success(response))),
-        Err(FilesystemError::DirectoryDoesNotExist) => {
-            Ok(ResponseJson(ApiResponse::error("Directory does not exist")))
-        }
-        Err(FilesystemError::PathIsNotDirectory) => {
-            Ok(ResponseJson(ApiResponse::error("Path is not a directory")))
-        }
-        Err(FilesystemError::Io(e)) => {
-            tracing::error!("Failed to read directory: {}", e);
-            Ok(ResponseJson(ApiResponse::error(&format!(
-                "Failed to read directory: {}",
-                e
-            ))))
-        }
+        Err(error) => Ok(filesystem_error_response("read directory", error)),
+    }
+}
+
+pub async fn create_directory(
+    State(deployment): State<DeploymentImpl>,
+    Json(payload): Json<CreateDirectoryRequest>,
+) -> Result<ResponseJson<ApiResponse<DirectoryEntry>>, ApiError> {
+    match deployment
+        .filesystem()
+        .create_directory(payload.parent_path, payload.name)
+        .await
+    {
+        Ok(response) => Ok(ResponseJson(ApiResponse::success(response))),
+        Err(error) => Ok(filesystem_error_response("create directory", error)),
+    }
+}
+
+pub async fn rename_directory(
+    State(deployment): State<DeploymentImpl>,
+    Json(payload): Json<RenameDirectoryRequest>,
+) -> Result<ResponseJson<ApiResponse<DirectoryEntry>>, ApiError> {
+    match deployment
+        .filesystem()
+        .rename_directory(payload.path, payload.name)
+        .await
+    {
+        Ok(response) => Ok(ResponseJson(ApiResponse::success(response))),
+        Err(error) => Ok(filesystem_error_response("rename directory", error)),
     }
 }
 
@@ -647,19 +697,7 @@ pub async fn list_git_repos(
     };
     match res {
         Ok(response) => Ok(ResponseJson(ApiResponse::success(response))),
-        Err(FilesystemError::DirectoryDoesNotExist) => {
-            Ok(ResponseJson(ApiResponse::error("Directory does not exist")))
-        }
-        Err(FilesystemError::PathIsNotDirectory) => {
-            Ok(ResponseJson(ApiResponse::error("Path is not a directory")))
-        }
-        Err(FilesystemError::Io(e)) => {
-            tracing::error!("Failed to read directory: {}", e);
-            Ok(ResponseJson(ApiResponse::error(&format!(
-                "Failed to read directory: {}",
-                e
-            ))))
-        }
+        Err(error) => Ok(filesystem_error_response("read directory", error)),
     }
 }
 
@@ -687,7 +725,12 @@ pub async fn select_directory(
 pub fn router() -> Router<DeploymentImpl> {
     Router::new()
         .route("/filesystem/roots", get(list_roots))
-        .route("/filesystem/directory", get(list_directory))
+        .route(
+            "/filesystem/directory",
+            get(list_directory)
+                .post(create_directory)
+                .put(rename_directory),
+        )
         .route("/filesystem/git-repos", get(list_git_repos))
         .route("/filesystem/select-directory", post(select_directory))
         .route("/filesystem/open-in-explorer", post(open_in_explorer))
