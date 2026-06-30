@@ -405,6 +405,13 @@ check(
   source,
 );
 check(
+  "opens diffs by reusing the most recent diff tab",
+  source.includes("const openReusableDiffTab") &&
+    source.includes("findLastDiffTabIndex(currentTabs)") &&
+    source.includes("openReusableDiffTab(nextTab)"),
+  source,
+);
+check(
   "replaces active tab for sidebar page navigation",
   source.includes("const replaceActiveTab") &&
     source.includes("replaceActiveTab(createPageTab(page, label))"),
