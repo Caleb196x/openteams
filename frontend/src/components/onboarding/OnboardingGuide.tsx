@@ -1042,9 +1042,10 @@ export function OnboardingGuide({
           <input
             value={projectName}
             onChange={(event) => {
-              setProjectName(sanitizeProjectName(event.target.value));
+              setProjectName(event.target.value);
               setProjectNameTouched(true);
             }}
+            onBlur={() => setProjectName((current) => sanitizeProjectName(current))}
             className="mt-2 h-9 w-full rounded-md border border-[var(--hairline)] bg-[var(--surface-2)] px-3 text-[13px] text-[var(--ink)] outline-none transition placeholder:text-[var(--ink-tertiary)] focus:border-[var(--primary)]"
             placeholder={t('onboarding.project.namePlaceholder')}
           />
