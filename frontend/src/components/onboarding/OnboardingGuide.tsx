@@ -49,6 +49,7 @@ import {
 } from '../../../../shared/types';
 
 const welcomeStepKey = 'welcome';
+const defaultProjectName = 'MyProject';
 const onboardingSteps = ['scenario', 'executor', 'project_path', 'appearance'] as const;
 
 type OnboardingStepKey = (typeof onboardingSteps)[number];
@@ -432,16 +433,6 @@ export function OnboardingGuide({
     }));
   };
 
-  const projectNameForScenario = useCallback(
-    (scenarioKey: OnboardingScenario) => {
-      const scenario =
-        scenarios.find((candidate) => candidate.key === scenarioKey) ??
-        currentScenario;
-      return sanitizeProjectName(`${scenario.title} workspace`);
-    },
-    [currentScenario, scenarios],
-  );
-
   const buildTeamConfigForScenario = useCallback(
     (
       scenarioKey: OnboardingScenario,
@@ -482,7 +473,7 @@ export function OnboardingGuide({
     setProjectName((current) =>
       sanitizeProjectName(
         nextInitialState?.project_name ??
-          (current.trim() ? current : projectNameForScenario(nextScenario)),
+          (current.trim() ? current : defaultProjectName),
       ),
     );
     setProjectNameTouched((current) =>
@@ -715,7 +706,7 @@ export function OnboardingGuide({
     setSelectedScenario(scenarioKey);
     setTeamConfig(nextTeamConfig);
     if (!projectNameTouched) {
-      setProjectName(projectNameForScenario(scenarioKey));
+      setProjectName(defaultProjectName);
     }
     setState((current) =>
       current
@@ -1036,7 +1027,7 @@ export function OnboardingGuide({
           <input
             value={projectName}
             onChange={(event) => {
-              setProjectName(sanitizeProjectName(event.target.value));
+              setProjectName(event.target.value);
               setProjectNameTouched(true);
             }}
             className="mt-2 h-9 w-full rounded-[8px] border border-white/10 bg-white/[0.04] px-3 text-[13px] text-white outline-none transition placeholder:text-[#7e8795] focus:border-white/25"
