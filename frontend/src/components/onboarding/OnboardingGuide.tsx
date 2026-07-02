@@ -360,8 +360,14 @@ export function OnboardingGuide({
   const initialStep = initialState?.welcome_seen_at
     ? stepFromBackend(initialState.current_step)
     : welcomeStepKey;
+  const initialConfigurationStep: OnboardingStepKey =
+    initialStep === welcomeStepKey ? 'scenario' : initialStep;
   const [state, setState] = useState<OnboardingState | null>(initialState);
   const [activeStepKey, setActiveStepKey] = useState<ActiveStepKey>(initialStep);
+  const [renderedConfigurationStepKey, setRenderedConfigurationStepKey] =
+    useState<OnboardingStepKey>(initialConfigurationStep);
+  const [configurationMotionState, setConfigurationMotionState] =
+    useState<'idle' | 'slide-out' | 'slide-in'>('idle');
   const [selectedScenario, setSelectedScenario] = useState<OnboardingScenario>(
     scenarioFromState(initialState?.selected_scenario),
   );
@@ -422,6 +428,8 @@ export function OnboardingGuide({
   const activeStepIndex = isWelcome
     ? -1
     : onboardingSteps.indexOf(activeStepKey);
+  const targetConfigurationStepKey: OnboardingStepKey =
+    activeStepKey === welcomeStepKey ? 'scenario' : activeStepKey;
   const recommendedTeamName = recommendedTeam?.name ?? currentScenario.teamName;
   const recommendedTeamId = recommendedTeam?.id ?? null;
   const teamMembers = teamConfig;
@@ -458,6 +466,36 @@ export function OnboardingGuide({
     welcomeCommandOptions.find(
       (option) => option.id === selectedWelcomeCommandId,
     ) ?? welcomeCommandOptions[0];
+
+  useEffect(() => {
+    if (targetConfigurationStepKey === renderedConfigurationStepKey) {
+      setConfigurationMotionState('idle');
+      return;
+    }
+
+    const prefersReducedMotion =
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (prefersReducedMotion) {
+      setRenderedConfigurationStepKey(targetConfigurationStepKey);
+      setConfigurationMotionState('idle');
+      return;
+    }
+
+    setConfigurationMotionState('slide-out');
+    const exitTimer = window.setTimeout(() => {
+      setRenderedConfigurationStepKey(targetConfigurationStepKey);
+      setConfigurationMotionState('slide-in');
+    }, 140);
+    const settleTimer = window.setTimeout(() => {
+      setConfigurationMotionState('idle');
+    }, 300);
+
+    return () => {
+      window.clearTimeout(exitTimer);
+      window.clearTimeout(settleTimer);
+    };
+  }, [renderedConfigurationStepKey, targetConfigurationStepKey]);
 
   const runnerOptions = useMemo(() => {
     const availableRunners = runtimes
@@ -1146,17 +1184,17 @@ export function OnboardingGuide({
               type="button"
               onClick={() => handleScenarioSelect(scenario.key)}
               className={cn(
-                'group relative min-h-[118px] cursor-pointer overflow-hidden rounded-[4px] border bg-black p-px text-left transition-all duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black',
+                'group relative min-h-[118px] cursor-pointer overflow-hidden rounded-[4px] border bg-black p-px text-left transition-colors duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black',
                 selected
-                  ? 'border-white bg-white/[0.04] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1)] duration-[50ms] ease-linear'
-                  : 'border-[#1F1F23] hover:border-[#3F3F46] hover:bg-white/[0.02]',
+                  ? 'border-white bg-white/[0.04] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1),0_10px_28px_rgba(255,255,255,0.045)]'
+                  : 'border-white/[0.07] hover:border-white/[0.14] hover:bg-white/[0.02]',
               )}
             >
               <div
                 className={cn(
-                  'relative z-10 flex min-h-[116px] flex-col rounded-[3px] px-4 py-4 transition-colors duration-150 ease-[cubic-bezier(0.16,1,0.3,1)]',
+                  'relative z-10 flex min-h-[116px] flex-col rounded-[3px] py-4 pl-4 pr-6 transition-colors duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] md:pr-8',
                   selected
-                    ? 'bg-white/[0.04] duration-[50ms] ease-linear'
+                    ? 'bg-white/[0.04]'
                     : 'bg-black group-hover:bg-white/[0.02]',
                 )}
               >
@@ -1181,7 +1219,7 @@ export function OnboardingGuide({
                   </h3>
                   <p
                     className={cn(
-                      'col-start-2 mt-1.5 text-[12px] leading-relaxed tracking-[0] transition-colors duration-150 ease-[cubic-bezier(0.16,1,0.3,1)]',
+                      'col-start-2 mt-1.5 pr-1 text-[12px] leading-relaxed tracking-[0] transition-colors duration-150 ease-[cubic-bezier(0.16,1,0.3,1)]',
                       selected
                         ? 'text-white'
                         : 'text-white/40 group-hover:text-white/65',
@@ -1592,7 +1630,18 @@ export function OnboardingGuide({
           </div>
 
           <div className="relative mt-7 w-full max-w-5xl p-0 text-left">
-            {renderActiveConfigurationContent(stepKey)}
+            <div
+              className={cn(
+                'relative transition-[opacity,transform] duration-[180ms] ease-[cubic-bezier(0.16,1,0.3,1)] will-change-transform motion-reduce:transform-none motion-reduce:transition-none',
+                configurationMotionState === 'slide-out' &&
+                  '-translate-x-8 opacity-0',
+                configurationMotionState === 'slide-in' &&
+                  'translate-x-6 opacity-0',
+                configurationMotionState === 'idle' && 'translate-x-0 opacity-100',
+              )}
+            >
+              {renderActiveConfigurationContent(renderedConfigurationStepKey)}
+            </div>
           </div>
 
           {error && (
@@ -1602,12 +1651,12 @@ export function OnboardingGuide({
           )}
 
           <div className="mt-12 grid w-full max-w-5xl grid-cols-1 items-center gap-4 sm:grid-cols-[1fr_auto_1fr]">
-            <div className="flex flex-wrap items-center justify-center gap-3 sm:justify-start">
+            <div className="flex min-h-10 flex-wrap items-center justify-center gap-3 sm:justify-start">
               <button
                 type="button"
                 onClick={() => void handleSkip()}
                 disabled={saving}
-                className="inline-flex min-h-10 cursor-pointer items-center justify-center px-0 py-2 text-[12px] font-medium text-[#7d8798] transition hover:text-[#f4f7fb] disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-10 cursor-pointer items-center justify-center px-0 py-2 text-[12px] font-medium text-[rgba(255,255,255,0.35)] transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {t('onboarding.action.skip')}
               </button>
@@ -1615,34 +1664,38 @@ export function OnboardingGuide({
                 type="button"
                 onClick={handleStepBack}
                 disabled={saving || activeStepIndex === 0}
-                className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 px-3 py-2 text-[12px] font-medium text-[#7d8798] transition-colors hover:text-[#f4f7fb] disabled:cursor-not-allowed disabled:opacity-45"
+                className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 px-3 py-2 text-[12px] font-medium text-[rgba(255,255,255,0.35)] transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
               >
                 {t('onboarding.action.back')}
-                <span className="flex items-center gap-1 font-mono text-[10px] text-[#5f6878]">
-                  <kbd className="rounded-[3px] border border-[#303030] bg-[#151515] px-1.5 py-0.5 leading-none">
+                <span className="inline-flex items-center gap-1 font-mono text-[10px] text-white/35">
+                  <kbd className="inline-flex h-[18px] min-w-[22px] items-center justify-center rounded-[3px] border border-white/[0.08] bg-white/[0.04] px-1.5 leading-none text-white/35">
                     Esc
                   </kbd>
-                  <kbd className="rounded-[3px] border border-[#303030] bg-[#151515] px-1.5 py-0.5 leading-none">
+                  <kbd className="inline-flex h-[18px] min-w-[22px] items-center justify-center rounded-[3px] border border-white/[0.08] bg-white/[0.04] px-1.5 leading-none text-white/35">
                     &larr;
                   </kbd>
                 </span>
               </button>
             </div>
-            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#7d8aa3]">
+            <p className="flex min-h-10 items-center justify-center font-mono text-[10px] uppercase tracking-[0.12em] text-[#7d8aa3]">
               Step {activeStepIndex + 1} of {onboardingSteps.length}: {stepLabel}
             </p>
-            <div className="flex justify-center sm:justify-end">
+            <div className="flex min-h-10 items-center justify-center sm:justify-end">
               <button
                 type="button"
                 onClick={() => void handleStepNext()}
                 disabled={saving}
-                className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-2.5 rounded-[4px] border border-white bg-white px-6 py-2 text-[13px] font-semibold text-black shadow-[inset_0_0_0_1px_rgba(255,255,255,0.92)] transition-colors hover:bg-[#f2f2f2] active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60"
+                className={cn(
+                  'inline-flex min-h-10 cursor-pointer items-center justify-center gap-2.5 rounded-[4px] border border-white bg-white px-6 py-2 text-[13px] font-semibold text-black shadow-[inset_0_0_0_1px_rgba(255,255,255,0.92)] transition-[background-color,box-shadow,transform] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-[#f2f2f2] active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60',
+                  stepKey === 'scenario' &&
+                    'origin-center will-change-transform hover:-translate-y-[2px] hover:scale-[1.02] hover:shadow-[0_12px_30px_rgba(255,255,255,0.18)] active:translate-y-[1px] active:scale-[0.98] motion-reduce:transform-none',
+                )}
               >
                 {saving && <LoaderCircle className="h-4 w-4 animate-spin" />}
                 {stepKey === 'appearance'
                   ? t('onboarding.action.startNow')
                   : t('onboarding.action.next')}
-                <kbd className="rounded-[3px] bg-[rgba(0,0,0,0.06)] px-1.5 py-0.5 font-mono text-[10px] font-semibold leading-none text-black/55">
+                <kbd className="inline-flex h-[18px] items-center rounded-[3px] bg-[rgba(0,0,0,0.05)] px-1.5 font-mono text-[10px] font-medium leading-none text-black/40 shadow-none">
                   Enter <span aria-hidden="true">&#8617;</span>
                 </kbd>
               </button>

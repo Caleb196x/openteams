@@ -123,11 +123,10 @@ check(
 
 check(
   'scenario page only exposes recommended team names, not member rows',
-  guideSource.includes('renderScenarioStep') &&
+    guideSource.includes('renderScenarioStep') &&
     guideSource.includes('recommendedTeamName') &&
     guideSource.includes('recommendOnboardingTeamTemplate') &&
-    guideSource.includes('Details in next step') &&
-    guideSource.includes('↵') &&
+    guideSource.includes("t('onboarding.scenario.memberDetailsHint')") &&
     guideSource.includes('renderExecutorStep') &&
     guideSource.includes('teamMembers.map') &&
     !/renderScenarioStep[\s\S]*teamMembers\.map/.test(guideSource),
@@ -158,22 +157,22 @@ check(
   guideSource.includes('lg:grid-cols-[minmax(0,65%)_minmax(280px,35%)]') &&
     guideSource.includes("gitignoreTemplates = ['node', 'go', 'python', 'none'] as const") &&
     guideSource.includes("grid-rows-[1fr]") &&
-    guideSource.includes("bg-[linear-gradient(180deg,#6f7ae6_0%,#5e6ad2_100%)]") &&
-    guideSource.includes("shadow-[inset_0_1px_0_rgba(255,255,255,0.22)]") &&
+    guideSource.includes('chatSessionsApi.initializeWorkspaceGit') &&
+    guideSource.includes('className="flex h-7 w-7 items-center justify-center text-[#768295] transition hover:text-[#f4f7fb]"') &&
+    guideSource.includes('rounded-[4px] border border-[#333] bg-black') &&
     !guideSource.includes("0_4px_20px_rgba(95,99,242,0.25)") &&
-    guideSource.includes("gap-2.5 rounded-[4px]") &&
     guideSource.includes("onboarding.project.gitMissing"),
   guideSource,
 );
 
 check(
   'configuration steps reuse the welcome page background treatment',
-    guideSource.includes('absolute inset-0 bg-black') &&
-    guideSource.includes('left-1/2 top-[48%] h-[520px] w-[760px]') &&
-    guideSource.includes('items-center justify-center overflow-y-auto py-10') &&
-    guideSource.includes('relative mt-8 w-full max-w-5xl p-0 text-left') &&
-    guideSource.includes('mt-16 grid w-full max-w-5xl') &&
-    guideSource.includes("index <= activeStepIndex ? 'bg-white' : 'bg-white/15'") &&
+    guideSource.includes('absolute inset-0 bg-[#050505]') &&
+    guideSource.includes('opacity-[0.032] mix-blend-screen') &&
+    guideSource.includes('items-center justify-center overflow-y-auto py-8') &&
+    guideSource.includes('relative mt-7 w-full max-w-5xl p-0 text-left') &&
+    guideSource.includes('mt-12 grid w-full max-w-5xl') &&
+    guideSource.includes("active ? 'bg-white' : 'bg-[#262626]'") &&
     !guideSource.includes('max-w-[760px]') &&
     !guideSource.includes('radial-gradient') &&
     !guideSource.includes("backgroundSize: stepKey === 'project_path'"),
@@ -185,21 +184,50 @@ check(
     guideSource.includes('renderScenarioStep') &&
     guideSource.includes('renderExecutorStep') &&
     guideSource.includes('renderAppearanceStep') &&
-    guideSource.includes('flex min-h-[420px] flex-col justify-center border-y border-[#222]') &&
-    guideSource.includes('max-w-4xl gap-5 md:grid-cols-2') &&
-    guideSource.includes('border-white/35 bg-[#121216]') &&
-    guideSource.includes('border-white/[0.08] bg-[#111111]') &&
+    guideSource.includes('flex min-h-[360px] flex-col justify-center border-y border-[#262626] py-5') &&
+    guideSource.includes('max-w-5xl gap-3 md:grid-cols-2') &&
+    guideSource.includes('border-white/[0.07] hover:border-white/[0.14]') &&
+    guideSource.includes('border-white/35 bg-white/[0.05]') &&
     guideSource.includes('items-center justify-between') &&
-    guideSource.includes('border border-white/[0.08] bg-white/[0.035]') &&
-    guideSource.includes('strokeWidth={1.5}') &&
-    guideSource.includes('Details in next step') &&
-    guideSource.includes('text-[12px] text-[#768295]') &&
+    guideSource.includes('rounded-[4px] border border-[#262626] bg-[#0a0a0a]') &&
+    guideSource.includes('strokeWidth={1}') &&
+    guideSource.includes("t('onboarding.scenario.memberDetailsHint')") &&
+    guideSource.includes('text-[12px] leading-relaxed') &&
     !guideSource.includes('[ ↳ Details in next step ]') &&
     guideSource.includes('tracking-[0.12em] text-[#7d8aa3]') &&
     guideSource.includes('rounded-[8px]') &&
     !guideSource.includes('selected && <Check') &&
     !guideSource.includes('text-[44px]') &&
     !guideSource.includes('rounded-full border border-white/10 bg-white/[0.06]'),
+  guideSource,
+);
+
+check(
+  'scenario next button owns the hover motion treatment',
+  guideSource.includes("stepKey === 'scenario' &&") &&
+    guideSource.includes('transition-[background-color,box-shadow,transform] duration-200') &&
+    guideSource.includes('hover:-translate-y-[2px] hover:scale-[1.02]') &&
+    guideSource.includes('active:translate-y-[1px] active:scale-[0.98]') &&
+    guideSource.includes('hover:shadow-[0_12px_30px_rgba(255,255,255,0.18)]') &&
+    !guideSource.includes('hover:scale-[1.006]') &&
+    !guideSource.includes('hover:shadow-[0_12px_30px_rgba(0,0,0,0.32)]') &&
+    !guideSource.includes('hover:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.16)'),
+  guideSource,
+);
+
+check(
+  'scenario page applies final contrast spacing footer and slide transition polish',
+  guideSource.includes('border-white/[0.07] hover:border-white/[0.14]') &&
+    guideSource.includes('py-4 pl-4 pr-6') &&
+    guideSource.includes('md:pr-8') &&
+    guideSource.includes('bg-[rgba(0,0,0,0.05)]') &&
+    guideSource.includes('text-black/40 shadow-none') &&
+    guideSource.includes('text-[rgba(255,255,255,0.35)]') &&
+    guideSource.includes('flex min-h-10 items-center justify-center') &&
+    guideSource.includes('renderedConfigurationStepKey') &&
+    guideSource.includes("configurationMotionState === 'slide-out'") &&
+    guideSource.includes('-translate-x-8 opacity-0') &&
+    guideSource.includes('transition-[opacity,transform] duration-[180ms]'),
   guideSource,
 );
 
