@@ -82,8 +82,9 @@ check(
     guideSource.includes('{selectedWelcomeCommand.label}') &&
     guideSource.includes('aria-pressed={active}') &&
     guideSource.includes('"JetBrains Mono", "SF Mono", "SFMono-Regular", ui-monospace') &&
-    guideSource.includes("'--ink': '#f4f7fb'") &&
-    guideSource.includes("'--ink-muted': '#c5ceda'") &&
+    guideSource.includes("'--ink': '#f4f4f5'") &&
+    guideSource.includes("'--ink-muted': '#a1a1aa'") &&
+    guideSource.includes("'--ink-subtle': '#8a8f98'") &&
     guideSource.includes('text-[#a8b3c2]') &&
     guideSource.includes('rounded-[6px] border border-white bg-white') &&
     guideSource.includes('px-9 py-3 text-[14px]') &&
@@ -114,9 +115,9 @@ check(
 );
 
 check(
-  'four onboarding steps are ordered as scenario, executor, project path, appearance',
+  'four onboarding steps are ordered as appearance, scenario, executor, project path',
   guideSource.includes(
-    "const onboardingSteps = ['scenario', 'executor', 'project_path', 'appearance'] as const",
+    "const onboardingSteps = ['appearance', 'scenario', 'executor', 'project_path'] as const",
   ),
   guideSource,
 );
@@ -158,7 +159,7 @@ check(
     guideSource.includes("gitignoreTemplates = ['node', 'go', 'python', 'none'] as const") &&
     guideSource.includes("grid-rows-[1fr]") &&
     guideSource.includes('chatSessionsApi.initializeWorkspaceGit') &&
-    guideSource.includes('className="flex h-7 w-7 items-center justify-center text-[#768295] transition hover:text-[#f4f7fb]"') &&
+    guideSource.includes('className="flex h-7 w-7 items-center justify-center text-[#768295] transition hover:text-[#f5f5f5]"') &&
     guideSource.includes('rounded-[4px] border border-[#333] bg-black') &&
     !guideSource.includes("0_4px_20px_rgba(95,99,242,0.25)") &&
     guideSource.includes("onboarding.project.gitMissing"),
@@ -167,12 +168,16 @@ check(
 
 check(
   'configuration steps reuse the welcome page background treatment',
-    guideSource.includes('absolute inset-0 bg-[#050505]') &&
+    guideSource.includes('absolute inset-0 bg-[#0a0a0a]') &&
     guideSource.includes('opacity-[0.032] mix-blend-screen') &&
     guideSource.includes('items-center justify-center overflow-y-auto py-8') &&
     guideSource.includes('relative mt-7 w-full max-w-5xl p-0 text-left') &&
-    guideSource.includes('mt-12 grid w-full max-w-5xl') &&
-    guideSource.includes("active ? 'bg-white' : 'bg-[#262626]'") &&
+    guideSource.includes('mt-12 flex min-h-10 w-full max-w-5xl') &&
+    guideSource.includes('const current = index === activeStepIndex') &&
+    guideSource.includes("'h-[2px] w-10 rounded-none transition-colors duration-150'") &&
+    guideSource.includes("? 'bg-[#f4f4f5]'") &&
+    guideSource.includes("? 'bg-white/[0.28]'") &&
+    guideSource.includes(": 'bg-white/[0.15]'") &&
     !guideSource.includes('max-w-[760px]') &&
     !guideSource.includes('radial-gradient') &&
     !guideSource.includes("backgroundSize: stepKey === 'project_path'"),
@@ -180,17 +185,29 @@ check(
 );
 
 check(
-  'scenario executor and appearance steps share the create project flat styling',
+  'scenario executor and appearance steps keep the flat onboarding treatment',
     guideSource.includes('renderScenarioStep') &&
     guideSource.includes('renderExecutorStep') &&
     guideSource.includes('renderAppearanceStep') &&
-    guideSource.includes('flex min-h-[360px] flex-col justify-center border-y border-[#262626] py-5') &&
-    guideSource.includes('max-w-5xl gap-3 md:grid-cols-2') &&
-    guideSource.includes('border-white/[0.07] hover:border-white/[0.14]') &&
-    guideSource.includes('border-white/35 bg-white/[0.05]') &&
+    guideSource.includes('flex min-h-[360px] items-center justify-center py-6') &&
+    guideSource.includes('max-w-[880px] rounded-[8px] border border-white/[0.08] bg-[#121212]/90') &&
+    guideSource.includes('lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.84fr)] lg:gap-12') &&
+    guideSource.includes('grid gap-3 sm:grid-cols-2') &&
+    guideSource.includes('group min-h-[126px] cursor-pointer rounded-[8px] border p-4') &&
+    guideSource.includes('border-white/[0.07] bg-white/[0.02] hover:border-white/[0.12] hover:bg-white/[0.04]') &&
+    guideSource.includes('border-white/[0.14] bg-white/[0.07]') &&
+    guideSource.includes('border-transparent bg-transparent text-[#8a8f98] hover:bg-white/[0.04]') &&
+    guideSource.includes('className="sr-only"') &&
+    guideSource.includes('flex h-3 w-3 shrink-0 items-center justify-center rounded-full border') &&
+    guideSource.includes('Icon: Moon') &&
+    guideSource.includes('Icon: Sun') &&
+    guideSource.includes('Icon: Monitor') &&
+    guideSource.includes('cursor-pointer rounded-[8px] border p-3 text-left transition') &&
+    guideSource.includes('border-[#d4d4d8]/80 bg-white/[0.07]') &&
+    guideSource.includes('strokeWidth={1.4}') &&
     guideSource.includes('items-center justify-between') &&
-    guideSource.includes('rounded-[4px] border border-[#262626] bg-[#0a0a0a]') &&
-    guideSource.includes('strokeWidth={1}') &&
+    guideSource.includes('rounded-[8px] border border-white/[0.08] bg-white/[0.025]') &&
+    guideSource.includes('tracking-[0] text-[#f4f4f5]') &&
     guideSource.includes("t('onboarding.scenario.memberDetailsHint')") &&
     guideSource.includes('text-[12px] leading-relaxed') &&
     !guideSource.includes('[ ↳ Details in next step ]') &&
@@ -217,17 +234,30 @@ check(
 
 check(
   'scenario page applies final contrast spacing footer and slide transition polish',
-  guideSource.includes('border-white/[0.07] hover:border-white/[0.14]') &&
-    guideSource.includes('py-4 pl-4 pr-6') &&
-    guideSource.includes('md:pr-8') &&
+  guideSource.includes('focus-visible:ring-1 focus-visible:ring-white/[0.35]') &&
+    guideSource.includes('grid grid-cols-[32px_minmax(0,1fr)]') &&
+    guideSource.includes('border-white/[0.07] bg-white/[0.025] text-[#8a8f98] group-hover:text-[#c9cdd6]') &&
+    guideSource.includes('text-[#8a8f98] group-hover:text-[#aeb4bf]') &&
+    guideSource.includes('border-0 bg-[rgba(0,0,0,0.05)]') &&
     guideSource.includes('bg-[rgba(0,0,0,0.05)]') &&
     guideSource.includes('text-black/40 shadow-none') &&
     guideSource.includes('text-[rgba(255,255,255,0.35)]') &&
+    guideSource.includes('flex min-h-10 w-full max-w-5xl flex-col items-center') &&
     guideSource.includes('flex min-h-10 items-center justify-center') &&
     guideSource.includes('renderedConfigurationStepKey') &&
     guideSource.includes("configurationMotionState === 'slide-out'") &&
     guideSource.includes('-translate-x-8 opacity-0') &&
     guideSource.includes('transition-[opacity,transform] duration-[180ms]'),
+  guideSource,
+);
+
+check(
+  'scenario cards support arrow-key selection',
+  guideSource.includes("['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']") &&
+    guideSource.includes("activeStepKey === 'scenario'") &&
+    guideSource.includes("window.matchMedia?.('(min-width: 768px)').matches") &&
+    guideSource.includes('handleScenarioSelect(scenarios[nextIndex].key)') &&
+    guideSource.includes('event.preventDefault()'),
   guideSource,
 );
 
@@ -251,7 +281,7 @@ check(
 );
 
 check(
-  'start now creates a real project, completes onboarding, then opens the existing session composer',
+  'final action creates a real project, completes onboarding, then opens the existing session composer',
   guideSource.indexOf('await onCreateProjectFromOnboarding') <
     guideSource.indexOf('await onboardingApi.complete') &&
   guideSource.includes('await onboardingApi.complete') &&
@@ -261,7 +291,10 @@ check(
     appSource.includes('onCreateProjectFromOnboarding={handleCreateOnboardingProject}') &&
     appSource.includes('return { projectId: project.id, sessionId: null }') &&
     appSource.includes('handleOnboardingCompleted') &&
-    appSource.includes('setIsCreateSessionModalOpen(true)'),
+    appSource.includes('setIsCreateSessionModalOpen(true)') &&
+    read('../../locales/zh/common.json').includes(
+      '"onboarding.action.startNow": "创建新会话"',
+    ),
   { guideSource, appSource },
 );
 

@@ -9,10 +9,13 @@ import {
   Info,
   Layers3,
   LoaderCircle,
+  Monitor,
+  Moon,
   RefreshCw,
   Rocket,
   Search,
   Sparkles,
+  Sun,
   Users,
   Zap,
 } from 'lucide-react';
@@ -51,13 +54,15 @@ import {
 } from '../../../../shared/types';
 
 const welcomeStepKey = 'welcome';
-const onboardingSteps = ['scenario', 'executor', 'project_path', 'appearance'] as const;
+const onboardingSteps = ['appearance', 'scenario', 'executor', 'project_path'] as const;
 const gitignoreTemplates = ['node', 'go', 'python', 'none'] as const;
 
 type OnboardingStepKey = (typeof onboardingSteps)[number];
 type ActiveStepKey = OnboardingStepKey | typeof welcomeStepKey;
 type OnboardingMode = 'onboarding' | 'upgrade';
 type GitignoreTemplate = (typeof gitignoreTemplates)[number];
+const firstOnboardingStep: OnboardingStepKey = 'appearance';
+const finalOnboardingStep: OnboardingStepKey = 'project_path';
 type TranslateFn = (
   key: string,
   replacements?: Record<string, string | number>,
@@ -85,7 +90,7 @@ interface OnboardingGuideProps {
 }
 
 const onboardingDarkThemeVars = {
-  '--canvas': '#010102',
+  '--canvas': '#0a0a0a',
   '--surface-1': '#0f1011',
   '--surface-2': '#141516',
   '--surface-3': '#18191a',
@@ -93,10 +98,10 @@ const onboardingDarkThemeVars = {
   '--hairline': '#23252a',
   '--hairline-strong': '#34343a',
   '--hairline-tertiary': '#3e3e44',
-  '--ink': '#f4f7fb',
-  '--ink-muted': '#c5ceda',
-  '--ink-subtle': '#8f9aaa',
-  '--ink-tertiary': '#667083',
+  '--ink': '#f4f4f5',
+  '--ink-muted': '#a1a1aa',
+  '--ink-subtle': '#8a8f98',
+  '--ink-tertiary': '#6f6f76',
   '--primary': '#5e6ad2',
   '--primary-hover': '#828fff',
   '--on-primary': '#ffffff',
@@ -111,6 +116,12 @@ const onboardingMonoFont = {
 const onboardingSansFont = {
   fontFamily: '"Inter", ui-sans-serif, system-ui, sans-serif',
 } as CSSProperties;
+
+const executorSelectTriggerClassName =
+  '!h-8 !rounded-[4px] !border-[#1f1f23] !bg-transparent !px-2.5 !py-1.5 !font-mono !text-[12px] !text-[#d4d4d8] !shadow-none hover:!border-[#3f3f46] hover:!bg-transparent focus-visible:!border-[#52525b] focus-visible:!outline-none focus-visible:!shadow-[0_0_0_1px_rgba(255,255,255,0.06)] [&[aria-expanded=true]]:!border-[#52525b] [&[aria-expanded=true]]:!shadow-[0_0_0_1px_rgba(255,255,255,0.06)]';
+
+const executorSelectPanelClassName =
+  '!rounded-[6px] !border-[#2a2a30] !bg-[#09090b] !shadow-[0_14px_32px_rgba(0,0,0,0.28)]';
 
 const onboardingNoiseTextureStyle = {
   backgroundImage:
@@ -223,7 +234,7 @@ const stepFromBackend = (
 ): OnboardingStepKey => {
   return onboardingSteps.includes(value as OnboardingStepKey)
     ? (value as OnboardingStepKey)
-    : 'scenario';
+    : firstOnboardingStep;
 };
 
 const scenarioFromState = (
@@ -339,6 +350,13 @@ const teamPresetToOnboardingConfig = (
     }));
 };
 
+const roleBadgeLabel = (name: string) => {
+  const words = name.trim().split(/\s+/u).filter(Boolean);
+  const compact =
+    words.length > 1 ? words.map((word) => word.charAt(0)).join('') : name;
+  return compact.slice(0, 2).toUpperCase();
+};
+
 export { compareVersions };
 
 export function OnboardingGuide({
@@ -361,7 +379,7 @@ export function OnboardingGuide({
     ? stepFromBackend(initialState.current_step)
     : welcomeStepKey;
   const initialConfigurationStep: OnboardingStepKey =
-    initialStep === welcomeStepKey ? 'scenario' : initialStep;
+    initialStep === welcomeStepKey ? firstOnboardingStep : initialStep;
   const [state, setState] = useState<OnboardingState | null>(initialState);
   const [activeStepKey, setActiveStepKey] = useState<ActiveStepKey>(initialStep);
   const [renderedConfigurationStepKey, setRenderedConfigurationStepKey] =
@@ -429,7 +447,7 @@ export function OnboardingGuide({
     ? -1
     : onboardingSteps.indexOf(activeStepKey);
   const targetConfigurationStepKey: OnboardingStepKey =
-    activeStepKey === welcomeStepKey ? 'scenario' : activeStepKey;
+    activeStepKey === welcomeStepKey ? firstOnboardingStep : activeStepKey;
   const recommendedTeamName = recommendedTeam?.name ?? currentScenario.teamName;
   const recommendedTeamId = recommendedTeam?.id ?? null;
   const teamMembers = teamConfig;
@@ -773,7 +791,7 @@ export function OnboardingGuide({
         teamId: recommendedTeamId,
       });
       const state = await onboardingApi.complete({
-        ...currentPayload('appearance'),
+        ...currentPayload(finalOnboardingStep),
         project_name: projectDraft.name,
         project_path: projectDraft.path,
         created_project_id: createdProject.projectId,
@@ -790,11 +808,11 @@ export function OnboardingGuide({
   const handleWelcomeNext = async () => {
     await saveState({
       welcome_seen: true,
-      current_step: OnboardingStep.scenario,
+      current_step: stepToBackend[firstOnboardingStep],
       selected_scenario: selectedScenario,
       recommended_team_name: recommendedTeamName,
     });
-    setActiveStepKey('scenario');
+    setActiveStepKey(firstOnboardingStep);
   };
 
   const handleStepBack = () => {
@@ -809,17 +827,17 @@ export function OnboardingGuide({
       return;
     }
 
+    if (activeStepKey === finalOnboardingStep) {
+      await handleFinish();
+      return;
+    }
+
     if (activeStepKey === 'project_path') {
       const projectDraft = await validateProjectDraft();
       if (!projectDraft) return;
     }
 
-    if (activeStepKey === 'appearance') {
-      await handleFinish();
-      return;
-    }
-
-    const nextStep = onboardingSteps[activeStepIndex + 1] ?? 'appearance';
+    const nextStep = onboardingSteps[activeStepIndex + 1] ?? finalOnboardingStep;
     await saveState(currentPayload(nextStep));
     setActiveStepKey(nextStep);
   };
@@ -834,6 +852,54 @@ export function OnboardingGuide({
         target instanceof HTMLElement &&
         target.closest('input, textarea, select, [contenteditable="true"]')
       ) {
+        return;
+      }
+
+      if (
+        activeStepKey === 'scenario' &&
+        ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)
+      ) {
+        const currentIndex = scenarios.findIndex(
+          (scenario) => scenario.key === selectedScenario,
+        );
+        if (currentIndex < 0) return;
+
+        const usesTwoColumnGrid =
+          typeof window !== 'undefined' &&
+          window.matchMedia?.('(min-width: 768px)').matches;
+        const columns = usesTwoColumnGrid ? 2 : 1;
+        let nextIndex = currentIndex;
+
+        if (columns === 1) {
+          if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
+            nextIndex = Math.min(currentIndex + 1, scenarios.length - 1);
+          } else {
+            nextIndex = Math.max(currentIndex - 1, 0);
+          }
+        } else {
+          const column = currentIndex % columns;
+          if (
+            event.key === 'ArrowRight' &&
+            column < columns - 1 &&
+            currentIndex + 1 < scenarios.length
+          ) {
+            nextIndex = currentIndex + 1;
+          } else if (event.key === 'ArrowLeft' && column > 0) {
+            nextIndex = currentIndex - 1;
+          } else if (
+            event.key === 'ArrowDown' &&
+            currentIndex + columns < scenarios.length
+          ) {
+            nextIndex = currentIndex + columns;
+          } else if (event.key === 'ArrowUp' && currentIndex - columns >= 0) {
+            nextIndex = currentIndex - columns;
+          }
+        }
+
+        event.preventDefault();
+        if (nextIndex !== currentIndex) {
+          handleScenarioSelect(scenarios[nextIndex].key);
+        }
         return;
       }
 
@@ -853,13 +919,22 @@ export function OnboardingGuide({
     return () => {
       window.removeEventListener('keydown', handleConfigurationShortcut);
     };
-  }, [activeStepIndex, handleStepNext, isWelcome, mode, saving]);
+  }, [
+    activeStepIndex,
+    activeStepKey,
+    handleStepNext,
+    isWelcome,
+    mode,
+    saving,
+    scenarios,
+    selectedScenario,
+  ]);
 
   const handleSkip = async () => {
     setSaving(true);
     setError(null);
     try {
-      const state = await onboardingApi.complete(currentPayload('appearance'));
+      const state = await onboardingApi.complete(currentPayload(finalOnboardingStep));
       applyState(state);
       onOpenCreateSession(state);
     } catch (err) {
@@ -871,7 +946,7 @@ export function OnboardingGuide({
     }
   };
 
-  const handleScenarioSelect = (scenarioKey: OnboardingScenario) => {
+  function handleScenarioSelect(scenarioKey: OnboardingScenario) {
     const scenario =
       scenarioDefinitions.find((candidate) => candidate.key === scenarioKey) ??
       scenarioDefinitions[0];
@@ -898,7 +973,7 @@ export function OnboardingGuide({
           }
         : current,
     );
-  };
+  }
 
   const updateTeamMember = (
     index: number,
@@ -1110,7 +1185,7 @@ export function OnboardingGuide({
             type="button"
             onClick={() => void handleMarkUpgradeRead()}
             disabled={saving}
-            className="mt-4 inline-flex min-h-9 w-full cursor-pointer items-center justify-center gap-2 rounded-[8px] bg-[#5e6ad2] px-[14px] py-2 text-[13px] font-semibold text-[#f4f7fb] transition hover:bg-[#6f7ae6] disabled:cursor-not-allowed disabled:opacity-60"
+            className="mt-4 inline-flex min-h-9 w-full cursor-pointer items-center justify-center gap-2 rounded-[8px] bg-[#5e6ad2] px-[14px] py-2 text-[13px] font-semibold text-[#f5f5f5] transition hover:bg-[#6f7ae6] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {saving && <LoaderCircle className="h-3.5 w-3.5 animate-spin" />}
             {t('onboarding.upgrade.markRead')}
@@ -1121,98 +1196,107 @@ export function OnboardingGuide({
   );
 
   const renderExecutorStep = () => (
-    <div className="min-h-[420px] border-y border-[#222]">
-      {runtimeError && (
-        <p className="border-b border-yellow-500/25 px-0 py-3 font-mono text-[12px] text-yellow-200">
-          {runtimeError}
-        </p>
-      )}
-      <div className="divide-y divide-[#222]">
-        {teamMembers.map((member, index) => {
-          const runnerValue = member.runner_type || runnerOptions[0]?.id || '';
-          const modelOptions = modelOptionsForRunner(runnerValue);
-          const modelValue = member.model_name || modelOptions[0]?.id || '';
-          return (
-            <div
-              key={`${member.member}-${index}`}
-              className="grid gap-3 py-4 md:grid-cols-[minmax(150px,1fr)_minmax(160px,220px)_minmax(160px,220px)] md:items-center"
-            >
-              <div className="flex min-w-0 items-center gap-2">
-                <span className="grid h-7 w-7 shrink-0 place-items-center border border-[#222] font-mono text-[11px] font-semibold text-[#8f9aaa]">
-                  {member.member.slice(0, 2).toUpperCase()}
-                </span>
-                <span className="truncate text-[13px] font-semibold text-[#f4f7fb]">
-                  {member.member}
-                </span>
+    <div className="mx-auto flex min-h-[380px] w-full max-w-5xl flex-col justify-center">
+      <div className="overflow-hidden rounded-[6px] border border-[#1f1f23] bg-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
+        {runtimeError && (
+          <p className="border-b border-yellow-500/25 px-4 py-2.5 font-mono text-[12px] text-yellow-200">
+            {runtimeError}
+          </p>
+        )}
+        <div className="hidden border-b border-[#1f1f23] px-4 py-2 font-mono text-[10px] font-semibold uppercase leading-none tracking-[0.14em] text-[#6f6f76] md:grid md:grid-cols-[minmax(180px,1fr)_220px_260px] md:gap-3">
+          <span>Role</span>
+          <span>Executor</span>
+          <span>Model</span>
+        </div>
+        <div>
+          {teamMembers.map((member, index) => {
+            const runnerValue = member.runner_type || runnerOptions[0]?.id || '';
+            const modelOptions = modelOptionsForRunner(runnerValue);
+            const modelValue = member.model_name || modelOptions[0]?.id || '';
+            return (
+              <div
+                key={`${member.member}-${index}`}
+                className={cn(
+                  'grid min-h-[54px] gap-2.5 px-3 py-2.5 md:grid-cols-[minmax(180px,1fr)_220px_260px] md:items-center md:gap-3 md:px-4',
+                  index < teamMembers.length - 1 && 'border-b border-[#1f1f23]',
+                )}
+              >
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <span className="inline-flex h-5 min-w-8 shrink-0 items-center justify-center rounded-[3px] border border-[#2a2a30] bg-transparent px-1.5 font-mono text-[11px] font-semibold uppercase leading-none tracking-[0] text-[#9ca3af]">
+                    {roleBadgeLabel(member.member)}
+                  </span>
+                  <span className="truncate text-[13px] font-semibold tracking-tight text-[#f5f5f5]">
+                    {member.member}
+                  </span>
+                </div>
+                <DropdownSelect
+                  value={runnerValue}
+                  options={runnerOptions}
+                  showSearch={false}
+                  placeholder={t('onboarding.executor.runnerPlaceholder')}
+                  className="w-full"
+                  triggerClassName={executorSelectTriggerClassName}
+                  panelClassName={executorSelectPanelClassName}
+                  onChange={(value) =>
+                    updateTeamMember(index, {
+                      runner_type: value,
+                      model_name: modelOptionsForRunner(value)[0]?.id,
+                    })
+                  }
+                  maxPanelHeightClassName="max-h-[190px]"
+                />
+                <DropdownSelect
+                  value={modelValue}
+                  options={modelOptions}
+                  placeholder={t('onboarding.executor.modelPlaceholder')}
+                  className="w-full"
+                  triggerClassName={executorSelectTriggerClassName}
+                  panelClassName={executorSelectPanelClassName}
+                  onChange={(value) => updateTeamMember(index, { model_name: value })}
+                  maxPanelHeightClassName="max-h-[190px]"
+                />
               </div>
-              <DropdownSelect
-                value={runnerValue}
-                options={runnerOptions}
-                showSearch={false}
-                placeholder={t('onboarding.executor.runnerPlaceholder')}
-                onChange={(value) =>
-                  updateTeamMember(index, {
-                    runner_type: value,
-                    model_name: modelOptionsForRunner(value)[0]?.id,
-                  })
-                }
-                maxPanelHeightClassName="max-h-[190px]"
-              />
-              <DropdownSelect
-                value={modelValue}
-                options={modelOptions}
-                placeholder={t('onboarding.executor.modelPlaceholder')}
-                onChange={(value) => updateTeamMember(index, { model_name: value })}
-                maxPanelHeightClassName="max-h-[190px]"
-              />
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     </div>
   );
 
   const renderScenarioStep = () => (
-    <div className="flex min-h-[360px] flex-col justify-center border-y border-[#262626] py-5">
-      <section className="mx-auto grid w-full max-w-5xl gap-3 md:grid-cols-2">
-        {scenarios.map((scenario) => {
-          const selected = scenario.key === selectedScenario;
-          const Icon = scenario.Icon;
-          return (
-            <button
-              key={scenario.key}
-              type="button"
-              onClick={() => handleScenarioSelect(scenario.key)}
-              className={cn(
-                'group relative min-h-[118px] cursor-pointer overflow-hidden rounded-[4px] border bg-black p-px text-left transition-colors duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black',
-                selected
-                  ? 'border-white bg-white/[0.04] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1),0_10px_28px_rgba(255,255,255,0.045)]'
-                  : 'border-white/[0.07] hover:border-white/[0.14] hover:bg-white/[0.02]',
-              )}
-            >
-              <div
+    <div className="flex min-h-[360px] items-center justify-center py-6">
+      <div className="w-full max-w-[880px] rounded-[8px] border border-white/[0.08] bg-[#121212]/90 px-5 py-5 shadow-[0_18px_60px_rgba(0,0,0,0.32)] sm:px-7 sm:py-6">
+        <section className="grid gap-3 sm:grid-cols-2">
+          {scenarios.map((scenario) => {
+            const selected = scenario.key === selectedScenario;
+            const Icon = scenario.Icon;
+            return (
+              <button
+                key={scenario.key}
+                type="button"
+                onClick={() => handleScenarioSelect(scenario.key)}
                 className={cn(
-                  'relative z-10 flex min-h-[116px] flex-col rounded-[3px] py-4 pl-4 pr-6 transition-colors duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] md:pr-8',
+                  'group min-h-[126px] cursor-pointer rounded-[8px] border p-4 text-left transition-colors duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/[0.35] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0a0a0a]',
                   selected
-                    ? 'bg-white/[0.04]'
-                    : 'bg-black group-hover:bg-white/[0.02]',
+                    ? 'border-[#d4d4d8]/80 bg-white/[0.07] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05),inset_0_1px_18px_rgba(255,255,255,0.025)]'
+                    : 'border-white/[0.07] bg-white/[0.02] hover:border-white/[0.12] hover:bg-white/[0.04]',
                 )}
               >
-                <div className="grid grid-cols-[20px_minmax(0,1fr)] items-start gap-x-3">
+                <div className="grid grid-cols-[32px_minmax(0,1fr)] items-start gap-x-3">
                   <span
                     className={cn(
-                      'col-start-1 mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center transition-colors duration-150 ease-[cubic-bezier(0.16,1,0.3,1)]',
+                      'col-start-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border transition-colors duration-150 ease-[cubic-bezier(0.16,1,0.3,1)]',
                       selected
-                        ? 'text-white'
-                        : 'text-white/45 group-hover:text-white/70',
+                        ? 'border-white/[0.12] bg-white/[0.08] text-[#f4f4f5]'
+                        : 'border-white/[0.07] bg-white/[0.025] text-[#8a8f98] group-hover:text-[#c9cdd6]',
                     )}
                   >
-                    <Icon className="h-4 w-4" strokeWidth={1} />
+                    <Icon className="h-4 w-4" strokeWidth={1.4} />
                   </span>
                   <h3
                     className={cn(
-                      'col-start-2 min-w-0 truncate text-[14px] font-semibold tracking-[-0.01em] transition-colors duration-150 ease-[cubic-bezier(0.16,1,0.3,1)]',
-                      selected ? 'text-white' : 'text-white/85 group-hover:text-white',
+                      'col-start-2 min-w-0 truncate text-[14px] font-semibold tracking-[0] transition-colors duration-150 ease-[cubic-bezier(0.16,1,0.3,1)]',
+                      selected ? 'text-[#f4f4f5]' : 'text-[#d4d4d8] group-hover:text-[#f4f4f5]',
                     )}
                   >
                     {scenario.title}
@@ -1221,37 +1305,37 @@ export function OnboardingGuide({
                     className={cn(
                       'col-start-2 mt-1.5 pr-1 text-[12px] leading-relaxed tracking-[0] transition-colors duration-150 ease-[cubic-bezier(0.16,1,0.3,1)]',
                       selected
-                        ? 'text-white'
-                        : 'text-white/40 group-hover:text-white/65',
+                        ? 'text-[#a1a1aa]'
+                        : 'text-[#8a8f98] group-hover:text-[#aeb4bf]',
                     )}
                   >
                     {scenario.desc}
                   </p>
                 </div>
+              </button>
+            );
+          })}
+        </section>
+        <aside className="mt-5 flex items-center justify-between gap-4 rounded-[8px] border border-white/[0.08] bg-white/[0.025] px-4 py-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <Users className="h-4 w-4 shrink-0 text-[#a1a1aa]" strokeWidth={1.4} />
+            <div className="min-w-0">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <p className="truncate font-mono text-[12px] font-semibold tracking-[0] text-[#f4f4f5]">
+                  {recommendedTeamName}
+                </p>
+                <span className="inline-flex items-center gap-1 rounded-[4px] border border-white/[0.08] bg-white/[0.04] px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[#a1a1aa]">
+                  <span className="text-[#d4d4d8]">+</span>
+                  {t('onboarding.scenario.recommendedTeam')}
+                </span>
               </div>
-            </button>
-          );
-        })}
-      </section>
-      <aside className="mx-auto mt-4 flex w-full max-w-5xl items-center justify-between gap-4 rounded-[4px] border border-[#262626] bg-[#0a0a0a] px-4 py-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <Users className="h-4 w-4 shrink-0 text-[#8b949e]" strokeWidth={1} />
-          <div className="min-w-0">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <p className="truncate font-mono text-[12px] font-semibold tracking-[-0.01em] text-[#f4f4f5]">
-                {recommendedTeamName}
+              <p className="mt-1 text-[11px] leading-none text-[#8a8f98]">
+                {t('onboarding.scenario.memberDetailsHint')}
               </p>
-              <span className="inline-flex items-center gap-1 rounded-[3px] border border-[#2f2f2f] bg-[#1a1a1a] px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[#9ca3af]">
-                <span className="text-[#c7cbd1]">+</span>
-                {t('onboarding.scenario.recommendedTeam')}
-              </span>
             </div>
-            <p className="mt-0.5 text-[11px] leading-none text-[#6b7280]">
-              {t('onboarding.scenario.memberDetailsHint')}
-            </p>
           </div>
-        </div>
-      </aside>
+        </aside>
+      </div>
     </div>
   );
 
@@ -1266,7 +1350,7 @@ export function OnboardingGuide({
               setProjectName(sanitizeProjectName(event.target.value));
               setProjectNameTouched(true);
             }}
-            className="mt-2 h-10 w-full border-0 border-b border-[#222] bg-transparent px-0 font-mono text-[18px] font-semibold text-[#f4f7fb] outline-none transition placeholder:text-[#5b6678] focus:border-[#4b5568]"
+            className="mt-2 h-10 w-full border-0 border-b border-[#222] bg-transparent px-0 font-mono text-[18px] font-semibold text-[#f5f5f5] outline-none transition placeholder:text-[#5b6678] focus:border-[#4b5568]"
             placeholder={t('onboarding.project.namePlaceholder')}
           />
         </label>
@@ -1279,7 +1363,7 @@ export function OnboardingGuide({
             <button
               type="button"
               onClick={() => void loadRoots()}
-              className="flex h-7 w-7 items-center justify-center text-[#768295] transition hover:text-[#f4f7fb]"
+              className="flex h-7 w-7 items-center justify-center text-[#768295] transition hover:text-[#f5f5f5]"
               aria-label={t('onboarding.project.roots')}
               title={t('onboarding.project.roots')}
             >
@@ -1292,7 +1376,7 @@ export function OnboardingGuide({
                 const parent = getParentPath(currentPath);
                 if (parent) void loadDirectory(parent);
               }}
-              className="flex h-7 w-7 items-center justify-center text-[#768295] transition hover:text-[#f4f7fb] disabled:cursor-not-allowed disabled:opacity-35"
+              className="flex h-7 w-7 items-center justify-center text-[#768295] transition hover:text-[#f5f5f5] disabled:cursor-not-allowed disabled:opacity-35"
               aria-label={t('onboarding.project.up')}
               title={t('onboarding.project.up')}
             >
@@ -1301,7 +1385,7 @@ export function OnboardingGuide({
             <button
               type="button"
               onClick={() => void loadDirectory(projectPath)}
-              className="flex h-7 w-7 items-center justify-center text-[#768295] transition hover:text-[#f4f7fb]"
+              className="flex h-7 w-7 items-center justify-center text-[#768295] transition hover:text-[#f5f5f5]"
               aria-label={t('onboarding.project.refresh')}
               title={t('onboarding.project.refresh')}
             >
@@ -1335,7 +1419,7 @@ export function OnboardingGuide({
                       onClick={() => {
                         if (entry.is_directory) void loadDirectory(entry.path);
                       }}
-                      className="flex min-h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 text-left font-mono text-[12px] tracking-[0.05em] text-[#8f9aaa] transition hover:text-[#f4f7fb] disabled:cursor-default disabled:opacity-55"
+                      className="flex min-h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 text-left font-mono text-[12px] tracking-[0.05em] text-[#8f9aaa] transition hover:text-[#f5f5f5] disabled:cursor-default disabled:opacity-55"
                     >
                       <Icon className="h-3.5 w-3.5 shrink-0 text-[#768295]" />
                       <span className="min-w-0 flex-1 truncate">{entry.name}</span>
@@ -1353,7 +1437,7 @@ export function OnboardingGuide({
                           void validateProjectPath(entry.path);
                         }}
                         className={cn(
-                          'flex h-7 w-7 shrink-0 items-center justify-center text-[#768295] opacity-0 transition hover:text-[#f4f7fb] group-hover/path-entry:opacity-100',
+                          'flex h-7 w-7 shrink-0 items-center justify-center text-[#768295] opacity-0 transition hover:text-[#f5f5f5] group-hover/path-entry:opacity-100',
                           selected && '!opacity-100',
                         )}
                         aria-label={t('onboarding.project.select')}
@@ -1389,7 +1473,7 @@ export function OnboardingGuide({
             type="button"
             onClick={() => void validateProjectPath(projectPath)}
             disabled={!projectPath.trim() || pathLoading || pathDetecting}
-            className="font-mono text-[11px] tracking-[0.05em] text-[#768295] transition hover:text-[#f4f7fb] disabled:cursor-not-allowed disabled:opacity-40"
+            className="font-mono text-[11px] tracking-[0.05em] text-[#768295] transition hover:text-[#f5f5f5] disabled:cursor-not-allowed disabled:opacity-40"
           >
             {t('onboarding.project.validate')}
           </button>
@@ -1481,79 +1565,170 @@ export function OnboardingGuide({
       { id: 'fr', label: t('language.fr') },
       { id: 'es', label: t('language.es') },
     ];
-    const appearanceOptions = [
+    const appearanceOptions: Array<{
+      id: OnboardingAppearance;
+      label: string;
+      Icon: LucideIcon;
+    }> = [
       {
         id: OnboardingAppearance.dark,
         label: t('onboarding.appearance.dark'),
+        Icon: Moon,
       },
       {
         id: OnboardingAppearance.light,
         label: t('onboarding.appearance.light'),
+        Icon: Sun,
       },
       {
         id: OnboardingAppearance.system,
         label: t('onboarding.appearance.system'),
+        Icon: Monitor,
       },
     ];
 
     return (
-      <div className="grid min-h-[420px] border-y border-[#222] lg:grid-cols-2">
-        <section className="space-y-4 py-6 lg:border-r lg:border-[#222] lg:pr-8">
-          <h3 className="font-mono text-[12px] font-medium tracking-[0.05em] text-[#768295]">
-            {t('onboarding.appearance.languageTitle')}
-          </h3>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {languageOptions.map((option) => (
-              <label
-                key={option.id}
-                className={cn(
-                  'flex cursor-pointer items-center gap-2 border px-3 py-2 text-[13px] transition',
-                  selectedLocale === option.id
-                    ? 'border-white/35 bg-white/[0.05] text-[#f4f7fb]'
-                    : 'border-[#222] bg-transparent text-[#8f9aaa] hover:border-[#4b5568] hover:text-[#f4f7fb]',
-                )}
-              >
-                <input
-                  type="radio"
-                  name="onboarding-language"
-                  value={option.id}
-                  checked={selectedLocale === option.id}
-                  onChange={() => handleLocaleSelect(option)}
-                  className="h-3.5 w-3.5 accent-white"
-                />
-                <span className="truncate">{option.label}</span>
-              </label>
-            ))}
+      <div className="flex min-h-[360px] items-center justify-center py-6">
+        <div className="w-full max-w-[880px] rounded-[8px] border border-white/[0.08] bg-[#121212]/90 px-5 py-5 shadow-[0_18px_60px_rgba(0,0,0,0.32)] sm:px-7 sm:py-6">
+          <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.84fr)] lg:gap-12">
+            <section className="space-y-4">
+              <h3 className="font-mono text-[12px] font-medium tracking-[0] text-[#a1a1aa]">
+                {t('onboarding.appearance.languageTitle')}
+              </h3>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {languageOptions.map((option) => (
+                  <label
+                    key={option.id}
+                    className={cn(
+                      'group flex h-10 cursor-pointer items-center gap-2 rounded-[6px] border px-3 text-[13px] transition',
+                      selectedLocale === option.id
+                        ? 'border-white/[0.14] bg-white/[0.07] text-[#f4f4f5] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.035)]'
+                        : 'border-transparent bg-transparent text-[#8a8f98] hover:bg-white/[0.04] hover:text-[#e4e4e7]',
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="onboarding-language"
+                      value={option.id}
+                      checked={selectedLocale === option.id}
+                      onChange={() => handleLocaleSelect(option)}
+                      className="sr-only"
+                    />
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        'flex h-3 w-3 shrink-0 items-center justify-center rounded-full border transition-colors',
+                        selectedLocale === option.id
+                          ? 'border-[#d4d4d8]'
+                          : 'border-white/[0.18] group-hover:border-white/[0.28]',
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          'h-1.5 w-1.5 rounded-full transition-colors',
+                          selectedLocale === option.id
+                            ? 'bg-[#d4d4d8]'
+                            : 'bg-transparent',
+                        )}
+                      />
+                    </span>
+                    <span className="truncate">{option.label}</span>
+                  </label>
+                ))}
+              </div>
+            </section>
+            <section className="space-y-4">
+              <h3 className="font-mono text-[12px] font-medium tracking-[0] text-[#a1a1aa]">
+                {t('onboarding.appearance.themeTitle')}
+              </h3>
+              <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+                {appearanceOptions.map((option) => {
+                  const selected = selectedAppearance === option.id;
+                  const lightPreview = option.id === OnboardingAppearance.light;
+                  const systemPreview = option.id === OnboardingAppearance.system;
+                  const Icon = option.Icon;
+
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => handleAppearanceSelect(option)}
+                      className={cn(
+                        'cursor-pointer rounded-[8px] border p-3 text-left transition',
+                        selected
+                          ? 'border-[#d4d4d8]/80 bg-white/[0.07] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05),inset_0_1px_18px_rgba(255,255,255,0.025)]'
+                          : 'border-white/[0.07] bg-white/[0.02] hover:border-white/[0.12] hover:bg-white/[0.04]',
+                      )}
+                    >
+                      <div
+                        className={cn(
+                          'flex h-12 items-center justify-between rounded-[8px] border px-3',
+                          lightPreview
+                            ? 'border-black/[0.08] bg-[#e4e4e7]'
+                            : systemPreview
+                              ? 'border-white/[0.08] bg-[#151516]'
+                              : 'border-white/[0.08] bg-[#0d0d0e]',
+                        )}
+                      >
+                        <Icon
+                          className={cn(
+                            'h-4 w-4',
+                            lightPreview
+                              ? 'text-[#52525b]'
+                              : systemPreview
+                                ? 'text-[#b8bcc6]'
+                                : 'text-[#a1a1aa]',
+                          )}
+                          strokeWidth={1.4}
+                        />
+                        <div className="flex items-end gap-1.5">
+                          <span
+                            className={cn(
+                              'h-2.5 w-4 rounded-[2px]',
+                              lightPreview
+                                ? 'bg-black/[0.18]'
+                                : systemPreview
+                                  ? 'bg-white/[0.14]'
+                                  : 'bg-white/[0.16]',
+                            )}
+                          />
+                          <span
+                            className={cn(
+                              'h-3.5 w-4 rounded-[2px]',
+                              lightPreview
+                                ? 'bg-black/[0.24]'
+                                : systemPreview
+                                  ? 'bg-[#d4d4d8]/70'
+                                  : 'bg-white/[0.22]',
+                            )}
+                          />
+                          <span
+                            className={cn(
+                              'h-2 w-4 rounded-[2px]',
+                              lightPreview
+                                ? 'bg-black/[0.12]'
+                                : systemPreview
+                                  ? 'bg-white/[0.09]'
+                                  : 'bg-white/[0.1]',
+                            )}
+                          />
+                        </div>
+                      </div>
+                      <p
+                        className={cn(
+                          'mt-3 text-[13px] font-semibold',
+                          selected ? 'text-[#f4f4f5]' : 'text-[#a1a1aa]',
+                        )}
+                      >
+                        {option.label}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
           </div>
-        </section>
-        <section className="space-y-4 py-6 lg:pl-8">
-          <h3 className="font-mono text-[12px] font-medium tracking-[0.05em] text-[#768295]">
-            {t('onboarding.appearance.themeTitle')}
-          </h3>
-          <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
-            {appearanceOptions.map((option) => (
-              <button
-                key={option.id}
-                type="button"
-                onClick={() => handleAppearanceSelect(option)}
-                className={cn(
-                  'cursor-pointer border p-4 text-left transition',
-                  selectedAppearance === option.id
-                    ? 'border-white/35 bg-white/[0.05]'
-                    : 'border-[#222] bg-transparent hover:border-[#4b5568] hover:bg-white/[0.03]',
-                )}
-              >
-                <div className="h-10 border border-[#222] bg-black p-2">
-                  <div className="h-1.5 bg-white/20" />
-                  <div className="mt-2 h-1.5 w-1/2 bg-white" />
-                </div>
-                <p className="mt-3 text-[13px] font-semibold text-[#f4f7fb]">
-                  {option.label}
-                </p>
-              </button>
-            ))}
-          </div>
-        </section>
+        </div>
       </div>
     );
   };
@@ -1598,7 +1773,7 @@ export function OnboardingGuide({
         className="relative isolate flex min-h-0 flex-1 flex-col items-center overflow-hidden px-6 text-center"
         style={onboardingTextFont}
       >
-        <div className="pointer-events-none absolute inset-0 bg-[#050505]" />
+        <div className="pointer-events-none absolute inset-0 bg-[#0a0a0a]" />
         <div
           className="pointer-events-none absolute inset-0 opacity-[0.032] mix-blend-screen"
           style={onboardingNoiseTextureStyle}
@@ -1607,13 +1782,18 @@ export function OnboardingGuide({
         <div className="relative z-10 flex min-h-0 w-full flex-1 flex-col items-center justify-center overflow-y-auto py-8">
           <div className="relative flex gap-2">
             {onboardingSteps.map((step, index) => {
-              const active = index <= activeStepIndex;
+              const current = index === activeStepIndex;
+              const completed = index < activeStepIndex;
               return (
                 <div
                   key={step}
                   className={cn(
-                    'h-[2px] w-12 rounded-none transition-colors duration-150',
-                    active ? 'bg-white' : 'bg-[#262626]',
+                    'h-[2px] w-10 rounded-none transition-colors duration-150',
+                    current
+                      ? 'bg-[#f4f4f5]'
+                      : completed
+                        ? 'bg-white/[0.28]'
+                        : 'bg-white/[0.15]',
                   )}
                 />
               );
@@ -1621,10 +1801,10 @@ export function OnboardingGuide({
           </div>
 
           <div className="mt-9 max-w-4xl">
-            <h1 className="text-[25px] font-[600] leading-tight tracking-[-0.02em] text-white">
+            <h1 className="text-[25px] font-[600] leading-tight tracking-[0] text-[#f4f4f5]">
               {stepTitle}
             </h1>
-            <p className="mx-auto mt-2 max-w-3xl text-[12px] leading-relaxed tracking-[0] text-[rgba(255,255,255,0.48)]">
+            <p className="mx-auto mt-2 max-w-3xl text-[12px] leading-relaxed tracking-[0] text-[#a1a1aa]">
               {stepDescription}
             </p>
           </div>
@@ -1650,13 +1830,13 @@ export function OnboardingGuide({
             </p>
           )}
 
-          <div className="mt-12 grid w-full max-w-5xl grid-cols-1 items-center gap-4 sm:grid-cols-[1fr_auto_1fr]">
-            <div className="flex min-h-10 flex-wrap items-center justify-center gap-3 sm:justify-start">
+          <div className="mt-12 flex min-h-10 w-full max-w-5xl flex-col items-center gap-4 sm:grid sm:grid-cols-[1fr_auto_1fr] sm:items-center">
+            <div className="flex min-h-10 flex-wrap items-center justify-center gap-3 leading-none sm:justify-start">
               <button
                 type="button"
                 onClick={() => void handleSkip()}
                 disabled={saving}
-                className="inline-flex h-10 cursor-pointer items-center justify-center px-0 py-2 text-[12px] font-medium text-[rgba(255,255,255,0.35)] transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-10 cursor-pointer items-center justify-center px-0 py-2 text-[12px] font-medium leading-none text-[rgba(255,255,255,0.35)] transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {t('onboarding.action.skip')}
               </button>
@@ -1664,20 +1844,17 @@ export function OnboardingGuide({
                 type="button"
                 onClick={handleStepBack}
                 disabled={saving || activeStepIndex === 0}
-                className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 px-3 py-2 text-[12px] font-medium text-[rgba(255,255,255,0.35)] transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+                className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 px-3 py-2 text-[12px] font-medium leading-none text-[rgba(255,255,255,0.35)] transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
               >
                 {t('onboarding.action.back')}
-                <span className="inline-flex items-center gap-1 font-mono text-[10px] text-white/35">
-                  <kbd className="inline-flex h-[18px] min-w-[22px] items-center justify-center rounded-[3px] border border-white/[0.08] bg-white/[0.04] px-1.5 leading-none text-white/35">
+                <span className="inline-flex items-center gap-1 font-mono text-[10px] leading-none text-white/35">
+                  <kbd className="inline-flex h-[18px] min-w-[22px] items-center justify-center rounded-[3px] border border-white/[0.06] bg-white/[0.035] px-1.5 leading-none text-white/35">
                     Esc
-                  </kbd>
-                  <kbd className="inline-flex h-[18px] min-w-[22px] items-center justify-center rounded-[3px] border border-white/[0.08] bg-white/[0.04] px-1.5 leading-none text-white/35">
-                    &larr;
                   </kbd>
                 </span>
               </button>
             </div>
-            <p className="flex min-h-10 items-center justify-center font-mono text-[10px] uppercase tracking-[0.12em] text-[#7d8aa3]">
+            <p className="flex min-h-10 items-center justify-center font-mono text-[10px] leading-none uppercase tracking-[0.12em] text-[#7d8aa3]">
               Step {activeStepIndex + 1} of {onboardingSteps.length}: {stepLabel}
             </p>
             <div className="flex min-h-10 items-center justify-center sm:justify-end">
@@ -1692,10 +1869,10 @@ export function OnboardingGuide({
                 )}
               >
                 {saving && <LoaderCircle className="h-4 w-4 animate-spin" />}
-                {stepKey === 'appearance'
+                {stepKey === finalOnboardingStep
                   ? t('onboarding.action.startNow')
                   : t('onboarding.action.next')}
-                <kbd className="inline-flex h-[18px] items-center rounded-[3px] bg-[rgba(0,0,0,0.05)] px-1.5 font-mono text-[10px] font-medium leading-none text-black/40 shadow-none">
+                <kbd className="inline-flex h-[18px] items-center rounded-[3px] border-0 bg-[rgba(0,0,0,0.05)] px-1.5 font-mono text-[10px] font-medium leading-none text-black/40 shadow-none">
                   Enter <span aria-hidden="true">&#8617;</span>
                 </kbd>
               </button>
@@ -1714,7 +1891,7 @@ export function OnboardingGuide({
 
           <div className="relative z-10 flex min-h-0 w-full flex-1 flex-col items-center overflow-y-auto pb-10 pt-10">
             <div className="mt-16 max-w-4xl">
-              <h1 className="font-sans text-[48px] font-semibold leading-[1.06] tracking-[0] text-[#f4f7fb]">
+              <h1 className="font-sans text-[48px] font-semibold leading-[1.06] tracking-[0] text-[#f5f5f5]">
                 {t('onboarding.welcome.title')}
               </h1>
               <p className="mx-auto mt-5 max-w-3xl text-[18px] leading-relaxed text-[#a8b3c2]">
@@ -1738,7 +1915,7 @@ export function OnboardingGuide({
                 <div className="w-full max-w-md -translate-y-4 overflow-hidden rounded-[6px] border border-white/[0.12] bg-[#0a0a0a] text-left">
                   <div className="flex items-center border-b border-white/[0.08] p-4">
                     <span className="mr-3 font-mono text-[15px] text-[#a8b3c2]">/</span>
-                    <span className="min-w-0 flex-1 truncate text-[14px] text-[#f4f7fb]">
+                    <span className="min-w-0 flex-1 truncate text-[14px] text-[#f5f5f5]">
                       {selectedWelcomeCommand.label}
                     </span>
                   </div>
@@ -1757,7 +1934,7 @@ export function OnboardingGuide({
                             'relative flex w-full cursor-pointer items-center justify-between rounded-[5px] border px-3 py-2 text-left text-[14px] transition',
                             active
                               ? 'border-white/[0.1] bg-white/[0.065] text-white'
-                              : 'border-transparent text-[#8792a3] hover:border-white/[0.08] hover:bg-white/[0.035] hover:text-[#f4f7fb]',
+                              : 'border-transparent text-[#8792a3] hover:border-white/[0.08] hover:bg-white/[0.035] hover:text-[#f5f5f5]',
                           )}
                         >
                           <span
