@@ -1,10 +1,12 @@
 use std::{fs, path::Path};
 
+use chrono::Duration;
 use db::models::{
     chat_agent::{ChatAgent, CreateChatAgent},
     chat_run::{ChatRun, CreateChatRun},
     chat_session::{ChatSession, CreateChatSession},
     chat_session_agent::{ChatSessionAgent, CreateChatSessionAgent},
+    chat_session_path_index::{ChatSessionPathIndex, UpsertChatSessionPathIndex},
     member_execution_config::MemberExecutionConfig,
     project::{CreateProject, Project},
     project_delivery_record::{ProjectDeliveryEventTypeV2, ProjectDeliveryRecord},
@@ -767,6 +769,77 @@ async fn committed_other_session_path_is_not_shared() {
         )
         .await
         .expect("commit succeeds");
+
+    let second_session =
+        seed_session_with_paths(&pool, project.id, &repo_path, &["tracked.txt"]).await;
+    fs::write(repo_path.join("tracked.txt"), "second session\n").expect("modify tracked again");
+
+    let status = SourceControlService::new()
+        .session_status(&pool, project.id, second_session, None)
+        .await
+        .expect("status");
+
+    let SessionSourceControlStatus::Git { changes, .. } = status else {
+        panic!("expected git status");
+    };
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].path, "tracked.txt");
+    assert!(!changes[0].shared);
+    assert!(changes[0].shared_session_ids.is_empty());
+}
+
+#[tokio::test]
+async fn stale_committed_other_session_path_index_is_not_shared() {
+    let pool = setup_pool().await;
+    let (_tempdir, repo_path) = setup_git_workspace();
+    let project = seed_project(&pool, &repo_path).await;
+    let first_session =
+        seed_session_with_paths(&pool, project.id, &repo_path, &["tracked.txt"]).await;
+    fs::write(repo_path.join("tracked.txt"), "first session\n").expect("modify tracked");
+    git_add(&repo_path, "tracked.txt");
+
+    SourceControlService::new()
+        .commit(
+            &pool,
+            project.id,
+            SourceControlCommitRequest {
+                session_id: first_session,
+                workspace_id: None,
+                message: "commit first session".to_string(),
+                expected_staged_paths: vec!["tracked.txt".to_string()],
+                force_shared: None,
+                work_item_ids: None,
+                expected_head_sha: None,
+            },
+        )
+        .await
+        .expect("commit succeeds");
+
+    let records = ProjectDeliveryRecord::find_by_project(&pool, project.id, None, None)
+        .await
+        .expect("delivery records");
+    let commit_record = records
+        .iter()
+        .find(|record| {
+            record.source_session_id == Some(first_session)
+                && record.event_type == ProjectDeliveryEventTypeV2::CommitCreated
+        })
+        .expect("commit delivery record");
+    let workspace_path_string = repo_path.to_string_lossy().to_string();
+    ChatSessionPathIndex::upsert_many(
+        &pool,
+        project.id,
+        &workspace_path_string,
+        first_session,
+        &[UpsertChatSessionPathIndex {
+            path: "tracked.txt".to_string(),
+            last_run_id: None,
+            last_observed_at: commit_record.occurred_at - Duration::milliseconds(1),
+            existed_after_run: true,
+        }],
+    )
+    .await
+    .expect("restore stale path index row");
 
     let second_session =
         seed_session_with_paths(&pool, project.id, &repo_path, &["tracked.txt"]).await;

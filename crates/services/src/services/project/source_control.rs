@@ -1711,12 +1711,34 @@ async fn collect_committed_path_times(
     context: &WorkspaceContext,
     session_id: Uuid,
 ) -> Result<HashMap<String, DateTime<Utc>>> {
+    let mut session_ids = BTreeSet::new();
+    session_ids.insert(session_id);
+    Ok(
+        collect_committed_path_times_by_session(pool, context, &session_ids)
+            .await?
+            .remove(&session_id)
+            .unwrap_or_default(),
+    )
+}
+
+async fn collect_committed_path_times_by_session(
+    pool: &SqlitePool,
+    context: &WorkspaceContext,
+    session_ids: &BTreeSet<Uuid>,
+) -> Result<HashMap<Uuid, HashMap<String, DateTime<Utc>>>> {
+    if session_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
     let records =
         ProjectDeliveryRecord::find_by_project(pool, context.project_id, None, None).await?;
-    let mut committed_paths = HashMap::<String, DateTime<Utc>>::new();
+    let mut committed_paths = HashMap::<Uuid, HashMap<String, DateTime<Utc>>>::new();
 
     for record in records {
-        if record.source_session_id != Some(session_id)
+        let Some(source_session_id) = record.source_session_id else {
+            continue;
+        };
+        if !session_ids.contains(&source_session_id)
             || record.event_type != ProjectDeliveryEventTypeV2::CommitCreated
         {
             continue;
@@ -1735,6 +1757,8 @@ async fn collect_committed_path_times(
                 continue;
             };
             committed_paths
+                .entry(source_session_id)
+                .or_default()
                 .entry(path)
                 .and_modify(|committed_at| {
                     if record.occurred_at > *committed_at {
@@ -1759,15 +1783,40 @@ async fn collect_shared_paths(
 
     let mut by_path = HashMap::<String, BTreeSet<Uuid>>::new();
     let target_paths = target_paths.iter().cloned().collect::<Vec<_>>();
-    for shared in ChatSessionPathIndex::find_shared_sessions_for_paths(
+    let shared_candidates = ChatSessionPathIndex::find_shared_sessions_for_paths(
         pool,
         context.project_id,
         &context.workspace_path_string,
         context.session_id,
         &target_paths,
     )
-    .await?
-    {
+    .await?;
+    let shared_session_ids = shared_candidates
+        .iter()
+        .map(|shared| shared.session_id)
+        .collect::<BTreeSet<_>>();
+    let committed_paths_by_session =
+        collect_committed_path_times_by_session(pool, context, &shared_session_ids).await?;
+    for shared in shared_candidates {
+        let committed_after_observation = committed_paths_by_session
+            .get(&shared.session_id)
+            .and_then(|paths| paths.get(&shared.path))
+            .map(|committed_at| committed_at >= &shared.last_observed_at)
+            .unwrap_or(false);
+        if committed_after_observation {
+            tracing::debug!(
+                project_id = %context.project_id,
+                session_id = %context.session_id,
+                workspace_id = ?context.workspace_id,
+                workspace_path = %context.workspace_path_string,
+                shared_path = %shared.path,
+                shared_session_id = %shared.session_id,
+                last_observed_at = %shared.last_observed_at,
+                "source-control collect_shared_paths ignored committed shared-file observation"
+            );
+            continue;
+        }
+
         by_path
             .entry(shared.path)
             .or_default()
