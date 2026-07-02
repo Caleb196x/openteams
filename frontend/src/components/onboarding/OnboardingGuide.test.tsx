@@ -178,7 +178,7 @@ check(
     guideSource.includes("? 'bg-[#f4f4f5]'") &&
     guideSource.includes("? 'bg-white/[0.28]'") &&
     guideSource.includes(": 'bg-white/[0.15]'") &&
-    !guideSource.includes('max-w-[760px]') &&
+    guideSource.includes('flex h-[340px] items-center justify-center') &&
     !guideSource.includes('radial-gradient') &&
     !guideSource.includes("backgroundSize: stepKey === 'project_path'"),
   guideSource,
@@ -189,12 +189,13 @@ check(
     guideSource.includes('renderScenarioStep') &&
     guideSource.includes('renderExecutorStep') &&
     guideSource.includes('renderAppearanceStep') &&
-    guideSource.includes('flex min-h-[360px] items-center justify-center py-6') &&
-    guideSource.includes('max-w-[880px] rounded-[8px] border border-white/[0.08] bg-[#121212]/90') &&
-    guideSource.includes('lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.84fr)] lg:gap-12') &&
-    guideSource.includes('grid gap-3 sm:grid-cols-2') &&
-    guideSource.includes('group min-h-[126px] cursor-pointer rounded-[8px] border p-4') &&
-    guideSource.includes('border-white/[0.07] bg-white/[0.02] hover:border-white/[0.12] hover:bg-white/[0.04]') &&
+    guideSource.includes('flex h-[340px] items-center justify-center') &&
+    guideSource.includes('h-full w-full max-w-[820px] rounded-[8px] border border-white/[0.08] bg-[#121212]/90') &&
+    guideSource.includes('px-5 py-5 shadow-[0_18px_60px_rgba(0,0,0,0.32)] sm:px-7 sm:py-6') &&
+    guideSource.includes('lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.84fr)] lg:gap-10') &&
+    guideSource.includes('mx-auto grid w-full max-w-[700px] gap-3 sm:grid-cols-2') &&
+    guideSource.includes('group min-h-[92px] cursor-pointer rounded-[8px] border p-3') &&
+    guideSource.includes('border-transparent bg-white/[0.025] hover:bg-white/[0.04]') &&
     guideSource.includes('border-white/[0.14] bg-white/[0.07]') &&
     guideSource.includes('border-transparent bg-transparent text-[#8a8f98] hover:bg-white/[0.04]') &&
     guideSource.includes('className="sr-only"') &&
@@ -202,14 +203,18 @@ check(
     guideSource.includes('Icon: Moon') &&
     guideSource.includes('Icon: Sun') &&
     guideSource.includes('Icon: Monitor') &&
-    guideSource.includes('cursor-pointer rounded-[8px] border p-3 text-left transition') &&
+    guideSource.includes('Icon: Ellipsis') &&
+    guideSource.includes('cursor-pointer rounded-[8px] border p-2 text-left transition') &&
+    guideSource.includes('flex h-8 items-center justify-between rounded-[8px] border px-2.5') &&
+    guideSource.includes('mt-1.5 text-[12px] font-semibold') &&
     guideSource.includes('border-[#d4d4d8]/80 bg-white/[0.07]') &&
     guideSource.includes('strokeWidth={1.4}') &&
     guideSource.includes('items-center justify-between') &&
-    guideSource.includes('rounded-[8px] border border-white/[0.08] bg-white/[0.025]') &&
+    guideSource.includes('mx-auto mt-5 flex w-full max-w-[700px]') &&
+    guideSource.includes('rounded-[8px] bg-white/[0.025] px-4 py-2.5') &&
     guideSource.includes('tracking-[0] text-[#f4f4f5]') &&
     guideSource.includes("t('onboarding.scenario.memberDetailsHint')") &&
-    guideSource.includes('text-[12px] leading-relaxed') &&
+    guideSource.includes('line-clamp-2 pr-1 text-[11px] leading-[1.45]') &&
     !guideSource.includes('[ ↳ Details in next step ]') &&
     guideSource.includes('tracking-[0.12em] text-[#7d8aa3]') &&
     guideSource.includes('rounded-[8px]') &&
@@ -235,8 +240,9 @@ check(
 check(
   'scenario page applies final contrast spacing footer and slide transition polish',
   guideSource.includes('focus-visible:ring-1 focus-visible:ring-white/[0.35]') &&
-    guideSource.includes('grid grid-cols-[32px_minmax(0,1fr)]') &&
-    guideSource.includes('border-white/[0.07] bg-white/[0.025] text-[#8a8f98] group-hover:text-[#c9cdd6]') &&
+    guideSource.includes('grid grid-cols-[28px_minmax(0,1fr)]') &&
+    guideSource.includes('rounded-[7px] transition-colors') &&
+    guideSource.includes('bg-white/[0.035] text-[#8a8f98] group-hover:text-[#c9cdd6]') &&
     guideSource.includes('text-[#8a8f98] group-hover:text-[#aeb4bf]') &&
     guideSource.includes('border-0 bg-[rgba(0,0,0,0.05)]') &&
     guideSource.includes('bg-[rgba(0,0,0,0.05)]') &&

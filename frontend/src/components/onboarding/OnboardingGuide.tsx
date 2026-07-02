@@ -3,6 +3,7 @@ import {
   Bot,
   Check,
   ChevronUp,
+  Ellipsis,
   FileText,
   Folder,
   Home,
@@ -199,7 +200,7 @@ const scenarioDefinitions: ScenarioDefinition[] = [
       'Start with a flexible collaboration team for exploration, execution, and review, then tune the members as the project takes shape.',
     teamKey: 'onboarding.scenario.other.team',
     teamFallback: 'General collaboration team',
-    Icon: Bot,
+    Icon: Ellipsis,
     members: [
       { member: 'General Lead', runner_type: 'openteams_cli', model_name: 'gpt-5' },
       { member: 'Executor', runner_type: 'codex', model_name: 'gpt-5' },
@@ -1264,9 +1265,9 @@ export function OnboardingGuide({
   );
 
   const renderScenarioStep = () => (
-    <div className="flex min-h-[360px] items-center justify-center py-6">
-      <div className="w-full max-w-[880px] rounded-[8px] border border-white/[0.08] bg-[#121212]/90 px-5 py-5 shadow-[0_18px_60px_rgba(0,0,0,0.32)] sm:px-7 sm:py-6">
-        <section className="grid gap-3 sm:grid-cols-2">
+    <div className="flex h-[340px] items-center justify-center">
+      <div className="h-full w-full max-w-[820px] rounded-[8px] border border-white/[0.08] bg-[#121212]/90 px-5 py-5 shadow-[0_18px_60px_rgba(0,0,0,0.32)] sm:px-7 sm:py-6">
+        <section className="mx-auto grid w-full max-w-[700px] gap-3 sm:grid-cols-2">
           {scenarios.map((scenario) => {
             const selected = scenario.key === selectedScenario;
             const Icon = scenario.Icon;
@@ -1276,26 +1277,26 @@ export function OnboardingGuide({
                 type="button"
                 onClick={() => handleScenarioSelect(scenario.key)}
                 className={cn(
-                  'group min-h-[126px] cursor-pointer rounded-[8px] border p-4 text-left transition-colors duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/[0.35] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0a0a0a]',
+                  'group min-h-[92px] cursor-pointer rounded-[8px] border p-3 text-left transition-colors duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/[0.35] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0a0a0a]',
                   selected
-                    ? 'border-[#d4d4d8]/80 bg-white/[0.07] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05),inset_0_1px_18px_rgba(255,255,255,0.025)]'
-                    : 'border-white/[0.07] bg-white/[0.02] hover:border-white/[0.12] hover:bg-white/[0.04]',
+                    ? 'border-white/[0.14] bg-white/[0.07] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.035)]'
+                    : 'border-transparent bg-white/[0.025] hover:bg-white/[0.04]',
                 )}
               >
-                <div className="grid grid-cols-[32px_minmax(0,1fr)] items-start gap-x-3">
+                <div className="grid grid-cols-[28px_minmax(0,1fr)] items-start gap-x-3">
                   <span
                     className={cn(
-                      'col-start-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border transition-colors duration-150 ease-[cubic-bezier(0.16,1,0.3,1)]',
+                      'col-start-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] transition-colors duration-150 ease-[cubic-bezier(0.16,1,0.3,1)]',
                       selected
-                        ? 'border-white/[0.12] bg-white/[0.08] text-[#f4f4f5]'
-                        : 'border-white/[0.07] bg-white/[0.025] text-[#8a8f98] group-hover:text-[#c9cdd6]',
+                        ? 'bg-white/[0.09] text-[#f4f4f5]'
+                        : 'bg-white/[0.035] text-[#8a8f98] group-hover:text-[#c9cdd6]',
                     )}
                   >
-                    <Icon className="h-4 w-4" strokeWidth={1.4} />
+                    <Icon className="h-3.5 w-3.5" strokeWidth={1.4} />
                   </span>
                   <h3
                     className={cn(
-                      'col-start-2 min-w-0 truncate text-[14px] font-semibold tracking-[0] transition-colors duration-150 ease-[cubic-bezier(0.16,1,0.3,1)]',
+                      'col-start-2 min-w-0 truncate text-[13px] font-semibold tracking-[0] transition-colors duration-150 ease-[cubic-bezier(0.16,1,0.3,1)]',
                       selected ? 'text-[#f4f4f5]' : 'text-[#d4d4d8] group-hover:text-[#f4f4f5]',
                     )}
                   >
@@ -1303,7 +1304,7 @@ export function OnboardingGuide({
                   </h3>
                   <p
                     className={cn(
-                      'col-start-2 mt-1.5 pr-1 text-[12px] leading-relaxed tracking-[0] transition-colors duration-150 ease-[cubic-bezier(0.16,1,0.3,1)]',
+                      'col-start-2 mt-1 line-clamp-2 pr-1 text-[11px] leading-[1.45] tracking-[0] transition-colors duration-150 ease-[cubic-bezier(0.16,1,0.3,1)]',
                       selected
                         ? 'text-[#a1a1aa]'
                         : 'text-[#8a8f98] group-hover:text-[#aeb4bf]',
@@ -1316,7 +1317,7 @@ export function OnboardingGuide({
             );
           })}
         </section>
-        <aside className="mt-5 flex items-center justify-between gap-4 rounded-[8px] border border-white/[0.08] bg-white/[0.025] px-4 py-3">
+        <aside className="mx-auto mt-5 flex w-full max-w-[700px] items-center justify-between gap-4 rounded-[8px] bg-white/[0.025] px-4 py-2.5">
           <div className="flex min-w-0 items-center gap-3">
             <Users className="h-4 w-4 shrink-0 text-[#a1a1aa]" strokeWidth={1.4} />
             <div className="min-w-0">
@@ -1588,10 +1589,10 @@ export function OnboardingGuide({
     ];
 
     return (
-      <div className="flex min-h-[360px] items-center justify-center py-6">
-        <div className="w-full max-w-[880px] rounded-[8px] border border-white/[0.08] bg-[#121212]/90 px-5 py-5 shadow-[0_18px_60px_rgba(0,0,0,0.32)] sm:px-7 sm:py-6">
-          <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.84fr)] lg:gap-12">
-            <section className="space-y-4">
+      <div className="flex h-[340px] items-center justify-center">
+        <div className="h-full w-full max-w-[820px] rounded-[8px] border border-white/[0.08] bg-[#121212]/90 px-5 py-5 shadow-[0_18px_60px_rgba(0,0,0,0.32)] sm:px-7 sm:py-6">
+          <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.84fr)] lg:gap-10">
+            <section className="space-y-3">
               <h3 className="font-mono text-[12px] font-medium tracking-[0] text-[#a1a1aa]">
                 {t('onboarding.appearance.languageTitle')}
               </h3>
@@ -1641,7 +1642,7 @@ export function OnboardingGuide({
               <h3 className="font-mono text-[12px] font-medium tracking-[0] text-[#a1a1aa]">
                 {t('onboarding.appearance.themeTitle')}
               </h3>
-              <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+              <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-1">
                 {appearanceOptions.map((option) => {
                   const selected = selectedAppearance === option.id;
                   const lightPreview = option.id === OnboardingAppearance.light;
@@ -1654,7 +1655,7 @@ export function OnboardingGuide({
                       type="button"
                       onClick={() => handleAppearanceSelect(option)}
                       className={cn(
-                        'cursor-pointer rounded-[8px] border p-3 text-left transition',
+                        'cursor-pointer rounded-[8px] border p-2 text-left transition',
                         selected
                           ? 'border-[#d4d4d8]/80 bg-white/[0.07] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05),inset_0_1px_18px_rgba(255,255,255,0.025)]'
                           : 'border-white/[0.07] bg-white/[0.02] hover:border-white/[0.12] hover:bg-white/[0.04]',
@@ -1662,7 +1663,7 @@ export function OnboardingGuide({
                     >
                       <div
                         className={cn(
-                          'flex h-12 items-center justify-between rounded-[8px] border px-3',
+                          'flex h-8 items-center justify-between rounded-[8px] border px-2.5',
                           lightPreview
                             ? 'border-black/[0.08] bg-[#e4e4e7]'
                             : systemPreview
@@ -1672,7 +1673,7 @@ export function OnboardingGuide({
                       >
                         <Icon
                           className={cn(
-                            'h-4 w-4',
+                            'h-3.5 w-3.5',
                             lightPreview
                               ? 'text-[#52525b]'
                               : systemPreview
@@ -1681,10 +1682,10 @@ export function OnboardingGuide({
                           )}
                           strokeWidth={1.4}
                         />
-                        <div className="flex items-end gap-1.5">
+                        <div className="flex items-end gap-1">
                           <span
                             className={cn(
-                              'h-2.5 w-4 rounded-[2px]',
+                              'h-2 w-3.5 rounded-[2px]',
                               lightPreview
                                 ? 'bg-black/[0.18]'
                                 : systemPreview
@@ -1694,7 +1695,7 @@ export function OnboardingGuide({
                           />
                           <span
                             className={cn(
-                              'h-3.5 w-4 rounded-[2px]',
+                              'h-3 w-3.5 rounded-[2px]',
                               lightPreview
                                 ? 'bg-black/[0.24]'
                                 : systemPreview
@@ -1704,7 +1705,7 @@ export function OnboardingGuide({
                           />
                           <span
                             className={cn(
-                              'h-2 w-4 rounded-[2px]',
+                              'h-1.5 w-3.5 rounded-[2px]',
                               lightPreview
                                 ? 'bg-black/[0.12]'
                                 : systemPreview
@@ -1716,7 +1717,7 @@ export function OnboardingGuide({
                       </div>
                       <p
                         className={cn(
-                          'mt-3 text-[13px] font-semibold',
+                          'mt-1.5 text-[12px] font-semibold',
                           selected ? 'text-[#f4f4f5]' : 'text-[#a1a1aa]',
                         )}
                       >
