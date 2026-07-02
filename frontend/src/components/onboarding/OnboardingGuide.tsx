@@ -404,8 +404,7 @@ export function OnboardingGuide({
   const [selectedWelcomeCommandId, setSelectedWelcomeCommandId] =
     useState('workflow_execution');
   const pathValidationRequestRef = useRef(0);
-  const onboardingTextFont =
-    locale === 'zh' ? onboardingMonoFont : onboardingSansFont;
+  const onboardingTextFont = onboardingSansFont;
 
   const { scenarios, currentScenario } = useTranslatedScenario(
     t,
@@ -1132,8 +1131,8 @@ export function OnboardingGuide({
   );
 
   const renderScenarioStep = () => (
-    <div className="flex min-h-[420px] flex-col justify-center border-y border-white/[0.08] py-6">
-      <section className="mx-auto grid max-w-4xl gap-5 md:grid-cols-2">
+    <div className="flex min-h-[360px] flex-col justify-center border-y border-[#262626] py-5">
+      <section className="mx-auto grid w-full max-w-5xl gap-3 md:grid-cols-2">
         {scenarios.map((scenario) => {
           const selected = scenario.key === selectedScenario;
           const Icon = scenario.Icon;
@@ -1143,46 +1142,42 @@ export function OnboardingGuide({
               type="button"
               onClick={() => handleScenarioSelect(scenario.key)}
               className={cn(
-                'group relative min-h-[138px] cursor-pointer overflow-hidden rounded-[8px] border p-px text-left backdrop-blur-xl transition duration-200',
+                'group relative min-h-[118px] cursor-pointer overflow-hidden rounded-[4px] border p-px text-left transition-colors duration-75 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-2 focus-visible:outline-white/60',
                 selected
-                  ? 'border-white/[0.24] bg-white/[0.075] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06),inset_0_1px_0_rgba(255,255,255,0.14)]'
-                  : 'border-white/[0.10] bg-white/[0.045] shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_16px_36px_rgba(0,0,0,0.24)] hover:border-white/[0.18] hover:bg-white/[0.06] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_16px_40px_rgba(0,0,0,0.22)]',
+                  ? 'border-white bg-[#111111] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.16)]'
+                  : 'border-[#262626] bg-[#0a0a0a] hover:border-[#404040] hover:bg-[#121212]',
               )}
             >
-              <span className="pointer-events-none absolute inset-x-6 top-px h-px bg-gradient-to-r from-transparent via-white/25 to-transparent" />
               <div
                 className={cn(
-                  'relative z-10 flex min-h-[136px] flex-col rounded-[7px] px-5 py-5',
+                  'relative z-10 flex min-h-[116px] flex-col rounded-[3px] px-4 py-4',
                   selected
-                    ? 'bg-[#101116]/82'
-                    : 'bg-[#0c0d0f]/62 group-hover:bg-[#101116]/72',
+                    ? 'bg-[#111111]'
+                    : 'bg-[#0a0a0a] group-hover:bg-[#121212]',
                 )}
               >
                 <div className="flex items-start gap-3">
                   <span
                     className={cn(
-                      'grid h-9 w-9 shrink-0 place-items-center rounded-[7px] border shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]',
+                      'mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center transition-colors',
                       selected
-                        ? 'border-white/[0.16] bg-white/[0.08] text-[#f4f7fb]'
-                        : 'border-white/[0.10] bg-white/[0.035] text-[#8f9aaa] group-hover:text-[#f4f7fb]',
+                        ? 'text-white'
+                        : 'text-[#7d8490] group-hover:text-[#d9dde6]',
                     )}
                   >
-                    <Icon className="h-[18px] w-[18px]" strokeWidth={1.55} />
+                    <Icon className="h-4 w-4" strokeWidth={1} />
                   </span>
                   <div className="min-w-0">
                     <h3
                       className={cn(
-                        'truncate text-[13px] font-semibold tracking-[0]',
-                        selected ? 'text-[#f4f7fb]' : 'text-[#c2cbd7]',
+                        'truncate text-[13px] font-semibold tracking-[-0.01em]',
+                        selected ? 'text-white' : 'text-[#f7f7f7]',
                       )}
                     >
                       {scenario.title}
                     </h3>
                     <p
-                      className={cn(
-                        'mt-2 text-[12px] leading-relaxed tracking-[0]',
-                        selected ? 'text-[#b7c1d0]' : 'text-[#8e99aa]',
-                      )}
+                      className="mt-1.5 text-[12px] leading-relaxed tracking-[0] text-[rgba(255,255,255,0.40)]"
                     >
                       {scenario.desc}
                     </p>
@@ -1193,24 +1188,20 @@ export function OnboardingGuide({
           );
         })}
       </section>
-      <aside className="mx-auto mt-5 flex max-w-4xl items-center justify-between gap-4 rounded-[8px] border border-white/[0.10] bg-white/[0.055] px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_14px_36px_rgba(0,0,0,0.22)] backdrop-blur-xl">
+      <aside className="mx-auto mt-4 flex w-full max-w-5xl items-center justify-between gap-4 rounded-[4px] border border-[#262626] bg-[#0a0a0a] px-4 py-3">
         <div className="flex min-w-0 items-center gap-3">
-          <span className="relative grid h-8 w-8 shrink-0 place-items-center rounded-[7px] border border-white/[0.12] bg-white/[0.045] text-[#b7c1d0]">
-            <Users className="h-3.5 w-3.5" strokeWidth={1.5} />
-            <span className="absolute -right-1 -top-1 grid h-4 w-4 place-items-center rounded-full border border-white/[0.16] bg-[radial-gradient(circle_at_30%_30%,#b8c2ff,#5e6ad2_58%,#2a2f69)] font-mono text-[10px] leading-none text-white shadow-[0_0_14px_rgba(94,106,210,0.42)] motion-safe:animate-pulse">
-              +
-            </span>
-          </span>
+          <Users className="h-4 w-4 shrink-0 text-[#8b949e]" strokeWidth={1} />
           <div className="min-w-0">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <p className="truncate font-mono text-[12px] font-semibold text-[#f4f7fb]">
+              <p className="truncate font-mono text-[12px] font-semibold tracking-[-0.01em] text-[#f4f4f5]">
                 {recommendedTeamName}
               </p>
-              <span className="rounded-[4px] border border-[#7f8cff]/25 bg-[#5e6ad2]/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[#b8c2ff]">
+              <span className="inline-flex items-center gap-1 rounded-[3px] border border-[#2f2f2f] bg-[#1a1a1a] px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[#9ca3af]">
+                <span className="text-[#c7cbd1]">+</span>
                 {t('onboarding.scenario.recommendedTeam')}
               </span>
             </div>
-            <p className="mt-0.5 text-[11px] leading-none text-[#7f8b9d]">
+            <p className="mt-0.5 text-[11px] leading-none text-[#6b7280]">
               {t('onboarding.scenario.memberDetailsHint')}
             </p>
           </div>
@@ -1562,16 +1553,14 @@ export function OnboardingGuide({
         className="relative isolate flex min-h-0 flex-1 flex-col items-center overflow-hidden px-6 text-center"
         style={onboardingTextFont}
       >
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_8%,#0d0d0e_0%,#050506_48%,#000_100%)]" />
+        <div className="pointer-events-none absolute inset-0 bg-[#050505]" />
         <div
           className="pointer-events-none absolute inset-0 opacity-[0.032] mix-blend-screen"
           style={onboardingNoiseTextureStyle}
         />
-        <div className="pointer-events-none absolute left-1/2 top-[86px] h-[170px] w-[720px] -translate-x-1/2 rounded-full bg-[radial-gradient(ellipse_at_center,rgba(94,106,210,0.22)_0%,rgba(92,122,255,0.09)_42%,transparent_72%)] blur-[46px]" />
-        <div className="pointer-events-none absolute left-1/2 top-[48%] h-[520px] w-[820px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/[0.035] blur-[130px]" />
 
-        <div className="relative z-10 flex min-h-0 w-full flex-1 flex-col items-center justify-center overflow-y-auto py-10">
-          <div className="relative flex gap-2.5">
+        <div className="relative z-10 flex min-h-0 w-full flex-1 flex-col items-center justify-center overflow-y-auto py-8">
+          <div className="relative flex gap-2">
             {onboardingSteps.map((step, index) => {
               const current = index === activeStepIndex;
               const complete = index < activeStepIndex;
@@ -1579,28 +1568,28 @@ export function OnboardingGuide({
                 <div
                   key={step}
                   className={cn(
-                    'h-px w-12 rounded-full transition duration-300',
+                    'h-0 w-12 border-t border-dashed transition-colors duration-150',
                     current
-                      ? 'bg-white shadow-[0_0_12px_rgba(255,255,255,0.62)]'
+                      ? 'border-white'
                       : complete
-                        ? 'bg-white/55'
-                        : 'bg-white/[0.12]',
+                        ? 'border-white/60'
+                        : 'border-[#262626]',
                   )}
                 />
               );
             })}
           </div>
 
-          <div className="mt-10 max-w-4xl">
-            <h1 className="text-[25px] font-semibold leading-tight tracking-[0] text-[#f4f7fb]">
+          <div className="mt-9 max-w-4xl">
+            <h1 className="text-[25px] font-semibold leading-tight tracking-[-0.02em] text-white">
               {stepTitle}
             </h1>
-            <p className="mx-auto mt-2 max-w-3xl text-[12px] leading-relaxed tracking-[0] text-[#aeb7c5]">
+            <p className="mx-auto mt-2 max-w-3xl text-[12px] leading-relaxed tracking-[0] text-[rgba(255,255,255,0.48)]">
               {stepDescription}
             </p>
           </div>
 
-          <div className="relative mt-8 w-full max-w-5xl p-0 text-left">
+          <div className="relative mt-7 w-full max-w-5xl p-0 text-left">
             {renderActiveConfigurationContent(stepKey)}
           </div>
 
@@ -1610,7 +1599,7 @@ export function OnboardingGuide({
             </p>
           )}
 
-          <div className="mt-16 grid w-full max-w-5xl grid-cols-1 items-center gap-4 sm:grid-cols-[1fr_auto_1fr]">
+          <div className="mt-12 grid w-full max-w-5xl grid-cols-1 items-center gap-4 sm:grid-cols-[1fr_auto_1fr]">
             <div className="flex flex-wrap items-center justify-center gap-3 sm:justify-start">
               <button
                 type="button"
@@ -1624,14 +1613,14 @@ export function OnboardingGuide({
                 type="button"
                 onClick={handleStepBack}
                 disabled={saving || activeStepIndex === 0}
-                className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 px-3 py-2 text-[12px] font-medium text-[#7d8798] transition hover:text-[#f4f7fb] disabled:cursor-not-allowed disabled:opacity-45"
+                className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 px-3 py-2 text-[12px] font-medium text-[#7d8798] transition-colors hover:text-[#f4f7fb] disabled:cursor-not-allowed disabled:opacity-45"
               >
                 {t('onboarding.action.back')}
                 <span className="flex items-center gap-1 font-mono text-[10px] text-[#5f6878]">
-                  <kbd className="rounded-[4px] border border-white/[0.08] bg-white/[0.03] px-1.5 py-0.5 leading-none">
+                  <kbd className="rounded-[3px] border border-[#303030] bg-[#151515] px-1.5 py-0.5 leading-none">
                     Esc
                   </kbd>
-                  <kbd className="rounded-[4px] border border-white/[0.08] bg-white/[0.03] px-1.5 py-0.5 leading-none">
+                  <kbd className="rounded-[3px] border border-[#303030] bg-[#151515] px-1.5 py-0.5 leading-none">
                     &larr;
                   </kbd>
                 </span>
@@ -1645,13 +1634,13 @@ export function OnboardingGuide({
                 type="button"
                 onClick={() => void handleStepNext()}
                 disabled={saving}
-                className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-2.5 rounded-[6px] border border-white/85 border-t-white bg-white px-6 py-2 text-[13px] font-semibold text-black shadow-[inset_0_1px_0_rgba(255,255,255,0.74),0_10px_26px_rgba(255,255,255,0.08)] transition hover:bg-[#eceef4] active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-2.5 rounded-[4px] border border-white bg-white px-6 py-2 text-[13px] font-semibold text-black shadow-[inset_0_0_0_1px_rgba(255,255,255,0.92)] transition-colors hover:bg-[#f2f2f2] active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {saving && <LoaderCircle className="h-4 w-4 animate-spin" />}
                 {stepKey === 'appearance'
                   ? t('onboarding.action.startNow')
                   : t('onboarding.action.next')}
-                <kbd className="rounded-[4px] border border-black/[0.12] bg-black/[0.035] px-1.5 py-0.5 font-mono text-[10px] font-semibold leading-none text-black/55">
+                <kbd className="rounded-[3px] border border-black/[0.14] bg-black/[0.035] px-1.5 py-0.5 font-mono text-[10px] font-semibold leading-none text-black/55">
                   Enter <span aria-hidden="true">&#8617;</span>
                 </kbd>
               </button>
