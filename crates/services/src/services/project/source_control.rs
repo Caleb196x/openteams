@@ -885,14 +885,22 @@ impl SourceControlService {
                 force_shared,
             )
             .await?;
-        ChatSessionPathIndex::delete_paths(
-            pool,
-            context.project_id,
-            &context.workspace_path_string,
-            context.session_id,
-            &committed_paths,
-        )
-        .await?;
+        let remaining_changed_paths = changed_paths(&context.workspace_path)?;
+        let completed_paths = committed_paths
+            .iter()
+            .filter(|path| !remaining_changed_paths.contains(*path))
+            .cloned()
+            .collect::<Vec<_>>();
+        if !completed_paths.is_empty() {
+            ChatSessionPathIndex::delete_paths(
+                pool,
+                context.project_id,
+                &context.workspace_path_string,
+                context.session_id,
+                &completed_paths,
+            )
+            .await?;
+        }
         invalidate_source_control_caches(&context.workspace_path_string);
 
         Ok(SourceControlCommitResponse {
@@ -1675,18 +1683,24 @@ async fn filter_committed_session_paths(
         return Ok(paths);
     }
 
+    let remaining_changed_paths = if is_git_repo(&context.workspace_path) {
+        changed_paths(&context.workspace_path)?
+    } else {
+        BTreeSet::new()
+    };
     let mut retained_paths = BTreeMap::new();
     let mut pruned_paths = Vec::new();
     for (path, state) in paths {
-        let keep = state
-            .last_observed_at
-            .as_ref()
-            .and_then(|last_observed_at| {
-                committed_paths
-                    .get(&path)
-                    .map(|committed_at| committed_at < last_observed_at)
-            })
-            .unwrap_or(true);
+        let keep = remaining_changed_paths.contains(&path)
+            || state
+                .last_observed_at
+                .as_ref()
+                .and_then(|last_observed_at| {
+                    committed_paths
+                        .get(&path)
+                        .map(|committed_at| committed_at < last_observed_at)
+                })
+                .unwrap_or(true);
         if keep {
             retained_paths.insert(path, state);
         } else {
@@ -2580,6 +2594,16 @@ fn staged_paths(workspace_path: &Path) -> Result<Vec<String>> {
     paths.sort();
     paths.dedup();
     Ok(paths)
+}
+
+fn changed_paths(workspace_path: &Path) -> Result<BTreeSet<String>> {
+    Ok(
+        normalize_status_entries(GitCli::new().get_worktree_status(workspace_path)?.entries)
+            .into_iter()
+            .filter(|entry| entry.is_untracked || entry.staged != ' ' || entry.unstaged != ' ')
+            .map(|entry| entry.path)
+            .collect(),
+    )
 }
 
 fn normalize_path_set(paths: &[String]) -> std::result::Result<BTreeSet<String>, String> {

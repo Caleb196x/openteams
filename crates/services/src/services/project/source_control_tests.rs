@@ -1021,6 +1021,52 @@ async fn commit_succeeds_with_valid_request() {
 }
 
 #[tokio::test]
+async fn commit_preserves_unstaged_changes_for_staged_paths() {
+    let pool = setup_pool().await;
+    let (_tempdir, repo_path) = setup_git_workspace();
+    let project = seed_project(&pool, &repo_path).await;
+    let session_id = seed_session_with_paths(&pool, project.id, &repo_path, &["tracked.txt"]).await;
+    fs::write(repo_path.join("tracked.txt"), "base\nstaged\n").expect("write staged content");
+    git_add(&repo_path, "tracked.txt");
+    fs::write(repo_path.join("tracked.txt"), "base\nstaged\nunstaged\n")
+        .expect("write unstaged content");
+
+    let response = SourceControlService::new()
+        .commit(
+            &pool,
+            project.id,
+            SourceControlCommitRequest {
+                session_id,
+                workspace_id: None,
+                message: "commit staged only".to_string(),
+                expected_staged_paths: vec!["tracked.txt".to_string()],
+                force_shared: None,
+                work_item_ids: None,
+                expected_head_sha: None,
+            },
+        )
+        .await
+        .expect("commit succeeds");
+
+    assert_eq!(response.committed_paths, vec!["tracked.txt"]);
+    let committed_content = GitCli::new()
+        .git(&repo_path, ["show", "HEAD:tracked.txt"])
+        .expect("read committed file");
+    assert_eq!(committed_content, "base\nstaged\n");
+    let worktree_content =
+        fs::read_to_string(repo_path.join("tracked.txt")).expect("read worktree file");
+    assert_eq!(worktree_content, "base\nstaged\nunstaged\n");
+
+    let status = SourceControlService::new()
+        .session_status(&pool, project.id, session_id, None)
+        .await
+        .expect("status after commit");
+    let (changes, staged) = git_status_paths(&status);
+    assert_eq!(changes, vec!["tracked.txt"]);
+    assert!(staged.is_empty());
+}
+
+#[tokio::test]
 async fn commit_writes_session_level_delivery_record_when_no_work_item_is_linked() {
     let pool = setup_pool().await;
     let (_tempdir, repo_path) = setup_git_workspace();
