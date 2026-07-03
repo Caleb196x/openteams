@@ -1771,6 +1771,9 @@ function WorkspaceLayout() {
 
   const handleOnboardingStateChange = (nextState: OnboardingState) => {
     setOnboardingState(nextState);
+    setOnboardingOverlay((current) =>
+      current ? { ...current, state: nextState } : current,
+    );
   };
 
   const handleUpgradeRead = (nextState: OnboardingState) => {
