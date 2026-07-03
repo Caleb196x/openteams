@@ -103,7 +103,8 @@ check(
     guideSource.includes("'--ink-subtle': '#8a8f98'") &&
     guideSource.includes('text-[#a8b3c2]') &&
     guideSource.includes('rounded-[6px] border border-white bg-white') &&
-    guideSource.includes('px-9 py-3 text-[14px]') &&
+    guideSource.includes('px-5 py-2 text-[13px]') &&
+    guideSource.includes('sm:min-h-12 sm:w-auto sm:max-w-[320px] sm:px-9 sm:py-3 sm:text-[14px]') &&
     guideSource.includes('transition-[background-color,box-shadow,transform] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]') &&
     guideSource.includes('will-change-transform hover:-translate-y-[2px] hover:scale-[1.012]') &&
     guideSource.includes('hover:shadow-[inset_0_-1px_0_rgba(0,0,0,0.18),0_0_0_1px_rgba(255,255,255,0.55),0_14px_34px_rgba(255,255,255,0.11)]') &&
@@ -113,18 +114,28 @@ check(
     guideSource.includes('opacity-[0.025]') &&
     guideSource.includes('shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]') &&
     guideSource.includes('pointer-events-none absolute inset-0 bg-[#0E0F11]') &&
-    guideSource.includes('flex min-h-[440px] w-full max-w-5xl flex-col overflow-hidden rounded-[8px] border border-white/[0.12] bg-[#1A1A1A]/90') &&
-    guideSource.includes('border-b border-white/[0.08] bg-[#1A1A1A]/90 px-4 py-3') &&
+    guideSource.includes('px-4 text-center sm:px-6') &&
+    guideSource.includes('overflow-hidden pb-4 pt-4 sm:pb-8 sm:pt-8 lg:pb-10 lg:pt-10') &&
+    guideSource.includes('text-[28px] font-semibold leading-[1.08]') &&
+    guideSource.includes('sm:text-[40px]') &&
+    guideSource.includes('lg:text-[48px]') &&
+    guideSource.includes('text-[13px] leading-5 text-[#a8b3c2]') &&
+    guideSource.includes('mt-4 flex min-h-[220px] w-full max-w-5xl flex-col overflow-hidden rounded-[8px] border border-white/[0.12] bg-[#1A1A1A]/90') &&
+    guideSource.includes('sm:mt-8 sm:min-h-[320px] lg:mt-14 lg:min-h-[440px]') &&
+    guideSource.includes('border-b border-white/[0.08] bg-[#1A1A1A]/90 px-3 py-2.5 sm:px-4 sm:py-3') &&
     guideSource.includes('h-2 w-2 rounded-full border border-white/[0.18] bg-white/[0.065]') &&
-    guideSource.includes('ml-4 h-3 w-32 rounded-[3px] border border-white/[0.08] bg-white/[0.065]') &&
-    guideSource.includes('flex min-h-0 flex-1 items-center justify-center px-4 py-10 sm:px-20') &&
-    guideSource.includes('max-w-md -translate-y-4 overflow-hidden rounded-[6px] border border-white/[0.12] bg-[#151617]/95') &&
+    guideSource.includes('ml-2 h-3 w-24 rounded-[3px] border border-white/[0.08] bg-white/[0.065] sm:ml-4 sm:w-32') &&
+    guideSource.includes('flex min-h-0 flex-1 items-center justify-center px-3 py-4 sm:px-12 sm:py-8 lg:px-20 lg:py-10') &&
+    guideSource.includes('max-w-sm overflow-hidden rounded-[6px] border border-white/[0.12] bg-[#151617]/95') &&
+    guideSource.includes('sm:max-w-md sm:-translate-y-2 lg:-translate-y-4') &&
+    guideSource.includes('border-b border-white/[0.08] p-3 sm:p-4') &&
+    guideSource.includes('relative flex w-full cursor-pointer items-center justify-between rounded-[5px] border px-3 py-1.5 text-left text-[13px] transition sm:py-2 sm:text-[14px]') &&
     guideSource.includes('min-w-6 rounded-[3px] border border-white/[0.18] bg-[#0c0c0c]') &&
     guideSource.includes("active ? 'text-white' : 'text-[#8792a3]'") &&
     guideSource.includes('absolute bottom-2 left-0 top-2 w-px') &&
     guideSource.includes('text-current opacity-55') &&
-    guideSource.includes('mt-12 flex flex-col items-center gap-4') &&
-    guideSource.includes('tracking-[0.22em] text-[#8f9aaa]') &&
+    guideSource.includes('mt-4 flex w-full flex-col items-center gap-2 sm:mt-9 sm:gap-3 lg:mt-12 lg:gap-4') &&
+    guideSource.includes('text-[9px] uppercase leading-relaxed tracking-[0.14em] text-[#8f9aaa] sm:text-[10px] sm:tracking-[0.22em]') &&
     guideSource.includes('ALL 4 STEPS TO FINISH CONFIGURATION') &&
     !guideSource.includes('top-1/2 -z-10 h-3/4 w-3/4') &&
     !guideSource.includes('Press Enter') &&

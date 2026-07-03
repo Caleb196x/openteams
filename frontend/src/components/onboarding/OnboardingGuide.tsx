@@ -2237,40 +2237,40 @@ export function OnboardingGuide({
   const renderStepBody = () => {
     if (isWelcome) {
       return (
-        <div className="relative isolate flex min-h-0 flex-1 flex-col items-center overflow-hidden px-6 text-center">
+        <div className="relative isolate flex min-h-0 flex-1 flex-col items-center overflow-hidden px-4 text-center sm:px-6">
           <div className="pointer-events-none absolute inset-0 bg-[#0E0F11]" />
 
-          <div className="relative z-10 flex min-h-0 w-full flex-1 flex-col items-center overflow-y-auto pb-10 pt-10">
-            <div className="mt-16 max-w-4xl">
-              <h1 className="font-sans text-[48px] font-semibold leading-[1.06] tracking-[0] text-[#f5f5f5]">
+          <div className="relative z-10 flex min-h-0 w-full flex-1 flex-col items-center overflow-hidden pb-4 pt-4 sm:pb-8 sm:pt-8 lg:pb-10 lg:pt-10">
+            <div className="mt-2 max-w-4xl sm:mt-8 lg:mt-16">
+              <h1 className="font-sans text-[28px] font-semibold leading-[1.08] tracking-[0] text-[#f5f5f5] sm:text-[40px] sm:leading-[1.07] lg:text-[48px] lg:leading-[1.06]">
                 {t('onboarding.welcome.title')}
               </h1>
-              <p className="mx-auto mt-5 max-w-3xl text-[18px] leading-relaxed text-[#a8b3c2]">
+              <p className="mx-auto mt-2 max-w-2xl text-[13px] leading-5 text-[#a8b3c2] sm:mt-4 sm:text-[16px] sm:leading-relaxed lg:mt-5 lg:max-w-3xl lg:text-[18px]">
                 {t('onboarding.welcome.desc')}
               </p>
             </div>
 
-            <div className="relative mt-14 flex min-h-[440px] w-full max-w-5xl flex-col overflow-hidden rounded-[8px] border border-white/[0.12] bg-[#1A1A1A]/90 p-px shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]">
+            <div className="relative mt-4 flex min-h-[220px] w-full max-w-5xl flex-col overflow-hidden rounded-[8px] border border-white/[0.12] bg-[#1A1A1A]/90 p-px shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)] sm:mt-8 sm:min-h-[320px] lg:mt-14 lg:min-h-[440px]">
               <div
                 className="pointer-events-none absolute inset-0 opacity-[0.025]"
                 style={onboardingNoiseTextureStyle}
               />
-              <div className="relative z-10 flex items-center gap-2 border-b border-white/[0.08] bg-[#1A1A1A]/90 px-4 py-3">
+              <div className="relative z-10 flex items-center gap-2 border-b border-white/[0.08] bg-[#1A1A1A]/90 px-3 py-2.5 sm:px-4 sm:py-3">
                 <div className="h-2 w-2 rounded-full border border-white/[0.18] bg-white/[0.065]" />
                 <div className="h-2 w-2 rounded-full border border-white/[0.18] bg-white/[0.065]" />
                 <div className="h-2 w-2 rounded-full border border-white/[0.18] bg-white/[0.065]" />
-                <div className="ml-4 h-3 w-32 rounded-[3px] border border-white/[0.08] bg-white/[0.065]" />
+                <div className="ml-2 h-3 w-24 rounded-[3px] border border-white/[0.08] bg-white/[0.065] sm:ml-4 sm:w-32" />
               </div>
 
-              <div className="relative z-10 flex min-h-0 flex-1 items-center justify-center px-4 py-10 sm:px-20">
-                <div className="w-full max-w-md -translate-y-4 overflow-hidden rounded-[6px] border border-white/[0.12] bg-[#151617]/95 text-left">
-                  <div className="flex items-center border-b border-white/[0.08] p-4">
+              <div className="relative z-10 flex min-h-0 flex-1 items-center justify-center px-3 py-4 sm:px-12 sm:py-8 lg:px-20 lg:py-10">
+                <div className="w-full max-w-sm overflow-hidden rounded-[6px] border border-white/[0.12] bg-[#151617]/95 text-left sm:max-w-md sm:-translate-y-2 lg:-translate-y-4">
+                  <div className="flex items-center border-b border-white/[0.08] p-3 sm:p-4">
                     <span className="mr-3 font-mono text-[15px] text-[#a8b3c2]">/</span>
                     <span className="min-w-0 flex-1 truncate text-[14px] text-[#f5f5f5]">
                       {selectedWelcomeCommand.label}
                     </span>
                   </div>
-                  <div className="p-2">
+                  <div className="p-1.5 sm:p-2">
                     {welcomeCommandOptions.map(({ id, label, Icon, keyHint }) => {
                       const active = selectedWelcomeCommand.id === id;
                       return (
@@ -2282,7 +2282,7 @@ export function OnboardingGuide({
                           onMouseEnter={() => setSelectedWelcomeCommandId(id)}
                           aria-pressed={active}
                           className={cn(
-                            'relative flex w-full cursor-pointer items-center justify-between rounded-[5px] border px-3 py-2 text-left text-[14px] transition',
+                            'relative flex w-full cursor-pointer items-center justify-between rounded-[5px] border px-3 py-1.5 text-left text-[13px] transition sm:py-2 sm:text-[14px]',
                             active
                               ? 'border-white/[0.1] bg-white/[0.065] text-white'
                               : 'border-transparent text-[#8792a3] hover:border-white/[0.08] hover:bg-white/[0.035] hover:text-[#f5f5f5]',
@@ -2295,7 +2295,7 @@ export function OnboardingGuide({
                               active ? 'bg-white' : 'bg-transparent',
                             )}
                           />
-                          <div className="flex min-w-0 items-center gap-3">
+                          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
                             <Icon className="h-4 w-4 shrink-0 text-current opacity-55" />
                             <span className="truncate">{label}</span>
                           </div>
@@ -2316,18 +2316,18 @@ export function OnboardingGuide({
               </div>
             </div>
 
-            <div className="mt-12 flex flex-col items-center gap-4">
+            <div className="mt-4 flex w-full flex-col items-center gap-2 sm:mt-9 sm:gap-3 lg:mt-12 lg:gap-4">
               <button
                 type="button"
                 onClick={() => void handleWelcomeNext()}
                 disabled={saving}
-                className="inline-flex min-h-12 origin-center cursor-pointer items-center justify-center gap-3 rounded-[6px] border border-white bg-white px-9 py-3 text-[14px] font-semibold text-black shadow-[inset_0_-1px_0_rgba(0,0,0,0.18),0_1px_2px_rgba(0,0,0,0.35)] transition-[background-color,box-shadow,transform] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] will-change-transform hover:-translate-y-[2px] hover:scale-[1.012] hover:bg-[#f7f7f7] hover:shadow-[inset_0_-1px_0_rgba(0,0,0,0.18),0_0_0_1px_rgba(255,255,255,0.55),0_14px_34px_rgba(255,255,255,0.11)] active:translate-y-[1px] active:scale-[0.988] active:bg-[#e7e7e7] active:shadow-[inset_0_1px_2px_rgba(0,0,0,0.22),0_1px_2px_rgba(0,0,0,0.28)] disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex min-h-10 w-full max-w-[280px] origin-center cursor-pointer items-center justify-center gap-3 rounded-[6px] border border-white bg-white px-5 py-2 text-[13px] font-semibold text-black shadow-[inset_0_-1px_0_rgba(0,0,0,0.18),0_1px_2px_rgba(0,0,0,0.35)] transition-[background-color,box-shadow,transform] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] will-change-transform hover:-translate-y-[2px] hover:scale-[1.012] hover:bg-[#f7f7f7] hover:shadow-[inset_0_-1px_0_rgba(0,0,0,0.18),0_0_0_1px_rgba(255,255,255,0.55),0_14px_34px_rgba(255,255,255,0.11)] active:translate-y-[1px] active:scale-[0.988] active:bg-[#e7e7e7] active:shadow-[inset_0_1px_2px_rgba(0,0,0,0.22),0_1px_2px_rgba(0,0,0,0.28)] disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-12 sm:w-auto sm:max-w-[320px] sm:px-9 sm:py-3 sm:text-[14px]"
               >
                 {saving && <LoaderCircle className="h-4 w-4 animate-spin" />}
                 {t('onboarding.welcome.next')}
               </button>
               <p
-                className="font-mono text-[10px] uppercase tracking-[0.22em] text-[#8f9aaa]"
+                className="px-2 text-center font-mono text-[9px] uppercase leading-relaxed tracking-[0.14em] text-[#8f9aaa] sm:text-[10px] sm:tracking-[0.22em]"
                 style={onboardingMonoFont}
               >
                 ALL 4 STEPS TO FINISH CONFIGURATION
