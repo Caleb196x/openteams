@@ -354,6 +354,23 @@ check(
   source,
 );
 check(
+  "worktree conflict resolution opens as a workspace tab page",
+  source.includes('kind: "worktree-conflicts"') &&
+    source.includes("createWorktreeConflictTabId") &&
+    source.includes("openWorktreeConflictTab") &&
+    source.includes("<WorktreeMergeConflictsSection") &&
+    source.includes('surface="page"') &&
+    source.includes("onOpenWorktreeConflictTab={openWorktreeConflictTab}"),
+  source,
+);
+check(
+  "worktree conflict tab refreshes source control when finished",
+  source.includes("notifySourceControlRefreshRequested") &&
+    source.includes("completeWorktreeConflictTab") &&
+    source.includes("closeWorktreeConflictTab(tab)"),
+  source,
+);
+check(
   "desktop sidebar keeps ProjectSidebar inside desktop-only aside",
   source.includes("hidden md:block"),
 );
