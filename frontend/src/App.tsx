@@ -213,6 +213,7 @@ type OnboardingOverlay =
 type CreateProjectOptions = {
   teamId?: string;
   openSessionComposer?: boolean;
+  forceMemberWorkspacePath?: boolean;
 };
 
 type PendingProjectSessionProtocol = {
@@ -463,6 +464,8 @@ function WorkspaceLayout() {
     useState<OnboardingOverlay>(null);
   const [onboardingState, setOnboardingState] =
     useState<OnboardingState | null>(null);
+  const [onboardingAppTransitionActive, setOnboardingAppTransitionActive] =
+    useState(false);
   const [openTabs, setOpenTabs] = useState<WorkspaceTab[]>(() =>
     activeSessionId ? [createSessionTab(activeSessionId)] : [],
   );
@@ -488,6 +491,7 @@ function WorkspaceLayout() {
     startWidth: defaultSidebarWidth,
     scale: 1,
   });
+  const onboardingAppTransitionTimerRef = useRef<number | null>(null);
 
   const loadLeadMember = useCallback(
     async (projectId: string): Promise<Member | null> => {
@@ -730,12 +734,17 @@ function WorkspaceLayout() {
     workspacePath: string | null,
     teamPreset: ChatTeamPreset,
     runtimes: AgentRuntimeStatus[],
+    options?: { forceWorkspacePath?: boolean },
   ): Promise<number> => {
     let created = 0;
     const memberSpecs = buildTemplateMemberSpecs(
       teamPreset,
       workspacePath,
       runtimes,
+    ).map((spec) =>
+      options?.forceWorkspacePath && workspacePath
+        ? { ...spec, workspacePath }
+        : spec,
     );
     for (const spec of memberSpecs) {
       await createProjectAgentMember({
@@ -770,6 +779,26 @@ function WorkspaceLayout() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (onboardingAppTransitionTimerRef.current !== null) {
+        window.clearTimeout(onboardingAppTransitionTimerRef.current);
+      }
+    };
+  }, []);
+
+  const startOnboardingAppTransition = () => {
+    if (typeof window === "undefined") return;
+    if (onboardingAppTransitionTimerRef.current !== null) {
+      window.clearTimeout(onboardingAppTransitionTimerRef.current);
+    }
+    setOnboardingAppTransitionActive(true);
+    onboardingAppTransitionTimerRef.current = window.setTimeout(() => {
+      setOnboardingAppTransitionActive(false);
+      onboardingAppTransitionTimerRef.current = null;
+    }, 420);
+  };
 
   useEffect(() => {
     const handleGuideReset = (event: Event) => {
@@ -1565,6 +1594,7 @@ function WorkspaceLayout() {
           data.default_workspace_path,
           selectedTeamPreset,
           runtimes,
+          { forceWorkspacePath: options?.forceMemberWorkspacePath === true },
         );
         if (templateMemberCount === 0) {
           teamSetupFailed = true;
@@ -1665,7 +1695,7 @@ function WorkspaceLayout() {
     );
   };
 
-  const handleOnboardingCompleted = (
+  const handleOnboardingCompleted = async (
     nextState: OnboardingState,
     options?: {
       createDefaultSession?: boolean;
@@ -1674,11 +1704,10 @@ function WorkspaceLayout() {
     },
   ) => {
     setOnboardingState(nextState);
-    setOnboardingOverlay(null);
     setIsCreateSessionModalOpen(false);
     closeMobileSidebar();
     if (options?.createDefaultSession) {
-      void handleCreateDefaultSession({
+      await handleCreateDefaultSession({
         projectId:
           options.projectId ??
           nextState.created_project_id ??
@@ -1688,7 +1717,9 @@ function WorkspaceLayout() {
           nextState.project_path ??
           activeProjectWorkspacePath,
       });
+      startOnboardingAppTransition();
     }
+    setOnboardingOverlay(null);
   };
 
   const handleCreateOnboardingProject = async ({
@@ -1709,7 +1740,10 @@ function WorkspaceLayout() {
         default_workspace_path: path,
         active_repo_id: null,
       },
-      { teamId: teamId ?? blankTeamId },
+      {
+        teamId: teamId ?? blankTeamId,
+        forceMemberWorkspacePath: true,
+      },
     );
     return { projectId: project.id, sessionId: null };
   };
@@ -1733,9 +1767,6 @@ function WorkspaceLayout() {
 
   const handleOnboardingStateChange = (nextState: OnboardingState) => {
     setOnboardingState(nextState);
-    setOnboardingOverlay((current) =>
-      current ? { ...current, state: nextState } : current,
-    );
   };
 
   const handleUpgradeRead = (nextState: OnboardingState) => {
@@ -1778,7 +1809,11 @@ function WorkspaceLayout() {
     teamPresets,
   };
   return (
-    <div className="h-full w-full flex bg-[var(--canvas)] text-[var(--ink)] font-sans antialiased overflow-hidden selection:bg-[var(--primary)] selection:text-white transition-colors duration-200">
+    <div
+      className={`h-full w-full flex bg-[var(--canvas)] text-[var(--ink)] font-sans antialiased overflow-hidden selection:bg-[var(--primary)] selection:text-white transition-colors duration-200 ${
+        onboardingAppTransitionActive ? "animate-onboarding-app-enter" : ""
+      }`}
+    >
       {toast && (
         <NotificationToast message={toast.message} tone={toast.tone} />
       )}

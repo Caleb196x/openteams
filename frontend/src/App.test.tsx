@@ -136,6 +136,7 @@ check(
   "creates selected team preset members during project creation",
   source.includes("createTeamPresetMembers") &&
     source.includes("buildTemplateMemberSpecs") &&
+    source.includes("options?.forceWorkspacePath && workspacePath") &&
     source.includes("teamPresets.find") &&
     source.includes("for (const spec of memberSpecs)") &&
     source.includes("toast.projectCreatedWithTeam") &&
@@ -147,11 +148,19 @@ check(
   source.includes("handleCreateOnboardingProject") &&
     source.includes("onCreateProjectFromOnboarding={handleCreateOnboardingProject}") &&
     source.includes("default_workspace_path: path") &&
+    source.includes("forceMemberWorkspacePath: true") &&
     source.includes("return { project }") &&
     source.includes("return { projectId: project.id, sessionId: null }") &&
     source.includes("onComplete={handleOnboardingCompleted}") &&
     source.includes("setIsCreateSessionModalOpen(false)") &&
-    source.includes("void handleCreateDefaultSession({"),
+    source.includes("await handleCreateDefaultSession({"),
+  source,
+);
+check(
+  "onboarding handoff animates the app after default session creation",
+  source.includes("onboardingAppTransitionActive") &&
+    source.includes("startOnboardingAppTransition()") &&
+    source.includes("animate-onboarding-app-enter"),
   source,
 );
 check(
