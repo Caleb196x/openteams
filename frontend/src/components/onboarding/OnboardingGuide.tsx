@@ -131,7 +131,7 @@ const executorSelectClassName =
   'w-full [&>button]:h-7 [&>button]:rounded-[3px] [&>button]:border-transparent [&>button]:bg-transparent [&>button]:px-1.5 [&>button]:py-0 [&>button]:font-mono [&>button]:text-[13px] [&>button]:text-[#d4d4d8] [&>button]:shadow-none [&>button]:transition-colors [&>button]:duration-100 [&>button:hover]:border-transparent [&>button:hover]:bg-white/[0.035] [&>button:focus-visible]:border-white/[0.14] [&>button:focus-visible]:bg-white/[0.045] [&>button:focus-visible]:outline-none [&>button[aria-expanded=true]]:border-white/[0.14] [&>button[aria-expanded=true]]:bg-white/[0.045] [&>button[data-placeholder=true]>span]:text-[#6f6f76] [&>button>svg:last-child]:h-3 [&>button>svg:last-child]:w-3 [&>button>svg:last-child]:text-[var(--ink-tertiary)] [&>button:hover>svg:last-child]:text-[#a1a1aa]';
 
 const onboardingProjectInputClassName =
-  'mt-2 w-full rounded-[6px] border border-white/[0.12] bg-[#030303] px-3 font-mono outline-none transition-[background-color,border-color,box-shadow] placeholder:text-[#505766] focus:border-white/[0.46] focus:bg-[#020202] focus:shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_0_0_4px_rgba(94,106,210,0.12)]';
+  'mt-2 w-full rounded-[5px] border border-white/[0.08] bg-[#111214] px-3 font-mono shadow-[inset_0_1px_2px_rgba(0,0,0,0.5)] outline-none transition-[background-color,border-color,box-shadow] placeholder:text-[#5F6672] focus:border-white/[0.24] focus:bg-[#131417] focus:shadow-[inset_0_1px_2px_rgba(0,0,0,0.5),0_0_0_1px_rgba(255,255,255,0.04)]';
 
 const onboardingNoiseTextureStyle = {
   backgroundImage:
@@ -1211,7 +1211,7 @@ export function OnboardingGuide({
 
   const renderExecutorStep = () => (
     <div className="flex h-[340px] items-center justify-center">
-      <div className="h-full w-full max-w-[820px] overflow-hidden rounded-[8px] border border-white/[0.08] bg-[#121212]/90 px-5 py-5 shadow-[0_18px_60px_rgba(0,0,0,0.32)] sm:px-7 sm:py-5">
+      <div className="h-full w-full max-w-[820px] overflow-hidden rounded-[8px] border border-white/[0.08] bg-[#1A1A1A]/90 px-5 py-5 shadow-[0_18px_60px_rgba(0,0,0,0.32)] sm:px-7 sm:py-5">
         <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[6px] bg-[#0a0a0a]/30">
           {runtimeError && (
             <p className="shrink-0 border-b border-yellow-500/25 px-4 py-2.5 font-mono text-[12px] text-yellow-200">
@@ -1274,7 +1274,7 @@ export function OnboardingGuide({
 
   const renderScenarioStep = () => (
     <div className="flex h-[340px] items-center justify-center">
-      <div className="h-full w-full max-w-[820px] rounded-[8px] border border-white/[0.08] bg-[#121212]/90 px-10 py-4 shadow-[0_18px_60px_rgba(0,0,0,0.32)] sm:px-7 sm:py-8">
+      <div className="h-full w-full max-w-[820px] rounded-[8px] border border-white/[0.08] bg-[#1A1A1A]/90 px-10 py-4 shadow-[0_18px_60px_rgba(0,0,0,0.32)] sm:px-7 sm:py-8">
         <section className="mx-auto grid w-full max-w-[760px] gap-3 sm:grid-cols-2">
           {scenarios.map((scenario) => {
             const selected = scenario.key === selectedScenario;
@@ -1349,10 +1349,10 @@ export function OnboardingGuide({
 
   const renderProjectPathStep = () => (
     <div className="flex h-[340px] items-center justify-center">
-      <div className="h-full w-full max-w-[820px] overflow-hidden rounded-[8px] border border-white/[0.11] bg-[#111111]/85 px-5 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),inset_0_0_0_1px_rgba(255,255,255,0.015),0_18px_60px_rgba(0,0,0,0.34)] backdrop-blur-sm sm:px-7 sm:py-5">
-        <div className="grid h-full min-h-0 gap-4 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_minmax(240px,0.74fr)] lg:gap-0 lg:divide-x lg:divide-white/[0.1] lg:overflow-hidden">
+      <div className="h-full w-full max-w-[820px] overflow-hidden rounded-[8px] border border-white/[0.08] bg-[#1A1A1A]/90 px-5 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_18px_60px_rgba(0,0,0,0.30)] backdrop-blur-sm sm:px-7 sm:py-5">
+        <div className="grid h-full min-h-0 gap-4 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_minmax(240px,0.74fr)] lg:gap-0 lg:divide-x lg:divide-white/[0.05] lg:overflow-hidden">
           <section className="flex min-h-0 flex-col lg:pr-6">
-            <label className="block min-w-0 text-[12px] font-medium text-[#a1a1aa]">
+            <label className="block min-w-0 font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-[#8A8F98]">
               {t('onboarding.project.nameTitle')}
               <input
                 value={projectName}
@@ -1362,21 +1362,21 @@ export function OnboardingGuide({
                 }}
                 className={cn(
                   onboardingProjectInputClassName,
-                  'h-9 text-[13px] font-semibold text-[#f5f5f5]',
+                  'h-9 text-[13px] font-semibold normal-case tracking-[0] text-white/[0.92]',
                 )}
                 placeholder={t('onboarding.project.namePlaceholder')}
               />
             </label>
 
-            <section className="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[8px] border border-white/[0.1] bg-[#050505] shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
-              <div className="flex shrink-0 items-center gap-2 border-b border-white/[0.1] px-3 py-2">
-                <span className="min-w-0 flex-1 truncate font-mono text-[12px] tracking-[0.03em] text-[#8f9aaa]">
+            <section className="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[6px] border border-white/[0.08] bg-[#111214] shadow-[inset_0_1px_2px_rgba(0,0,0,0.5)]">
+              <div className="flex shrink-0 items-center gap-2 border-b border-white/[0.05] px-3 py-1.5">
+                <span className="min-w-0 flex-1 truncate font-mono text-[11px] tracking-[0.03em] text-[#8A8F98]">
                   {currentPath || t('onboarding.project.localRoots')}
                 </span>
                 <button
                   type="button"
                   onClick={() => void loadRoots()}
-                  className="flex h-7 w-7 items-center justify-center rounded-[6px] text-[#768295] transition hover:bg-white/[0.05] hover:text-[#f5f5f5]"
+                  className="flex h-6 w-6 items-center justify-center rounded-[4px] text-[#768295] transition hover:bg-white/[0.05] hover:text-[#f5f5f5]"
                   aria-label={t('onboarding.project.roots')}
                   title={t('onboarding.project.roots')}
                 >
@@ -1389,7 +1389,7 @@ export function OnboardingGuide({
                     const parent = getParentPath(currentPath);
                     if (parent) void loadDirectory(parent);
                   }}
-                  className="flex h-7 w-7 items-center justify-center rounded-[6px] text-[#768295] transition hover:bg-white/[0.05] hover:text-[#f5f5f5] disabled:cursor-not-allowed disabled:opacity-35"
+                  className="flex h-6 w-6 items-center justify-center rounded-[4px] text-[#768295] transition hover:bg-white/[0.05] hover:text-[#f5f5f5] disabled:cursor-not-allowed disabled:opacity-35"
                   aria-label={t('onboarding.project.up')}
                   title={t('onboarding.project.up')}
                 >
@@ -1398,7 +1398,7 @@ export function OnboardingGuide({
                 <button
                   type="button"
                   onClick={() => void loadDirectory(projectPath)}
-                  className="flex h-7 w-7 items-center justify-center rounded-[6px] text-[#768295] transition hover:bg-white/[0.05] hover:text-[#f5f5f5]"
+                  className="flex h-6 w-6 items-center justify-center rounded-[4px] text-[#768295] transition hover:bg-white/[0.05] hover:text-[#f5f5f5]"
                   aria-label={t('onboarding.project.refresh')}
                   title={t('onboarding.project.refresh')}
                 >
@@ -1423,7 +1423,8 @@ export function OnboardingGuide({
                         key={`${entry.path}-${directoryEntryTime(entry)}`}
                         className={cn(
                           'group/path-entry flex items-center rounded-[6px] border border-transparent px-2',
-                          selected && 'border-white/[0.12] bg-white/[0.045]',
+                          selected &&
+                            'border-white/[0.08] border-l-white/[0.28] bg-white/[0.05]',
                         )}
                       >
                         <button
@@ -1432,17 +1433,17 @@ export function OnboardingGuide({
                           onClick={() => {
                             if (entry.is_directory) void loadDirectory(entry.path);
                           }}
-                          className="flex min-h-7 min-w-0 flex-1 cursor-pointer items-center gap-2 text-left font-mono text-[12px] leading-none tracking-[0.03em] text-[#8f9aaa] transition hover:text-[#f5f5f5] disabled:cursor-default disabled:opacity-55"
+                          className="flex min-h-6 min-w-0 flex-1 cursor-pointer items-center gap-2 text-left font-mono text-[11px] leading-none tracking-[0.02em] text-[#8A8F98] transition hover:text-[#f5f5f5] disabled:cursor-default disabled:opacity-55"
                         >
                           <Icon
-                            className="h-3.5 w-3.5 shrink-0 text-[#768295]"
+                            className="h-3 w-3 shrink-0 text-[#768295]"
                             strokeWidth={1.5}
                           />
                           <span className="min-w-0 flex-1 truncate">
                             {entry.name}
                           </span>
                           {entry.is_git_repo && (
-                            <span className="font-mono text-[10px] text-emerald-400/80">
+                            <span className="inline-flex h-4 items-center rounded-[3px] border border-emerald-300/[0.14] bg-emerald-400/[0.06] px-1.5 font-mono text-[9px] font-medium uppercase tracking-[0.08em] text-emerald-200/55">
                               git
                             </span>
                           )}
@@ -1455,7 +1456,7 @@ export function OnboardingGuide({
                               void validateProjectPath(entry.path);
                             }}
                             className={cn(
-                              'flex h-6 w-6 shrink-0 items-center justify-center rounded-[6px] text-[#768295] opacity-0 transition hover:bg-white/[0.05] hover:text-[#f5f5f5] group-hover/path-entry:opacity-100',
+                              'flex h-5 w-5 shrink-0 items-center justify-center rounded-[4px] text-[#768295] opacity-0 transition hover:bg-white/[0.05] hover:text-[#f5f5f5] group-hover/path-entry:opacity-100',
                               selected && '!opacity-100',
                             )}
                             aria-label={t('onboarding.project.select')}
@@ -1474,7 +1475,7 @@ export function OnboardingGuide({
 
           <aside className="min-h-0 overflow-y-auto lg:pl-6">
             <div className="space-y-4">
-              <label className="block text-[12px] font-medium text-[#a1a1aa]">
+              <label className="block font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-[#8A8F98]">
                 {t('onboarding.project.selectedPath')}
                 <input
                   value={projectPath}
@@ -1484,7 +1485,7 @@ export function OnboardingGuide({
                   }}
                   className={cn(
                     onboardingProjectInputClassName,
-                    'h-8 truncate text-[12px] tracking-[0.03em] text-[#d4d4d8]',
+                    'h-8 truncate text-[12px] normal-case tracking-[0.03em] text-[#d4d4d8]',
                   )}
                   placeholder={t('onboarding.project.pathPlaceholder')}
                 />
@@ -1494,7 +1495,7 @@ export function OnboardingGuide({
                 type="button"
                 onClick={() => void validateProjectPath(projectPath)}
                 disabled={!projectPath.trim() || pathLoading || pathDetecting}
-                className="inline-flex h-8 cursor-pointer items-center justify-center rounded-[6px] border border-white/[0.1] bg-[#050505] px-3 font-mono text-[11px] tracking-[0.03em] text-[#c9d2df] transition hover:border-white/[0.18] hover:bg-white/[0.045] hover:text-[#f5f5f5] disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex h-8 cursor-pointer items-center justify-center rounded-[5px] border border-white/[0.08] bg-[#111214] px-3 font-mono text-[11px] tracking-[0.03em] text-[#c9d2df] shadow-[inset_0_1px_2px_rgba(0,0,0,0.5)] transition hover:border-white/[0.16] hover:bg-white/[0.045] hover:text-[#f5f5f5] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {t('onboarding.project.validate')}
               </button>
@@ -1515,8 +1516,8 @@ export function OnboardingGuide({
                 !pathDetecting &&
                 projectStatus?.valid &&
                 projectStatus.is_git_repo && (
-                  <p className="flex items-center gap-2 font-mono text-[12px] tracking-[0.03em] text-emerald-400/80">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                  <p className="inline-flex w-fit items-center gap-2 rounded-[4px] border border-emerald-300/[0.14] bg-emerald-400/[0.06] px-2 py-1 font-mono text-[11px] tracking-[0.03em] text-emerald-200/60">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-300/50" />
                     {t('onboarding.project.gitDetected')}
                   </p>
                 )}
@@ -1525,7 +1526,7 @@ export function OnboardingGuide({
                 !pathDetecting &&
                 projectStatus?.valid &&
                 !projectStatus.is_git_repo && (
-                  <div className="grid grid-rows-[1fr] border-t border-white/[0.1] pt-4 transition-[grid-template-rows] duration-200">
+                  <div className="grid grid-rows-[1fr] border-t border-white/[0.05] pt-4 transition-[grid-template-rows] duration-200">
                     <div className="space-y-4 overflow-hidden">
                       <p className="flex items-start gap-2 font-mono text-[12px] leading-relaxed tracking-[0.03em] text-[#8f9aaa]">
                         <Info
@@ -1546,9 +1547,9 @@ export function OnboardingGuide({
                         <span
                           aria-hidden="true"
                           className={cn(
-                            'flex h-3.5 w-3.5 shrink-0 items-center justify-center border bg-[#030303] transition-[background-color,border-color,box-shadow,color] peer-focus-visible:shadow-[0_0_0_1px_rgba(255,255,255,0.16),0_0_0_4px_rgba(94,106,210,0.12)]',
+                            'flex h-3.5 w-3.5 shrink-0 items-center justify-center border bg-[#111214] transition-[background-color,border-color,box-shadow,color] peer-focus-visible:shadow-[0_0_0_1px_rgba(255,255,255,0.16),0_0_0_4px_rgba(94,106,210,0.12)]',
                             initializeGit
-                              ? 'border-white bg-white text-[#050505]'
+                              ? 'border-white bg-white text-[#0E0F11]'
                               : 'border-white/[0.22] text-transparent group-hover:border-white/[0.36]',
                           )}
                         >
@@ -1577,7 +1578,7 @@ export function OnboardingGuide({
                                 event.target.value as GitignoreTemplate,
                               )
                             }
-                            className="mt-2 h-8 w-full rounded-[6px] border border-white/[0.12] bg-[#030303] px-2 font-mono text-[12px] text-[#c9d2df] outline-none transition-[background-color,border-color,box-shadow] focus:border-white/[0.46] focus:bg-[#020202] focus:shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_0_0_4px_rgba(94,106,210,0.12)]"
+                            className="mt-2 h-8 w-full rounded-[5px] border border-white/[0.08] bg-[#111214] px-2 font-mono text-[12px] text-[#c9d2df] shadow-[inset_0_1px_2px_rgba(0,0,0,0.5)] outline-none transition-[background-color,border-color,box-shadow] focus:border-white/[0.24] focus:bg-[#131417]"
                           >
                             {gitignoreTemplates.map((template) => (
                               <option key={template} value={template}>
@@ -1636,7 +1637,7 @@ export function OnboardingGuide({
 
     return (
       <div className="flex h-[340px] items-center justify-center">
-        <div className="h-full w-full max-w-[820px] rounded-[8px] border border-white/[0.08] bg-[#121212]/90 px-5 py-5 shadow-[0_18px_60px_rgba(0,0,0,0.32)] sm:px-7 sm:py-6">
+        <div className="h-full w-full max-w-[820px] rounded-[8px] border border-white/[0.08] bg-[#1A1A1A]/90 px-5 py-5 shadow-[0_18px_60px_rgba(0,0,0,0.32)] sm:px-7 sm:py-6">
           <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.84fr)] lg:gap-10">
             <section className="space-y-3">
               <h3 className="font-mono text-[12px] font-medium tracking-[0] text-[#a1a1aa]">
@@ -1820,7 +1821,7 @@ export function OnboardingGuide({
         className="relative isolate flex min-h-0 flex-1 flex-col items-center overflow-hidden px-6 text-center"
         style={onboardingTextFont}
       >
-        <div className="pointer-events-none absolute inset-0 bg-[#0a0a0a]" />
+        <div className="pointer-events-none absolute inset-0 bg-[#0E0F11]" />
         <div
           className="pointer-events-none absolute inset-0 opacity-[0.032] mix-blend-screen"
           style={onboardingNoiseTextureStyle}
@@ -1851,7 +1852,12 @@ export function OnboardingGuide({
             <h1 className="text-[25px] font-[600] leading-tight tracking-[0] text-[#f4f4f5]">
               {stepTitle}
             </h1>
-            <p className="mx-auto mt-2 max-w-3xl text-[12px] leading-relaxed tracking-[0] text-[#a1a1aa]">
+            <p
+              className={cn(
+                'mx-auto mt-2 max-w-3xl text-[12px] leading-relaxed tracking-[0]',
+                stepKey === 'project_path' ? 'text-[#8A8F98]' : 'text-[#a1a1aa]',
+              )}
+            >
               {stepDescription}
             </p>
           </div>
@@ -1910,7 +1916,9 @@ export function OnboardingGuide({
                 onClick={() => void handleStepNext()}
                 disabled={saving}
                 className={cn(
-                  'inline-flex min-h-10 cursor-pointer items-center justify-center gap-2.5 rounded-[4px] border border-white bg-white px-6 py-2 text-[13px] font-semibold text-black shadow-[inset_0_0_0_1px_rgba(255,255,255,0.92)] transition-[background-color,box-shadow,transform] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-[#f2f2f2] active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60',
+                  stepKey === finalOnboardingStep
+                    ? 'inline-flex min-h-10 cursor-pointer items-center justify-center gap-2.5 rounded-[4px] border border-white bg-[linear-gradient(180deg,#FFFFFF_0%,#F2F2F2_100%)] px-6 py-2 text-[13px] font-semibold text-black shadow-[inset_0_1px_0_rgba(255,255,255,1),inset_0_-1px_0_rgba(0,0,0,0.10),0_1px_2px_rgba(0,0,0,0.28)] transition-[background-color,box-shadow,transform] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-[linear-gradient(180deg,#FFFFFF_0%,#EDEDED_100%)] active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60'
+                    : 'inline-flex min-h-10 cursor-pointer items-center justify-center gap-2.5 rounded-[4px] border border-white bg-white px-6 py-2 text-[13px] font-semibold text-black shadow-[inset_0_0_0_1px_rgba(255,255,255,0.92)] transition-[background-color,box-shadow,transform] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-[#f2f2f2] active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60',
                   stepKey === 'scenario' &&
                     'origin-center will-change-transform hover:-translate-y-[2px] hover:scale-[1.02] hover:shadow-[0_12px_30px_rgba(255,255,255,0.18)] active:translate-y-[1px] active:scale-[0.98] motion-reduce:transform-none',
                 )}
@@ -1934,7 +1942,7 @@ export function OnboardingGuide({
     if (isWelcome) {
       return (
         <div className="relative isolate flex min-h-0 flex-1 flex-col items-center overflow-hidden px-6 text-center">
-          <div className="pointer-events-none absolute inset-0 bg-black" />
+          <div className="pointer-events-none absolute inset-0 bg-[#0E0F11]" />
 
           <div className="relative z-10 flex min-h-0 w-full flex-1 flex-col items-center overflow-y-auto pb-10 pt-10">
             <div className="mt-16 max-w-4xl">
@@ -1946,7 +1954,7 @@ export function OnboardingGuide({
               </p>
             </div>
 
-            <div className="relative mt-14 flex min-h-[440px] w-full max-w-5xl flex-col overflow-hidden rounded-[8px] border border-white/[0.12] bg-[#0a0a0a] p-px shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]">
+            <div className="relative mt-14 flex min-h-[440px] w-full max-w-5xl flex-col overflow-hidden rounded-[8px] border border-white/[0.12] bg-[#1A1A1A]/90 p-px shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]">
               <div
                 className="pointer-events-none absolute inset-0 opacity-[0.025]"
                 style={onboardingNoiseTextureStyle}

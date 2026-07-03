@@ -99,7 +99,8 @@ check(
     guideSource.includes('feTurbulence type=%27fractalNoise%27') &&
     guideSource.includes('opacity-[0.025]') &&
     guideSource.includes('shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]') &&
-    guideSource.includes('flex min-h-[440px] w-full max-w-5xl flex-col overflow-hidden rounded-[8px] border border-white/[0.12] bg-[#0a0a0a]') &&
+    guideSource.includes('pointer-events-none absolute inset-0 bg-[#0E0F11]') &&
+    guideSource.includes('flex min-h-[440px] w-full max-w-5xl flex-col overflow-hidden rounded-[8px] border border-white/[0.12] bg-[#1A1A1A]/90') &&
     guideSource.includes('h-2 w-2 rounded-full border border-white/[0.18] bg-transparent') &&
     guideSource.includes('flex min-h-0 flex-1 items-center justify-center px-4 py-10 sm:px-20') &&
     guideSource.includes('max-w-md -translate-y-4 overflow-hidden rounded-[6px] border border-white/[0.12] bg-[#0a0a0a]') &&
@@ -161,22 +162,26 @@ check(
 
 check(
   'project path step uses the shared onboarding panel with micro Git controls',
-  guideSource.includes('h-full w-full max-w-[820px] overflow-hidden rounded-[8px] border border-white/[0.08] bg-[#121212]/90') &&
+  guideSource.includes('h-full w-full max-w-[820px] overflow-hidden rounded-[8px] border border-white/[0.08] bg-[#1A1A1A]/90') &&
     guideSource.includes('lg:grid-cols-[minmax(0,1fr)_minmax(240px,0.74fr)]') &&
     guideSource.includes('overflow-y-auto lg:grid-cols') &&
     guideSource.includes("gitignoreTemplates = ['node', 'go', 'python', 'none'] as const") &&
     guideSource.includes("grid-rows-[1fr]") &&
     guideSource.includes('chatSessionsApi.initializeWorkspaceGit') &&
-    guideSource.includes('className="flex h-7 w-7 items-center justify-center rounded-[6px] text-[#768295] transition hover:bg-white/[0.05] hover:text-[#f5f5f5]"') &&
-    guideSource.includes('rounded-[6px] border border-white/[0.08] bg-[#0a0a0a]') &&
+    guideSource.includes('className="flex h-6 w-6 items-center justify-center rounded-[4px] text-[#768295] transition hover:bg-white/[0.05] hover:text-[#f5f5f5]"') &&
+    guideSource.includes('rounded-[6px] border border-white/[0.08] bg-[#111214]') &&
+    guideSource.includes('border-l-white/[0.28] bg-white/[0.05]') &&
+    guideSource.includes('border border-emerald-300/[0.14] bg-emerald-400/[0.06]') &&
     !guideSource.includes("0_4px_20px_rgba(95,99,242,0.25)") &&
     guideSource.includes("onboarding.project.gitMissing"),
   guideSource,
 );
 
 check(
-  'configuration steps reuse the welcome page background treatment',
-    guideSource.includes('absolute inset-0 bg-[#0a0a0a]') &&
+  'all onboarding step pages use the create-project base background',
+    guideSource.includes('pointer-events-none absolute inset-0 bg-[#0E0F11]') &&
+    !guideSource.includes("stepKey === 'project_path' ? 'bg-[#0E0F11]' : 'bg-[#0a0a0a]'") &&
+    !guideSource.includes('pointer-events-none absolute inset-0 bg-black') &&
     guideSource.includes('opacity-[0.032] mix-blend-screen') &&
     guideSource.includes('items-center justify-center overflow-y-auto py-8') &&
     guideSource.includes('relative mt-7 w-full max-w-5xl p-0 text-left') &&
@@ -186,6 +191,7 @@ check(
     guideSource.includes("? 'bg-[#f4f4f5]'") &&
     guideSource.includes("? 'bg-white/[0.28]'") &&
     guideSource.includes(": 'bg-white/[0.15]'") &&
+    !guideSource.includes('const topProgressPercent =') &&
     guideSource.includes('flex h-[340px] items-center justify-center') &&
     !guideSource.includes('radial-gradient') &&
     !guideSource.includes("backgroundSize: stepKey === 'project_path'"),
@@ -199,11 +205,18 @@ check(
     guideSource.includes('renderProjectPathStep') &&
     guideSource.includes('renderAppearanceStep') &&
     guideSource.includes('flex h-[340px] items-center justify-center') &&
-    guideSource.includes('h-full w-full max-w-[820px] rounded-[8px] border border-white/[0.08] bg-[#121212]/90') &&
-    guideSource.includes('h-full w-full max-w-[820px] overflow-hidden rounded-[8px] border border-white/[0.08] bg-[#121212]/90') &&
+    guideSource.includes('h-full w-full max-w-[820px] rounded-[8px] border border-white/[0.08] bg-[#1A1A1A]/90') &&
+    guideSource.includes('h-full w-full max-w-[820px] overflow-hidden rounded-[8px] border border-white/[0.08] bg-[#1A1A1A]/90') &&
+    !guideSource.includes('bg-[#121212]/90') &&
     guideSource.includes('px-5 py-5 shadow-[0_18px_60px_rgba(0,0,0,0.32)] sm:px-7 sm:py-5') &&
     guideSource.includes('md:grid-cols-[minmax(160px,1fr)_190px_230px]') &&
     guideSource.includes("const executorSelectClassName =") &&
+    guideSource.includes('text-[25px] font-[600] leading-tight tracking-[0] text-[#f4f4f5]') &&
+    !guideSource.includes('text-[22px] font-medium text-white/[0.92]') &&
+    guideSource.includes('font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-[#8A8F98]') &&
+    guideSource.includes('shadow-[inset_0_1px_2px_rgba(0,0,0,0.5)]') &&
+    guideSource.includes('bg-[linear-gradient(180deg,#FFFFFF_0%,#F2F2F2_100%)]') &&
+    guideSource.includes('shadow-[inset_0_1px_0_rgba(255,255,255,1),inset_0_-1px_0_rgba(0,0,0,0.10),0_1px_2px_rgba(0,0,0,0.28)]') &&
     guideSource.includes('[&>button]:h-7 [&>button]:rounded-[3px]') &&
     guideSource.includes('[&>button]:border-transparent [&>button]:bg-transparent') &&
     guideSource.includes('[&>button:hover]:border-transparent [&>button:hover]:bg-white/[0.035]') &&
