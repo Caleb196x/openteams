@@ -1811,12 +1811,20 @@ async fn collect_shared_paths(
         .collect::<BTreeSet<_>>();
     let committed_paths_by_session =
         collect_committed_path_times_by_session(pool, context, &shared_session_ids).await?;
+    let head_commit_times_by_path =
+        last_head_commit_times_for_paths(&context.workspace_path, &target_paths);
     for shared in shared_candidates {
-        let committed_after_observation = committed_paths_by_session
+        let delivery_committed_after_observation = committed_paths_by_session
             .get(&shared.session_id)
             .and_then(|paths| paths.get(&shared.path))
             .map(|committed_at| committed_at >= &shared.last_observed_at)
             .unwrap_or(false);
+        let head_committed_after_observation = head_commit_times_by_path
+            .get(&shared.path)
+            .map(|committed_at| committed_at >= &shared.last_observed_at)
+            .unwrap_or(false);
+        let committed_after_observation =
+            delivery_committed_after_observation || head_committed_after_observation;
         if committed_after_observation {
             tracing::debug!(
                 project_id = %context.project_id,
@@ -1826,6 +1834,8 @@ async fn collect_shared_paths(
                 shared_path = %shared.path,
                 shared_session_id = %shared.session_id,
                 last_observed_at = %shared.last_observed_at,
+                delivery_committed_after_observation,
+                head_committed_after_observation,
                 "source-control collect_shared_paths ignored committed shared-file observation"
             );
             continue;
@@ -1936,6 +1946,37 @@ fn invalidate_source_control_session_caches(session_id: Uuid) {
 
 fn elapsed_ms(duration: Duration) -> u64 {
     duration.as_millis().min(u128::from(u64::MAX)) as u64
+}
+
+fn last_head_commit_times_for_paths(
+    workspace_path: &Path,
+    paths: &[String],
+) -> HashMap<String, DateTime<Utc>> {
+    let git = GitCli::new();
+    let mut times = HashMap::new();
+    for path in paths {
+        let Ok(output) = git.git(
+            workspace_path,
+            [
+                "--no-optional-locks",
+                "log",
+                "-1",
+                "--format=%cI",
+                "--",
+                path,
+            ],
+        ) else {
+            continue;
+        };
+        let Some(line) = output.lines().find(|line| !line.trim().is_empty()) else {
+            continue;
+        };
+        let Ok(committed_at) = DateTime::parse_from_rfc3339(line.trim()) else {
+            continue;
+        };
+        times.insert(path.clone(), committed_at.with_timezone(&Utc));
+    }
+    times
 }
 
 fn source_control_cache_epoch() -> u64 {
