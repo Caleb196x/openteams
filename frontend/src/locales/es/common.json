@@ -152,6 +152,7 @@
   "onboarding.project.gitError.invalid_gitignore_template": "Esa plantilla .gitignore no está disponible. Elige otra plantilla.",
   "onboarding.project.gitError.git_init_failed": "No se pudo inicializar Git en esta carpeta.",
   "onboarding.project.gitError.gitignore_write_failed": "Git se inicializó, pero no se pudo escribir el archivo .gitignore.",
+  "onboarding.project.gitError.gitignore_commit_failed": "Git se inicializó, pero no se pudo confirmar el .gitignore generado.",
   "onboarding.project.initializeGit": "Initialize Git repository",
   "onboarding.project.initializeAction": "Initialize",
   "onboarding.project.initializeFailed": "Failed to initialize Git repository.",

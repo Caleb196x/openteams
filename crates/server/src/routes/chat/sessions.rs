@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, HashSet},
-    path::{Component, PathBuf},
+    path::{Component, Path, PathBuf},
     sync::LazyLock,
 };
 
@@ -2247,6 +2247,7 @@ pub enum WorkspaceGitErrorCode {
     InvalidGitignoreTemplate,
     GitInitFailed,
     GitignoreWriteFailed,
+    GitignoreCommitFailed,
 }
 
 impl WorkspaceGitErrorCode {
@@ -2260,6 +2261,9 @@ impl WorkspaceGitErrorCode {
             Self::InvalidGitignoreTemplate => "Selected .gitignore template is not available.",
             Self::GitInitFailed => "Failed to initialize Git repository for this workspace.",
             Self::GitignoreWriteFailed => "Failed to write .gitignore for this workspace.",
+            Self::GitignoreCommitFailed => {
+                "Failed to commit the generated .gitignore for this workspace."
+            }
         }
     }
 }
@@ -2275,6 +2279,7 @@ impl std::fmt::Display for WorkspaceGitErrorCode {
             Self::InvalidGitignoreTemplate => "invalid_gitignore_template",
             Self::GitInitFailed => "git_init_failed",
             Self::GitignoreWriteFailed => "gitignore_write_failed",
+            Self::GitignoreCommitFailed => "gitignore_commit_failed",
         };
         f.write_str(value)
     }
@@ -2339,6 +2344,7 @@ mod gitignore_templates {
 
     const TEMPLATE_PREFIX: &str = "templates/";
     const TEMPLATE_SUFFIX: &str = ".gitignore";
+    const OPENTEAMS_IGNORE_ENTRY: &str = ".openteams/";
 
     #[derive(Debug, Clone)]
     struct GitignoreTemplateRecord {
@@ -2377,12 +2383,10 @@ mod gitignore_templates {
     pub async fn write_template(
         workspace_path: &Path,
         id: &str,
-    ) -> Result<(), WorkspaceGitErrorData> {
+    ) -> Result<bool, WorkspaceGitErrorData> {
         let body = read_template(id)
             .ok_or_else(|| workspace_git_error(WorkspaceGitErrorCode::InvalidGitignoreTemplate))?;
-        if body.is_empty() {
-            return Ok(());
-        }
+        let body = with_openteams_ignore_entry(body);
 
         let gitignore_path = workspace_path.join(".gitignore");
         match tokio::fs::OpenOptions::new()
@@ -2393,15 +2397,36 @@ mod gitignore_templates {
         {
             Ok(mut file) => {
                 use tokio::io::AsyncWriteExt;
-                file.write_all(body.as_bytes())
-                    .await
-                    .map_err(|_| workspace_git_error(WorkspaceGitErrorCode::GitignoreWriteFailed))
+                file.write_all(body.as_bytes()).await.map_err(|_| {
+                    workspace_git_error(WorkspaceGitErrorCode::GitignoreWriteFailed)
+                })?;
+                Ok(true)
             }
-            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
             Err(_) => Err(workspace_git_error(
                 WorkspaceGitErrorCode::GitignoreWriteFailed,
             )),
         }
+    }
+
+    fn with_openteams_ignore_entry(mut body: String) -> String {
+        if body
+            .lines()
+            .any(|line| line.trim() == OPENTEAMS_IGNORE_ENTRY)
+        {
+            return body;
+        }
+
+        if !body.is_empty() && !body.ends_with('\n') {
+            body.push('\n');
+        }
+        if !body.is_empty() {
+            body.push('\n');
+        }
+        body.push_str("# OpenTeams runtime files\n");
+        body.push_str(OPENTEAMS_IGNORE_ENTRY);
+        body.push('\n');
+        body
     }
 
     fn find_record(id: &str) -> Option<&'static GitignoreTemplateRecord> {
@@ -2600,6 +2625,53 @@ mod gitignore_templates {
     }
 }
 
+fn commit_generated_gitignore(workspace_path: &Path) -> Result<(), WorkspaceGitErrorData> {
+    let error = || workspace_git_error(WorkspaceGitErrorCode::GitignoreCommitFailed);
+    let repo = git2::Repository::open(workspace_path).map_err(|_| error())?;
+    let mut index = repo.index().map_err(|_| error())?;
+    index
+        .add_path(Path::new(".gitignore"))
+        .map_err(|_| error())?;
+    index.write().map_err(|_| error())?;
+
+    let tree_id = index.write_tree().map_err(|_| error())?;
+    let tree = repo.find_tree(tree_id).map_err(|_| error())?;
+    let signature = repo
+        .signature()
+        .or_else(|_| git2::Signature::now("openteams", "noreply@openteams.com"))
+        .map_err(|_| error())?;
+
+    let parents = match repo.head() {
+        Ok(head) => head
+            .target()
+            .and_then(|oid| repo.find_commit(oid).ok())
+            .map(|commit| vec![commit])
+            .unwrap_or_default(),
+        Err(err)
+            if matches!(
+                err.code(),
+                git2::ErrorCode::UnbornBranch | git2::ErrorCode::NotFound
+            ) =>
+        {
+            Vec::new()
+        }
+        Err(_) => return Err(error()),
+    };
+    let parent_refs = parents.iter().collect::<Vec<_>>();
+
+    repo.commit(
+        Some("HEAD"),
+        &signature,
+        &signature,
+        "Add .gitignore",
+        &tree,
+        &parent_refs,
+    )
+    .map_err(|_| error())?;
+
+    Ok(())
+}
+
 pub(crate) async fn validate_workspace_path_status(
     workspace_path: &str,
 ) -> ValidateWorkspacePathResponse {
@@ -2713,8 +2785,14 @@ pub async fn initialize_workspace_git_endpoint(
     }
 
     if let Some(template) = template.as_deref() {
-        if let Err(error) = gitignore_templates::write_template(&parsed_path, template).await {
-            return Ok(workspace_git_bad_request(error));
+        match gitignore_templates::write_template(&parsed_path, template).await {
+            Ok(true) if initialized => {
+                if let Err(error) = commit_generated_gitignore(&parsed_path) {
+                    return Ok(workspace_git_bad_request(error));
+                }
+            }
+            Ok(_) => {}
+            Err(error) => return Ok(workspace_git_bad_request(error)),
         }
     }
 
@@ -2864,11 +2942,79 @@ mod tests {
         assert_eq!(data.gitignore_template.as_deref(), Some("node"));
         assert!(data.status.valid);
         assert!(data.status.is_git_repo);
-        assert!(git2::Repository::open(plain_dir.path()).is_ok());
+        let repo = git2::Repository::open(plain_dir.path()).expect("open initialized repo");
 
         let gitignore = fs::read_to_string(plain_dir.path().join(".gitignore"))
             .expect("read generated .gitignore");
         assert!(gitignore.contains("node_modules/"));
+        assert!(gitignore.contains(".openteams/"));
+
+        let commit = repo
+            .head()
+            .expect("repo has head after gitignore commit")
+            .peel_to_commit()
+            .expect("head points to gitignore commit");
+        assert_eq!(commit.message(), Some("Add .gitignore"));
+        assert!(
+            commit
+                .tree()
+                .expect("read commit tree")
+                .get_path(Path::new(".gitignore"))
+                .is_ok()
+        );
+        let committed_gitignore = commit
+            .tree()
+            .expect("read commit tree")
+            .get_path(Path::new(".gitignore"))
+            .expect("gitignore is committed")
+            .to_object(&repo)
+            .expect("read gitignore object")
+            .peel_to_blob()
+            .expect("gitignore is a blob");
+        assert!(
+            std::str::from_utf8(committed_gitignore.content())
+                .expect("gitignore is utf-8")
+                .contains(".openteams/")
+        );
+        assert!(
+            repo.statuses(None)
+                .expect("read repo status after gitignore commit")
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn initialize_workspace_git_commits_only_generated_gitignore() {
+        let plain_dir = tempfile::tempdir().expect("create plain dir");
+        fs::write(
+            plain_dir.path().join("app.js"),
+            "console.log('left untracked');\n",
+        )
+        .expect("write existing project file");
+
+        let (_, ResponseJson(response)) =
+            initialize_workspace_git_endpoint(Json(InitializeWorkspaceGitRequest {
+                workspace_path: plain_dir.path().to_string_lossy().to_string(),
+                gitignore_template: Some("Node".to_string()),
+            }))
+            .await
+            .expect("initialize git workspace");
+        response.into_data().expect("git init response data");
+
+        let repo = git2::Repository::open(plain_dir.path()).expect("open initialized repo");
+        let commit = repo
+            .head()
+            .expect("repo has head after gitignore commit")
+            .peel_to_commit()
+            .expect("head points to gitignore commit");
+        let tree = commit.tree().expect("read commit tree");
+        assert!(tree.get_path(Path::new(".gitignore")).is_ok());
+        assert!(tree.get_path(Path::new("app.js")).is_err());
+        assert!(
+            repo.status_file(Path::new("app.js"))
+                .expect("read app.js status")
+                .contains(git2::Status::WT_NEW)
+        );
     }
 
     #[tokio::test]
@@ -2929,6 +3075,12 @@ mod tests {
         assert_eq!(
             fs::read_to_string(&gitignore_path).expect("read existing gitignore"),
             "custom\n"
+        );
+        assert!(
+            git2::Repository::open(plain_dir.path())
+                .expect("open initialized repo")
+                .head()
+                .is_err()
         );
     }
 

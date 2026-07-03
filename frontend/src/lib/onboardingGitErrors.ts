@@ -15,6 +15,7 @@ const workspaceGitErrorKeys = {
   invalid_gitignore_template: `${gitErrorKeyPrefix}.invalid_gitignore_template`,
   git_init_failed: `${gitErrorKeyPrefix}.git_init_failed`,
   gitignore_write_failed: `${gitErrorKeyPrefix}.gitignore_write_failed`,
+  gitignore_commit_failed: `${gitErrorKeyPrefix}.gitignore_commit_failed`,
 } satisfies Record<WorkspaceGitErrorCode, string>;
 
 const genericGitErrorKey = `${gitErrorKeyPrefix}.generic`;

@@ -56,6 +56,7 @@ const requiredLocaleKeys = [
   'onboarding.project.gitError.invalid_gitignore_template',
   'onboarding.project.gitError.git_init_failed',
   'onboarding.project.gitError.gitignore_write_failed',
+  'onboarding.project.gitError.gitignore_commit_failed',
   'onboarding.project.initializeGit',
   'onboarding.project.initializeAction',
   'onboarding.project.initializeFailed',

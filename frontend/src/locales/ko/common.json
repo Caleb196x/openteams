@@ -152,6 +152,7 @@
   "onboarding.project.gitError.invalid_gitignore_template": "해당 .gitignore 템플릿을 사용할 수 없습니다. 다른 템플릿을 선택하세요.",
   "onboarding.project.gitError.git_init_failed": "이 폴더에서 Git을 초기화하지 못했습니다.",
   "onboarding.project.gitError.gitignore_write_failed": "Git은 초기화되었지만 .gitignore 파일을 쓸 수 없습니다.",
+  "onboarding.project.gitError.gitignore_commit_failed": "Git은 초기화되었지만 생성된 .gitignore 파일을 커밋할 수 없습니다.",
   "onboarding.project.initializeGit": "Initialize Git repository",
   "onboarding.project.initializeAction": "Initialize",
   "onboarding.project.initializeFailed": "Failed to initialize Git repository.",

@@ -152,6 +152,7 @@
   "onboarding.project.gitError.invalid_gitignore_template": "Ce modèle .gitignore n’est pas disponible. Choisissez un autre modèle.",
   "onboarding.project.gitError.git_init_failed": "Git n’a pas pu être initialisé dans ce dossier.",
   "onboarding.project.gitError.gitignore_write_failed": "Git a été initialisé, mais le fichier .gitignore n’a pas pu être écrit.",
+  "onboarding.project.gitError.gitignore_commit_failed": "Git a été initialisé, mais le fichier .gitignore généré n’a pas pu être validé.",
   "onboarding.project.initializeGit": "Initialize Git repository",
   "onboarding.project.initializeAction": "Initialize",
   "onboarding.project.initializeFailed": "Failed to initialize Git repository.",
