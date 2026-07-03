@@ -143,6 +143,8 @@
   "onboarding.project.gitignore.python": "Python",
   "onboarding.project.gitignoreTemplate": ".gitignore 模板",
   "onboarding.project.initializeGit": "初始化 Git 仓库",
+  "onboarding.project.initializeAction": "初始化",
+  "onboarding.project.initializeFailed": "初始化 Git 仓库失败。",
   "onboarding.project.gitNo": "否",
   "onboarding.project.gitStatus": "Git 仓库",
   "onboarding.project.gitYes": "是",

@@ -1235,10 +1235,14 @@ function WorkspaceLayout() {
       );
       return;
     }
+    const defaultSessionTitle = translate(
+      'createSession.defaultTitle',
+      'Default Session',
+    );
 
     try {
       const backendSession = await projectApi.createSession(projectId, {
-        title: null,
+        title: defaultSessionTitle,
         workspace_path: options?.workspacePath ?? activeProjectWorkspacePath ?? null,
       });
       const mappedSession = mapSession(backendSession, {

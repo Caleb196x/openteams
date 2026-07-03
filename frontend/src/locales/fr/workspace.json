@@ -83,6 +83,7 @@
   "createSession.shrink": "Réduire le composeur de tâche",
   "createSession.switchTaskMode": "Changer de mode de tâche",
   "createSession.taskSentToast": "Tâche envoyée à {member}.",
+  "createSession.defaultTitle": "Session par défaut",
   "createSession.title": "Nouvelle session",
   "createSession.workflowMode": "Workflow",
   "linkedWorkItems.changeStatusFor": "Modifier le statut de {title}",

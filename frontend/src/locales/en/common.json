@@ -143,6 +143,8 @@
   "onboarding.project.gitignore.python": "Python",
   "onboarding.project.gitignoreTemplate": ".gitignore template",
   "onboarding.project.initializeGit": "Initialize Git repository",
+  "onboarding.project.initializeAction": "Initialize",
+  "onboarding.project.initializeFailed": "Failed to initialize Git repository.",
   "onboarding.project.gitNo": "No",
   "onboarding.project.gitStatus": "Git repository",
   "onboarding.project.gitYes": "Yes",

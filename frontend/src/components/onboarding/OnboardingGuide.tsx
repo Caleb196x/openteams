@@ -103,7 +103,7 @@ interface OnboardingGuideProps {
   onComplete: (
     state: OnboardingState,
     options?: OnboardingCompleteOptions,
-  ) => void;
+  ) => void | Promise<void>;
   onStateChange?: (state: OnboardingState) => void;
   onUpgradeRead: (state: OnboardingState) => void;
 }
@@ -803,6 +803,32 @@ export function OnboardingGuide({
     return { name, path, status };
   };
 
+  const initializeProjectWorkspaceGit = async (path: string) => {
+    const initialized = await chatSessionsApi.initializeWorkspaceGit({
+      workspace_path: path,
+      gitignore_template: gitignoreTemplate === 'none' ? null : gitignoreTemplate,
+    });
+    setProjectStatus(initialized.status);
+    return initialized.status;
+  };
+
+  const handleInitializeProjectGit = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const projectDraft = await validateProjectDraft();
+      if (!projectDraft || projectDraft.status.is_git_repo) return;
+      await initializeProjectWorkspaceGit(projectDraft.path);
+      setPathError(null);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : t('onboarding.project.initializeFailed'),
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleFinish = async () => {
     const projectDraft = await validateProjectDraft();
     if (!projectDraft) return;
@@ -811,12 +837,7 @@ export function OnboardingGuide({
     setError(null);
     try {
       if (!projectDraft.status.is_git_repo && initializeGit) {
-        const initialized = await chatSessionsApi.initializeWorkspaceGit({
-          workspace_path: projectDraft.path,
-          gitignore_template:
-            gitignoreTemplate === 'none' ? null : gitignoreTemplate,
-        });
-        setProjectStatus(initialized.status);
+        await initializeProjectWorkspaceGit(projectDraft.path);
       }
 
       const createdProject = await onCreateProjectFromOnboarding({
@@ -831,7 +852,7 @@ export function OnboardingGuide({
         created_project_id: createdProject.projectId,
       });
       applyState(state);
-      onComplete(state, {
+      await onComplete(state, {
         createDefaultSession: true,
         projectId: createdProject.projectId,
         workspacePath: projectDraft.path,
@@ -974,7 +995,7 @@ export function OnboardingGuide({
     try {
       const state = await onboardingApi.complete(currentPayload(finalOnboardingStep));
       applyState(state);
-      onComplete(state);
+      await onComplete(state);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : t('onboarding.error.completeFailed'),
@@ -1461,10 +1482,19 @@ export function OnboardingGuide({
     </div>
   );
 
-  const renderProjectPathStep = () => (
-    <div className="flex h-[340px] items-center justify-center">
-      <div className="h-full w-full max-w-[820px] overflow-hidden rounded-[8px] border border-white/[0.08] bg-[#1A1A1A]/90 px-5 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_18px_60px_rgba(0,0,0,0.30)] backdrop-blur-sm sm:px-7 sm:py-5">
-        <div className="grid h-full min-h-0 gap-4 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_minmax(240px,0.74fr)] lg:gap-0 lg:divide-x lg:divide-white/[0.05] lg:overflow-hidden">
+  const renderProjectPathStep = () => {
+    const projectConfigurationError = pathError || error;
+    const showInitializeGitAction = Boolean(
+      projectPath.trim() &&
+        initializeGit &&
+        projectStatus?.valid &&
+        !projectStatus.is_git_repo,
+    );
+
+    return (
+      <div className="flex h-[340px] items-center justify-center">
+        <div className="h-full w-full max-w-[820px] overflow-hidden rounded-[8px] border border-white/[0.08] bg-[#1A1A1A]/90 px-5 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_18px_60px_rgba(0,0,0,0.30)] backdrop-blur-sm sm:px-7 sm:py-5">
+          <div className="grid h-full min-h-0 gap-4 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_minmax(240px,0.74fr)] lg:gap-0 lg:divide-x lg:divide-white/[0.05] lg:overflow-hidden">
           <section className="flex min-h-0 flex-col lg:pr-6">
             <label className="block min-w-0 font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-[#8A8F98]">
               {t('onboarding.project.nameTitle')}
@@ -1642,8 +1672,9 @@ export function OnboardingGuide({
             </section>
           </section>
 
-          <aside className="min-h-0 overflow-y-auto lg:pl-6">
-            <div className="space-y-4">
+          <aside className="flex min-h-0 flex-col lg:pl-6">
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <div className="space-y-4">
               <label className="block font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-[#8A8F98]">
                 {t('onboarding.project.selectedPath')}
                 <input
@@ -1748,17 +1779,33 @@ export function OnboardingGuide({
                   </div>
                 )}
 
-              {(pathError || error) && (
-                <p className="font-mono text-[12px] leading-relaxed tracking-[0.03em] text-red-400">
-                  {pathError || error}
-                </p>
+              </div>
+            </div>
+            <div className="mt-4 flex min-h-[42px] shrink-0 items-end justify-between gap-3 pt-2">
+              <div className="min-w-0 flex-1">
+                {projectConfigurationError && (
+                  <p className="font-mono text-[12px] leading-relaxed tracking-[0.03em] text-red-400">
+                    {projectConfigurationError}
+                  </p>
+                )}
+              </div>
+              {showInitializeGitAction && (
+                <button
+                  type="button"
+                  onClick={() => void handleInitializeProjectGit()}
+                  disabled={saving || pathDetecting}
+                  className="inline-flex h-7 shrink-0 cursor-pointer items-center justify-center rounded-[4px] border border-white/[0.14] bg-white/[0.06] px-3 font-mono text-[11px] font-medium tracking-[0.03em] text-[#d4d4d8] transition hover:border-white/[0.24] hover:bg-white/[0.1] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {t('onboarding.project.initializeAction')}
+                </button>
               )}
             </div>
           </aside>
         </div>
       </div>
     </div>
-  );
+    );
+  };
 
   const renderAppearanceStep = () => {
     const languageOptions: Array<{ id: Locale; label: string }> = [
@@ -2033,7 +2080,7 @@ export function OnboardingGuide({
             </div>
           </div>
 
-          {error && (
+          {error && stepKey !== 'project_path' && (
             <p className="mt-4 max-w-3xl text-center text-[12px] leading-relaxed text-red-300">
               {error}
             </p>
@@ -2043,17 +2090,23 @@ export function OnboardingGuide({
             <div className="flex min-h-10 flex-wrap items-center justify-center gap-3 leading-none sm:justify-start">
               <button
                 type="button"
-                onClick={() => void handleSkip()}
-                disabled={saving}
-                className="inline-flex h-10 cursor-pointer items-center justify-center px-0 py-2 text-[12px] font-medium leading-none text-[rgba(255,255,255,0.35)] transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={() => {
+                  if (saving) return;
+                  void handleSkip();
+                }}
+                aria-disabled={saving}
+                className="inline-flex h-10 cursor-pointer items-center justify-center px-0 py-2 text-[12px] font-medium leading-none text-[rgba(255,255,255,0.35)] transition-colors hover:text-white"
               >
                 {t('onboarding.action.skip')}
               </button>
               <button
                 type="button"
-                onClick={handleStepBack}
-                disabled={saving || activeStepIndex === 0}
-                className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 px-3 py-2 text-[12px] font-medium leading-none text-[rgba(255,255,255,0.35)] transition-colors hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+                onClick={() => {
+                  if (saving || activeStepIndex === 0) return;
+                  handleStepBack();
+                }}
+                aria-disabled={saving || activeStepIndex === 0}
+                className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 px-3 py-2 text-[12px] font-medium leading-none text-[rgba(255,255,255,0.35)] transition-colors hover:text-white"
               >
                 {t('onboarding.action.back')}
                 <span className="inline-flex items-center gap-1 font-mono text-[10px] leading-none text-white/35">

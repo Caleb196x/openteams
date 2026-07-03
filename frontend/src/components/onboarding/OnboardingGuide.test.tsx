@@ -41,6 +41,8 @@ const requiredLocaleKeys = [
   'onboarding.project.gitMissing',
   'onboarding.project.gitignoreTemplate',
   'onboarding.project.initializeGit',
+  'onboarding.project.initializeAction',
+  'onboarding.project.initializeFailed',
   'onboarding.project.nameRequired',
   'onboarding.project.namePlaceholder',
   'onboarding.project.nameTitle',
@@ -196,6 +198,29 @@ check(
 );
 
 check(
+  'project creation errors stay in the lower-right project configuration area',
+  guideSource.includes('const projectConfigurationError = pathError || error;') &&
+    guideSource.includes('className="mt-4 flex min-h-[42px] shrink-0 items-end justify-between gap-3 pt-2"') &&
+    guideSource.includes('projectConfigurationError &&') &&
+    guideSource.includes("error && stepKey !== 'project_path'") &&
+    !guideSource.includes('{(pathError || error) &&'),
+  guideSource,
+);
+
+check(
+  'project path step exposes a compact lower-right Git initialize action',
+  guideSource.includes('const handleInitializeProjectGit = async () =>') &&
+    guideSource.includes('showInitializeGitAction') &&
+    guideSource.includes('initializeGit &&') &&
+    guideSource.includes('!projectStatus.is_git_repo') &&
+    guideSource.includes('onClick={() => void handleInitializeProjectGit()}') &&
+    guideSource.includes("t('onboarding.project.initializeAction')") &&
+    guideSource.includes('h-7 shrink-0') &&
+    guideSource.includes("t('onboarding.project.initializeFailed')"),
+  guideSource,
+);
+
+check(
   'all onboarding step pages use the create-project base background',
     guideSource.includes('pointer-events-none absolute inset-0 bg-[#0E0F11]') &&
     !guideSource.includes("stepKey === 'project_path' ? 'bg-[#0E0F11]' : 'bg-[#0a0a0a]'") &&
@@ -319,6 +344,15 @@ check(
 );
 
 check(
+  'configuration footer keeps left actions visually stable while saving',
+  guideSource.includes('aria-disabled={saving}') &&
+    guideSource.includes('if (saving) return;') &&
+    guideSource.includes('aria-disabled={saving || activeStepIndex === 0}') &&
+    !guideSource.includes('\n                disabled={saving || activeStepIndex === 0}'),
+  guideSource,
+);
+
+check(
   'scenario cards support arrow-key selection',
   guideSource.includes("['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']") &&
     guideSource.includes("activeStepKey === 'scenario'") &&
@@ -355,13 +389,14 @@ check(
   guideSource.includes('await onboardingApi.complete') &&
     guideSource.includes('path: projectDraft.path') &&
     guideSource.includes('created_project_id: createdProject.projectId') &&
-    guideSource.includes('onComplete(state, {') &&
+    guideSource.includes('await onComplete(state, {') &&
     guideSource.includes('createDefaultSession: true') &&
     appSource.includes('onCreateProjectFromOnboarding={handleCreateOnboardingProject}') &&
     appSource.includes('return { projectId: project.id, sessionId: null }') &&
     appSource.includes('handleOnboardingCompleted') &&
     appSource.includes('setIsCreateSessionModalOpen(false)') &&
-    appSource.includes('void handleCreateDefaultSession({') &&
+    appSource.includes('await handleCreateDefaultSession({') &&
+    appSource.includes('startOnboardingAppTransition()') &&
     read('../../locales/zh/common.json').includes(
       '"onboarding.action.startNow": "创建会话"',
     ),
@@ -379,9 +414,10 @@ check(
 );
 
 check(
-  'onboarding state changes keep the active overlay state synchronized',
-  appSource.includes('setOnboardingOverlay((current) =>') &&
-    appSource.includes('current ? { ...current, state: nextState } : current'),
+  'onboarding state changes do not feed saved progress back into the mounted guide',
+  appSource.includes('const handleOnboardingStateChange = (nextState: OnboardingState) => {') &&
+    appSource.includes('setOnboardingState(nextState);') &&
+    !appSource.includes('current ? { ...current, state: nextState } : current'),
   appSource,
 );
 

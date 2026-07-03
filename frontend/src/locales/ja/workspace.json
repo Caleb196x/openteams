@@ -83,6 +83,7 @@
   "createSession.shrink": "タスク入力欄を縮小",
   "createSession.switchTaskMode": "タスクモードを切り替え",
   "createSession.taskSentToast": "{member} にタスクを送信しました。",
+  "createSession.defaultTitle": "デフォルトセッション",
   "createSession.title": "新しいセッション",
   "createSession.workflowMode": "ワークフロー",
   "linkedWorkItems.changeStatusFor": "{title} のステータスを変更",

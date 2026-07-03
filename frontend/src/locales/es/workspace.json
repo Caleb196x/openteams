@@ -83,6 +83,7 @@
   "createSession.shrink": "Reducir compositor de tarea",
   "createSession.switchTaskMode": "Cambiar modo de tarea",
   "createSession.taskSentToast": "Tarea enviada a {member}.",
+  "createSession.defaultTitle": "Sesión predeterminada",
   "createSession.title": "Nueva sesión",
   "createSession.workflowMode": "Flujo de trabajo",
   "linkedWorkItems.changeStatusFor": "Cambiar estado de {title}",

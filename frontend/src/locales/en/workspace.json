@@ -85,6 +85,7 @@
   "createSession.shrink": "Shrink task composer",
   "createSession.switchTaskMode": "Switch task mode",
   "createSession.taskSentToast": "Sent task to {member}.",
+  "createSession.defaultTitle": "Default Session",
   "createSession.title": "New session",
   "createSession.workflowMode": "Workflow",
   "linkedWorkItems.empty": "No linked issues in this session.",

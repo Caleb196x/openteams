@@ -83,6 +83,7 @@
   "createSession.shrink": "작업 입력창 줄이기",
   "createSession.switchTaskMode": "작업 모드 전환",
   "createSession.taskSentToast": "{member}에게 작업을 보냈습니다.",
+  "createSession.defaultTitle": "기본 세션",
   "createSession.title": "새 세션",
   "createSession.workflowMode": "워크플로",
   "linkedWorkItems.changeStatusFor": "{title} 상태 변경",
