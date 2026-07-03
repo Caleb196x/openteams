@@ -127,6 +127,25 @@ const onboardingDarkThemeVars = {
   '--primary-tint': 'rgba(94, 106, 210, 0.12)',
 } as CSSProperties;
 
+const onboardingLightThemeVars = {
+  '--canvas': '#f7f7f5',
+  '--surface-1': '#ffffff',
+  '--surface-2': '#f1f1ef',
+  '--surface-3': '#e8e8e5',
+  '--surface-4': '#deded9',
+  '--hairline': '#deded8',
+  '--hairline-strong': '#c9c9c2',
+  '--hairline-tertiary': '#b8b8b0',
+  '--ink': '#151516',
+  '--ink-muted': '#52525b',
+  '--ink-subtle': '#71717a',
+  '--ink-tertiary': '#8a8a92',
+  '--primary': '#4f58c9',
+  '--primary-hover': '#3840a8',
+  '--on-primary': '#ffffff',
+  '--primary-tint': 'rgba(79, 88, 201, 0.12)',
+} as CSSProperties;
+
 const onboardingMonoFont = {
   fontFamily:
     '"JetBrains Mono", "SF Mono", "SFMono-Regular", ui-monospace, "Cascadia Code", monospace',
@@ -463,6 +482,23 @@ export function OnboardingGuide({
     useState('workflow_execution');
   const pathValidationRequestRef = useRef(0);
   const onboardingTextFont = onboardingSansFont;
+  const isOnboardingLightMode =
+    selectedAppearance === OnboardingAppearance.light ||
+    (selectedAppearance === OnboardingAppearance.system && theme === 'light');
+  const onboardingThemeVars = isOnboardingLightMode
+    ? onboardingLightThemeVars
+    : onboardingDarkThemeVars;
+  const onboardingRootStyle = {
+    ...onboardingThemeVars,
+    ...onboardingTextFont,
+  } as CSSProperties;
+  const onboardingInvertedContentStyle = isOnboardingLightMode
+    ? ({
+        ...onboardingDarkThemeVars,
+        filter: 'invert(1) hue-rotate(180deg)',
+        colorScheme: 'light',
+      } as CSSProperties)
+    : undefined;
 
   const { scenarios, currentScenario } = useTranslatedScenario(
     t,
@@ -485,30 +521,30 @@ export function OnboardingGuide({
     () => [
       {
         id: 'local_workspace',
-        label: '本地多Agent工作区',
+        label: t('onboarding.welcome.command.localWorkspace'),
         Icon: Folder,
         keyHint: 'L',
       },
       {
         id: 'workflow_execution',
-        label: '工作流编排引擎',
+        label: t('onboarding.welcome.command.workflowExecution'),
         Icon: Zap,
         keyHint: 'W',
       },
       {
         id: 'agent_team',
-        label: '智能体团队模板平台',
+        label: t('onboarding.welcome.command.agentTeam'),
         Icon: Bot,
         keyHint: 'T',
       },
       {
         id: 'personal_project_management',
-        label: '项目进度加速器',
+        label: t('onboarding.welcome.command.projectManagement'),
         Icon: FileText,
         keyHint: 'P',
       },
     ],
-    [],
+    [t],
   );
   const selectedWelcomeCommand =
     welcomeCommandOptions.find(
@@ -2064,7 +2100,11 @@ export function OnboardingGuide({
               </button>
             </div>
             <p className="flex min-h-10 items-center justify-center font-mono text-[10px] leading-none uppercase tracking-[0.12em] text-[#7d8aa3]">
-              Step {activeStepIndex + 1} of {onboardingSteps.length}: {stepLabel}
+              {t('onboarding.header.step', {
+                current: activeStepIndex + 1,
+                total: onboardingSteps.length,
+              })}
+              : {stepLabel}
             </p>
             <div className="flex min-h-10 items-center justify-center sm:justify-end">
               <button
@@ -2190,7 +2230,9 @@ export function OnboardingGuide({
                 className="font-mono text-[10px] uppercase tracking-[0.22em] text-[#8f9aaa]"
                 style={onboardingMonoFont}
               >
-                ALL 4 STEPS TO FINISH CONFIGURATION
+                {t('onboarding.welcome.footerSteps', {
+                  count: onboardingSteps.length,
+                })}
               </p>
             </div>
           </div>
@@ -2205,7 +2247,7 @@ export function OnboardingGuide({
     return (
       <div
         className="fixed inset-0 z-[90] bg-[var(--canvas)] p-4 text-[var(--ink)]"
-        style={{ ...onboardingDarkThemeVars, ...onboardingTextFont }}
+        style={onboardingRootStyle}
       >
         <div className="mx-auto flex h-full max-w-6xl flex-col">
           {renderUpgradeGuide()}
@@ -2217,11 +2259,14 @@ export function OnboardingGuide({
   return (
     <div
       className="fixed inset-0 z-[90] bg-[var(--canvas)] text-[var(--ink)]"
-      style={{ ...onboardingDarkThemeVars, ...onboardingTextFont }}
+      style={onboardingRootStyle}
     >
       <section className="mx-auto flex h-full w-full max-w-none flex-col overflow-hidden bg-transparent">
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div
+            className="flex min-h-0 flex-1 flex-col overflow-hidden"
+            style={onboardingInvertedContentStyle}
+          >
             {renderStepBody()}
           </div>
         </main>

@@ -28,6 +28,11 @@ const settingsSource = read('../SettingsWorkspace.tsx');
 const requiredLocaleKeys = [
   'onboarding.welcome.title',
   'onboarding.welcome.next',
+  'onboarding.welcome.command.agentTeam',
+  'onboarding.welcome.command.localWorkspace',
+  'onboarding.welcome.command.projectManagement',
+  'onboarding.welcome.command.workflowExecution',
+  'onboarding.welcome.footerSteps',
   'onboarding.step.scenario.title',
   'onboarding.step.executor.title',
   'onboarding.step.projectPath.title',
@@ -74,10 +79,10 @@ check(
     guideSource.includes('onboarding.welcome.next') &&
     guideSource.includes("useState('workflow_execution')") &&
     guideSource.includes('const welcomeCommandOptions = useMemo') &&
-    guideSource.includes("label: '本地多Agent工作区'") &&
-    guideSource.includes("label: '工作流编排引擎'") &&
-    guideSource.includes("label: '智能体团队模板平台'") &&
-    guideSource.includes("label: '项目进度加速器'") &&
+    guideSource.includes("label: t('onboarding.welcome.command.localWorkspace')") &&
+    guideSource.includes("label: t('onboarding.welcome.command.workflowExecution')") &&
+    guideSource.includes("label: t('onboarding.welcome.command.agentTeam')") &&
+    guideSource.includes("label: t('onboarding.welcome.command.projectManagement')") &&
     !guideSource.includes("label: '多Agent协作'") &&
     !guideSource.includes("keyHint: 'A'") &&
     guideSource.includes('window.addEventListener(\'keydown\', handleWelcomeShortcut)') &&
@@ -112,12 +117,24 @@ check(
     guideSource.includes('text-current opacity-55') &&
     guideSource.includes('mt-12 flex flex-col items-center gap-4') &&
     guideSource.includes('tracking-[0.22em] text-[#8f9aaa]') &&
-    guideSource.includes('ALL 4 STEPS TO FINISH CONFIGURATION') &&
+    guideSource.includes("t('onboarding.welcome.footerSteps'") &&
+    !guideSource.includes('ALL 4 STEPS TO FINISH CONFIGURATION') &&
     !guideSource.includes('top-1/2 -z-10 h-3/4 w-3/4') &&
     !guideSource.includes('Press Enter') &&
     !guideSource.includes('h-0.5 w-10 rounded-full bg-[#f4f4f5]') &&
     !guideSource.includes('welcomeStepKey, ...onboardingSteps'),
   guideSource,
+);
+
+check(
+  'onboarding supports a light inverted mode while preserving app theme preview',
+  guideSource.includes('const onboardingLightThemeVars =') &&
+    guideSource.includes('const isOnboardingLightMode =') &&
+    guideSource.includes("filter: 'invert(1) hue-rotate(180deg)'") &&
+    guideSource.includes('style={onboardingInvertedContentStyle}') &&
+    appSource.includes('setTheme("light")') &&
+    appSource.includes('setTheme("dark")'),
+  { guideSource, appSource },
 );
 
 check(
@@ -361,7 +378,7 @@ check(
     appSource.includes('return { projectId: project.id, sessionId: null }') &&
     appSource.includes('handleOnboardingCompleted') &&
     appSource.includes('setIsCreateSessionModalOpen(false)') &&
-    appSource.includes('void handleCreateDefaultSession({') &&
+    appSource.includes('await handleCreateDefaultSession({') &&
     read('../../locales/zh/common.json').includes(
       '"onboarding.action.startNow": "创建会话"',
     ),
@@ -434,6 +451,55 @@ for (const locale of ['en', 'zh', 'ja', 'ko', 'fr', 'es']) {
         : commonSource.includes(`"${key}"`),
     ),
     { commonSource, settingsLocaleSource },
+  );
+}
+
+const localeNames = ['en', 'zh', 'ja', 'ko', 'fr', 'es'] as const;
+const onboardingLocaleDictionaries = Object.fromEntries(
+  localeNames.map((locale) => [
+    locale,
+    JSON.parse(read(`../../locales/${locale}/common.json`)) as Record<
+      string,
+      string
+    >,
+  ]),
+);
+const onboardingLocaleKeys = (dict: Record<string, string>) =>
+  Object.keys(dict)
+    .filter((key) => key.startsWith('onboarding.') || key.startsWith('language.'))
+    .sort();
+const placeholders = (value: string) =>
+  Array.from(value.matchAll(/\{([a-zA-Z0-9_]+)\}/g))
+    .map((match) => match[1])
+    .sort();
+const sameJson = (left: unknown, right: unknown) =>
+  JSON.stringify(left) === JSON.stringify(right);
+const baselineOnboardingKeys = onboardingLocaleKeys(
+  onboardingLocaleDictionaries.en,
+);
+
+for (const locale of localeNames) {
+  const localeKeys = onboardingLocaleKeys(onboardingLocaleDictionaries[locale]);
+  check(
+    `locale ${locale} keeps onboarding keys synchronized with en`,
+    sameJson(localeKeys, baselineOnboardingKeys),
+    {
+      missing: baselineOnboardingKeys.filter((key) => !localeKeys.includes(key)),
+      extra: localeKeys.filter((key) => !baselineOnboardingKeys.includes(key)),
+    },
+  );
+
+  const placeholderMismatches = baselineOnboardingKeys.filter(
+    (key) =>
+      !sameJson(
+        placeholders(onboardingLocaleDictionaries[locale][key] ?? ''),
+        placeholders(onboardingLocaleDictionaries.en[key] ?? ''),
+      ),
+  );
+  check(
+    `locale ${locale} keeps onboarding placeholders synchronized with en`,
+    placeholderMismatches.length === 0,
+    placeholderMismatches,
   );
 }
 
