@@ -1959,11 +1959,11 @@ export function OnboardingGuide({
                 className="pointer-events-none absolute inset-0 opacity-[0.025]"
                 style={onboardingNoiseTextureStyle}
               />
-              <div className="relative z-10 flex items-center gap-2 border-b border-white/[0.08] bg-[#0c0c0c] px-4 py-3">
-                <div className="h-2 w-2 rounded-full border border-white/[0.18] bg-transparent" />
-                <div className="h-2 w-2 rounded-full border border-white/[0.18] bg-transparent" />
-                <div className="h-2 w-2 rounded-full border border-white/[0.18] bg-transparent" />
-                <div className="ml-4 h-3 w-32 rounded-[3px] border border-white/[0.08] bg-white/[0.03]" />
+              <div className="relative z-10 flex items-center gap-2 border-b border-white/[0.08] bg-[#1A1A1A]/90 px-4 py-3">
+                <div className="h-2 w-2 rounded-full border border-white/[0.18] bg-white/[0.065]" />
+                <div className="h-2 w-2 rounded-full border border-white/[0.18] bg-white/[0.065]" />
+                <div className="h-2 w-2 rounded-full border border-white/[0.18] bg-white/[0.065]" />
+                <div className="ml-4 h-3 w-32 rounded-[3px] border border-white/[0.08] bg-white/[0.065]" />
               </div>
 
               <div className="relative z-10 flex min-h-0 flex-1 items-center justify-center px-4 py-10 sm:px-20">

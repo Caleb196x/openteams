@@ -101,7 +101,9 @@ check(
     guideSource.includes('shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]') &&
     guideSource.includes('pointer-events-none absolute inset-0 bg-[#0E0F11]') &&
     guideSource.includes('flex min-h-[440px] w-full max-w-5xl flex-col overflow-hidden rounded-[8px] border border-white/[0.12] bg-[#1A1A1A]/90') &&
-    guideSource.includes('h-2 w-2 rounded-full border border-white/[0.18] bg-transparent') &&
+    guideSource.includes('border-b border-white/[0.08] bg-[#1A1A1A]/90 px-4 py-3') &&
+    guideSource.includes('h-2 w-2 rounded-full border border-white/[0.18] bg-white/[0.065]') &&
+    guideSource.includes('ml-4 h-3 w-32 rounded-[3px] border border-white/[0.08] bg-white/[0.065]') &&
     guideSource.includes('flex min-h-0 flex-1 items-center justify-center px-4 py-10 sm:px-20') &&
     guideSource.includes('max-w-md -translate-y-4 overflow-hidden rounded-[6px] border border-white/[0.12] bg-[#0a0a0a]') &&
     guideSource.includes('min-w-6 rounded-[3px] border border-white/[0.18] bg-[#0c0c0c]') &&
