@@ -250,10 +250,13 @@ export function GlobalSearchDialog({
         role="dialog"
         aria-modal="true"
         aria-label="全局搜索"
-        className="relative flex max-h-[min(620px,calc(100vh-32px))] w-full max-w-2xl flex-col overflow-hidden rounded-[10px] border border-[var(--hairline-strong)] bg-[var(--surface-1)] text-[var(--ink)] shadow-[0_24px_80px_rgba(0,0,0,0.38)]"
+        className="relative flex max-h-[min(520px,calc(100vh-32px))] w-full max-w-xl flex-col overflow-hidden rounded-[10px] border border-[rgba(255,255,255,0.08)] bg-[#17181A]/95 text-[var(--ink)] shadow-[0_28px_72px_rgba(0,0,0,0.48),0_2px_8px_rgba(0,0,0,0.32),inset_0_1px_0_rgba(255,255,255,0.04)] backdrop-blur-xl"
       >
-        <div className="flex items-center gap-3 border-b border-[var(--hairline)] bg-[var(--surface-2)] px-4 py-3">
-          <Search className="h-5 w-5 shrink-0 text-[var(--ink-tertiary)]" />
+        <div className="flex items-center gap-3 border-b border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.02)] px-4 py-2.5">
+          <Search
+            strokeWidth={1.5}
+            className="h-4.5 w-4.5 shrink-0 text-[rgba(255,255,255,0.42)]"
+          />
           <input
             ref={inputRef}
             type="search"
@@ -261,7 +264,7 @@ export function GlobalSearchDialog({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="搜索会话、事项和消息"
-            className="min-w-0 flex-1 bg-transparent text-[18px] leading-7 text-[var(--ink)] outline-none placeholder:text-[var(--ink-tertiary)]"
+            className="min-w-0 flex-1 bg-transparent text-[16px] leading-6 text-[rgba(255,255,255,0.9)] outline-none placeholder:text-[rgba(255,255,255,0.36)]"
           />
           <button
             type="button"
@@ -270,28 +273,28 @@ export function GlobalSearchDialog({
             aria-label="筛选隔离 worktree"
             title="筛选隔离 worktree"
             onClick={toggleWorktreeMode}
-            className={`flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border transition ${
+            className={`flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-[7px] border shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] transition ${
               worktreeModeActive
-                ? "border-[var(--primary)] bg-[var(--primary-tint)] text-[var(--primary)]"
-                : "border-[var(--hairline)] bg-[var(--surface-1)] text-[var(--ink-tertiary)] hover:border-[var(--hairline-strong)] hover:text-[var(--ink)]"
+                ? "border-[rgba(255,255,255,0.16)] bg-[rgba(255,255,255,0.08)] text-[rgba(255,255,255,0.82)]"
+                : "border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.035)] text-[rgba(255,255,255,0.42)] hover:border-[rgba(255,255,255,0.14)] hover:bg-[rgba(255,255,255,0.055)] hover:text-[rgba(255,255,255,0.72)]"
             }`}
           >
-            <GitBranch className="h-4 w-4" />
+            <GitBranch strokeWidth={1.5} className="h-3.5 w-3.5" />
           </button>
         </div>
 
-        <div className="min-h-48 overflow-y-auto bg-[var(--surface-1)] p-2">
+        <div className="min-h-40 overflow-y-auto bg-[#17181A] p-1.5">
           {loading ? (
             <div className="space-y-1" aria-label="搜索加载中">
               {Array.from({ length: 4 }).map((_, index) => (
                 <div
                   key={index}
-                  className="flex items-center gap-3 rounded-lg px-3 py-2.5"
+                  className="flex items-center gap-2.5 rounded-[7px] px-3 py-2"
                 >
-                  <div className="h-8 w-8 shrink-0 animate-pulse rounded-md bg-[var(--surface-3)]" />
+                  <div className="h-3.5 w-3.5 shrink-0 animate-pulse rounded bg-[rgba(255,255,255,0.07)]" />
                   <div className="min-w-0 flex-1 space-y-2">
-                    <div className="h-3 w-2/5 animate-pulse rounded bg-[var(--surface-3)]" />
-                    <div className="h-2.5 w-3/5 animate-pulse rounded bg-[var(--surface-3)]" />
+                    <div className="h-2.5 w-2/5 animate-pulse rounded bg-[rgba(255,255,255,0.07)]" />
+                    <div className="h-2 w-3/5 animate-pulse rounded bg-[rgba(255,255,255,0.05)]" />
                   </div>
                 </div>
               ))}
@@ -300,18 +303,21 @@ export function GlobalSearchDialog({
             <button
               type="button"
               onClick={() => setRetryVersion((version) => version + 1)}
-              className="flex w-full cursor-pointer items-center gap-3 rounded-lg border border-transparent px-3 py-3 text-left text-[13px] text-[var(--ink-subtle)] transition hover:border-[var(--hairline)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)]"
+              className="flex w-full cursor-pointer items-center gap-2.5 rounded-[7px] border border-transparent px-3 py-2 text-left text-[12px] text-[rgba(255,255,255,0.5)] transition hover:border-[rgba(255,255,255,0.08)] hover:bg-[rgba(255,255,255,0.04)] hover:text-[rgba(255,255,255,0.86)]"
             >
-              <RefreshCw className="h-4 w-4 shrink-0 text-[var(--ink-tertiary)]" />
+              <RefreshCw
+                strokeWidth={1.5}
+                className="h-3.5 w-3.5 shrink-0 text-[rgba(255,255,255,0.42)]"
+              />
               <span className="min-w-0 flex-1 truncate">
                 搜索失败，点击重试
               </span>
-              <span className="max-w-[40%] shrink-0 truncate text-[12px] text-[var(--ink-tertiary)]">
+              <span className="max-w-[40%] shrink-0 truncate text-[11px] text-[rgba(255,255,255,0.4)]">
                 {error}
               </span>
             </button>
           ) : results.length === 0 ? (
-            <div className="flex h-44 items-center justify-center rounded-lg text-[14px] text-[var(--ink-tertiary)]">
+            <div className="flex h-36 items-center justify-center rounded-[7px] text-[13px] text-[rgba(255,255,255,0.42)]">
               没有匹配结果
             </div>
           ) : (
@@ -326,30 +332,30 @@ export function GlobalSearchDialog({
                     role="option"
                     aria-selected={active}
                     onClick={() => openResult(result)}
-                    className={`flex w-full cursor-pointer items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition ${
+                    className={`flex w-full cursor-pointer items-center gap-2.5 rounded-[7px] border px-3 py-2 text-left transition ${
                       active
-                        ? "border-[var(--hairline-strong)] bg-[var(--surface-3)] text-[var(--ink)]"
-                        : "border-transparent text-[var(--ink-subtle)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)]"
+                        ? "border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.04)] text-[rgba(255,255,255,0.9)]"
+                        : "border-transparent text-[rgba(255,255,255,0.58)] hover:bg-[rgba(255,255,255,0.028)] hover:text-[rgba(255,255,255,0.82)]"
                     }`}
                   >
                     <span
-                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md border ${
+                      className={`flex h-4.5 w-4.5 shrink-0 items-center justify-center ${
                         active
-                          ? "border-[var(--primary)] bg-[var(--primary-tint)] text-[var(--primary)]"
-                          : "border-[var(--hairline)] bg-[var(--surface-2)] text-[var(--ink-tertiary)]"
+                          ? "text-[rgba(255,255,255,0.72)]"
+                          : "text-[rgba(255,255,255,0.38)]"
                       }`}
                     >
-                      <ResultIcon className="h-4 w-4" />
+                      <ResultIcon strokeWidth={1.5} className="h-3.5 w-3.5" />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[14px] font-medium leading-5">
+                      <span className="block truncate text-[14px] font-medium leading-[18px] text-[rgba(255,255,255,0.9)]">
                         {resultTitle(result)}
                       </span>
-                      <span className="block truncate text-[12px] leading-5 text-[var(--ink-tertiary)]">
+                      <span className="block truncate text-[12px] leading-[16px] text-[rgba(255,255,255,0.46)]">
                         {resultSnippet(result)}
                       </span>
                     </span>
-                    <span className="shrink-0 rounded-md border border-[var(--hairline)] bg-[var(--surface-1)] px-2 py-1 text-[11px] text-[var(--ink-tertiary)]">
+                    <span className="shrink-0 rounded-full border border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.025)] px-1.5 py-0.5 text-[11px] leading-4 text-[rgba(255,255,255,0.48)]">
                       {resultMeta(result)}
                     </span>
                   </button>
