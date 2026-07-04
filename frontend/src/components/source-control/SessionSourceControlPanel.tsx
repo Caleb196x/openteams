@@ -61,6 +61,7 @@ interface SourceControlConfirmDialogState {
 }
 
 type ScopedErrorState = Record<string, string>;
+type ScopedTextState = Record<string, string>;
 
 const scopedError = (errors: ScopedErrorState, scopeKey: string) =>
   errors[scopeKey] ?? null;
@@ -73,6 +74,20 @@ const updateScopedError = (
   const next = { ...errors };
   if (message?.trim()) {
     next[scopeKey] = message;
+  } else {
+    delete next[scopeKey];
+  }
+  return next;
+};
+
+const updateScopedText = (
+  values: ScopedTextState,
+  scopeKey: string,
+  value: string,
+): ScopedTextState => {
+  const next = { ...values };
+  if (value.length > 0) {
+    next[scopeKey] = value;
   } else {
     delete next[scopeKey];
   }
@@ -276,7 +291,11 @@ export const SessionSourceControlPanel: React.FC<
     sessionId,
     enabled: worktreeEnabled && enabled,
   });
-  const [commitMessage, setCommitMessage] = useState("");
+  const scopeKey = `${enabled ? "1" : "0"}:${projectId ?? ""}:${
+    sessionId ?? ""
+  }:${worktreeMode ?? ""}`;
+  const [commitMessagesByScope, setCommitMessagesByScope] =
+    useState<ScopedTextState>({});
   const [pendingActionState, setPendingActionState] = useState<{
     scopeKey: string;
     key: string;
@@ -297,13 +316,11 @@ export const SessionSourceControlPanel: React.FC<
   >(null);
   const [worktreeActionErrorsByScope, setWorktreeActionErrorsByScope] =
     useState<ScopedErrorState>({});
-  const scopeKey = `${enabled ? "1" : "0"}:${projectId ?? ""}:${
-    sessionId ?? ""
-  }:${worktreeMode ?? ""}`;
   const scopeKeyRef = useRef(scopeKey);
   scopeKeyRef.current = scopeKey;
 
   const isCurrentScope = (key: string) => scopeKeyRef.current === key;
+  const commitMessage = commitMessagesByScope[scopeKey] ?? "";
   const pendingAction =
     pendingActionState?.scopeKey === scopeKey ? pendingActionState.key : null;
   const actionError = scopedError(actionErrorsByScope, scopeKey);
@@ -321,6 +338,11 @@ export const SessionSourceControlPanel: React.FC<
   ) => {
     setWorktreeActionErrorsByScope((current) =>
       updateScopedError(current, key, message),
+    );
+  };
+  const setCommitMessageForScope = (key: string, message: string) => {
+    setCommitMessagesByScope((current) =>
+      updateScopedText(current, key, message),
     );
   };
   const closeWorktreeHistoryForScope = (key: string) => {
@@ -628,7 +650,7 @@ export const SessionSourceControlPanel: React.FC<
             ...current,
           ]),
         );
-        setCommitMessage("");
+        setCommitMessageForScope(commitScopeKey, "");
         return { ok: true, failed: [] };
       });
     })();
@@ -822,7 +844,9 @@ export const SessionSourceControlPanel: React.FC<
         <div className="shrink-0 border-t border-[color-mix(in_srgb,var(--hairline)_72%,transparent)] p-3">
           <textarea
             value={commitMessage}
-            onChange={(event) => setCommitMessage(event.target.value)}
+            onChange={(event) =>
+              setCommitMessageForScope(scopeKey, event.target.value)
+            }
             rows={2}
             className="mb-2 min-h-14 w-full resize-none rounded-lg border border-[color-mix(in_srgb,var(--hairline)_72%,transparent)] bg-[color-mix(in_srgb,var(--surface-1)_76%,var(--canvas))] px-2.5 py-1.5 text-[12px] text-[var(--ink)] outline-none placeholder:text-[var(--ink-tertiary)] focus:border-[color-mix(in_srgb,var(--primary)_60%,var(--hairline))]"
             placeholder={tr("sourceControl.commitPlaceholder", "commit message")}

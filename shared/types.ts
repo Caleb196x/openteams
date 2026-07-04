@@ -348,7 +348,7 @@ export type ConflictResolutionSide = "current" | "session";
 
 export type MergeResult = { worktree: SessionWorktree, has_conflicts: boolean, conflict_files: Array<string>, };
 
-export enum WorkspaceGitErrorCode { workspace_path_required = "workspace_path_required", workspace_path_invalid = "workspace_path_invalid", workspace_path_not_found = "workspace_path_not_found", workspace_path_not_directory = "workspace_path_not_directory", workspace_path_not_accessible = "workspace_path_not_accessible", invalid_gitignore_template = "invalid_gitignore_template", git_init_failed = "git_init_failed", gitignore_write_failed = "gitignore_write_failed" }
+export enum WorkspaceGitErrorCode { workspace_path_required = "workspace_path_required", workspace_path_invalid = "workspace_path_invalid", workspace_path_not_found = "workspace_path_not_found", workspace_path_not_directory = "workspace_path_not_directory", workspace_path_not_accessible = "workspace_path_not_accessible", invalid_gitignore_template = "invalid_gitignore_template", git_init_failed = "git_init_failed", gitignore_write_failed = "gitignore_write_failed", gitignore_commit_failed = "gitignore_commit_failed" }
 
 export type WorkspaceGitErrorData = { code: WorkspaceGitErrorCode, message: string, };
 

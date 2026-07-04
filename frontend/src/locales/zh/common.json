@@ -153,6 +153,7 @@
   "onboarding.project.gitError.invalid_gitignore_template": "该 .gitignore 模板不可用，请选择其他模板。",
   "onboarding.project.gitError.git_init_failed": "无法在该文件夹中初始化 Git。",
   "onboarding.project.gitError.gitignore_write_failed": "Git 已初始化，但无法写入 .gitignore 文件。",
+  "onboarding.project.gitError.gitignore_commit_failed": "Git 已初始化，但无法提交生成的 .gitignore 文件。",
   "onboarding.project.initializeGit": "初始化 Git 仓库",
   "onboarding.project.initializeAction": "初始化",
   "onboarding.project.initializeFailed": "初始化 Git 仓库失败。",

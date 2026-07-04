@@ -43,6 +43,7 @@ import {
 } from "lucide-react";
 import type {
   DirectoryEntry,
+  GitignoreTemplateSummary,
   Session,
   SidebarBuildStats,
   SidebarNavigationItem,
@@ -227,9 +228,10 @@ const createProjectLabelClass =
 const createProjectFieldBaseClass =
   "w-full rounded-md border border-[var(--hairline)] bg-[var(--surface-2)] px-3 py-2 text-[var(--ink)] outline-none transition placeholder:text-[var(--ink-tertiary)] hover:border-[var(--hairline-strong)] hover:bg-[var(--surface-3)] focus:border-[var(--primary)] focus:bg-[var(--surface-1)]";
 
-const gitignoreTemplates = ["node", "go", "python", "none"] as const;
+const gitignoreTemplates = ["node", "go", "python"] as const;
+const noneGitignoreTemplate = "none";
 
-type GitignoreTemplate = (typeof gitignoreTemplates)[number];
+type GitignoreTemplate = string;
 
 const getNavigationIcon = (icon: string): LucideIcon =>
   navigationIcons[icon] ?? CircleDot;
@@ -475,6 +477,14 @@ export function ProjectSidebar({
   const [initializeWorkspaceGit, setInitializeWorkspaceGit] = useState(true);
   const [gitignoreTemplate, setGitignoreTemplate] =
     useState<GitignoreTemplate>("node");
+  const [gitignoreTemplateCatalog, setGitignoreTemplateCatalog] = useState<
+    GitignoreTemplateSummary[]
+  >([]);
+  const [gitignoreTemplatesLoading, setGitignoreTemplatesLoading] =
+    useState(false);
+  const [gitignoreTemplatesLoadFailed, setGitignoreTemplatesLoadFailed] =
+    useState(false);
+  const gitignoreTemplatesRequestedRef = useRef(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [creatingProject, setCreatingProject] = useState(false);
   const [deletingProjectDraft, setDeletingProjectDraft] =
@@ -597,24 +607,53 @@ export function ProjectSidebar({
     return translated && translated !== key ? translated : fallback;
   };
 
-  const gitignoreOptions = useMemo<DropdownSelectOption[]>(
-    () =>
-      gitignoreTemplates.map((template) => ({
-        id: template,
-        label: translate(
-          `sidebar.gitignore.${template}`,
-          template === "none"
-            ? "None"
-            : template.charAt(0).toUpperCase() + template.slice(1),
-        ),
-      })),
-    [t],
-  );
+  const gitignoreOptions = useMemo<DropdownSelectOption[]>(() => {
+    const seenIds = new Set<string>();
+    const catalog =
+      gitignoreTemplateCatalog.length > 0
+        ? gitignoreTemplateCatalog
+        : gitignoreTemplates.map((template) => ({
+            id: template,
+            label: translate(
+              `sidebar.gitignore.${template}`,
+              template.charAt(0).toUpperCase() + template.slice(1),
+            ),
+            group: "",
+            description: "",
+            aliases: [],
+          }));
+
+    return [
+      ...catalog
+        .filter((template) => {
+          if (template.id === noneGitignoreTemplate || seenIds.has(template.id)) {
+            return false;
+          }
+          seenIds.add(template.id);
+          return true;
+        })
+        .map((template) => ({
+          id: template.id,
+          label: template.label,
+          group: template.group || undefined,
+          description: template.description || undefined,
+          hint:
+            template.aliases.length > 0 ? template.aliases.join(", ") : undefined,
+        })),
+      {
+        id: noneGitignoreTemplate,
+        label: translate("sidebar.gitignore.none", "None"),
+      },
+    ];
+  }, [gitignoreTemplateCatalog, t]);
   const currentWorkspacePath = projectWorkspacePath.trim();
   const workspaceGitStatusForCurrentPath =
     currentWorkspacePath && workspaceGitStatusPath === currentWorkspacePath
       ? workspaceGitStatus
       : null;
+  const workspaceGitStatusForCreatePanel = currentWorkspacePath
+    ? workspaceGitStatusForCurrentPath ?? workspaceGitStatus
+    : null;
 
   const copySessionIdLabel =
     copySessionIdState === "copied"
@@ -793,32 +832,59 @@ export function ProjectSidebar({
     openBuildStatsPage();
   };
 
-  const loadWorkspaceDirectory = useCallback(async (path?: string) => {
-    setWorkspaceBrowserLoading(true);
-    setWorkspaceBrowserError(null);
+  const loadCreateProjectGitignoreTemplates = useCallback(async () => {
+    gitignoreTemplatesRequestedRef.current = true;
+    setGitignoreTemplatesLoading(true);
+    setGitignoreTemplatesLoadFailed(false);
     try {
-      const response = await filesystemApi.listDirectory(
-        path?.trim() || undefined,
-      );
-      setWorkspaceEntries(sortWorkspaceDirectoryEntries(response.entries));
-      setWorkspaceCurrentPath(response.current_path);
-      setProjectWorkspacePath(response.current_path);
-      setRenamingWorkspacePath(null);
-      setRenameWorkspaceName("");
-      setRenameWorkspaceError(null);
-    } catch (err) {
-      setWorkspaceBrowserError(
-        err instanceof Error
-          ? err.message
-          : translate(
-              "sidebar.workspaceReadFailed",
-              "Workspace directory could not be read",
-            ),
-      );
+      const response = await chatSessionsApi.listGitignoreTemplates();
+      setGitignoreTemplateCatalog(response.templates);
+    } catch {
+      setGitignoreTemplateCatalog([]);
+      setGitignoreTemplatesLoadFailed(true);
     } finally {
-      setWorkspaceBrowserLoading(false);
+      setGitignoreTemplatesLoading(false);
     }
   }, []);
+
+  const loadWorkspaceDirectory = useCallback(
+    async (path?: string, knownGitRepo?: boolean) => {
+      setWorkspaceBrowserLoading(true);
+      setWorkspaceBrowserError(null);
+      try {
+        const response = await filesystemApi.listDirectory(
+          path?.trim() || undefined,
+        );
+        setWorkspaceEntries(sortWorkspaceDirectoryEntries(response.entries));
+        setWorkspaceCurrentPath(response.current_path);
+        setProjectWorkspacePath(response.current_path);
+        if (knownGitRepo !== undefined) {
+          setWorkspaceGitStatus({
+            valid: true,
+            is_git_repo: knownGitRepo,
+            error: null,
+            error_code: null,
+          });
+          setWorkspaceGitStatusPath(response.current_path);
+        }
+        setRenamingWorkspacePath(null);
+        setRenameWorkspaceName("");
+        setRenameWorkspaceError(null);
+      } catch (err) {
+        setWorkspaceBrowserError(
+          err instanceof Error
+            ? err.message
+            : translate(
+                "sidebar.workspaceReadFailed",
+                "Workspace directory could not be read",
+              ),
+        );
+      } finally {
+        setWorkspaceBrowserLoading(false);
+      }
+    },
+    [],
+  );
 
   const loadWorkspaceRoots = useCallback(async () => {
     setWorkspaceBrowserLoading(true);
@@ -1365,6 +1431,17 @@ export function ProjectSidebar({
   useEffect(() => {
     if (
       !createFormOpen ||
+      editingProject ||
+      gitignoreTemplatesRequestedRef.current
+    ) {
+      return;
+    }
+    void loadCreateProjectGitignoreTemplates();
+  }, [createFormOpen, editingProject, loadCreateProjectGitignoreTemplates]);
+
+  useEffect(() => {
+    if (
+      !createFormOpen ||
       !workspaceBrowserOpen ||
       workspaceEntries.length > 0
     ) {
@@ -1382,11 +1459,12 @@ export function ProjectSidebar({
     const workspacePath = projectWorkspacePath.trim();
     const requestId = ++workspaceGitValidationRef.current;
 
-    setWorkspaceGitStatus(null);
-    setWorkspaceGitStatusPath("");
-
     if (!createFormOpen || editingProject || !workspacePath) {
       setWorkspaceGitDetecting(false);
+      if (!workspacePath) {
+        setWorkspaceGitStatus(null);
+        setWorkspaceGitStatusPath("");
+      }
       return;
     }
 
@@ -1466,7 +1544,9 @@ export function ProjectSidebar({
             const initialized = await chatSessionsApi.initializeWorkspaceGit({
               workspace_path: workspacePath,
               gitignore_template:
-                gitignoreTemplate === "none" ? null : gitignoreTemplate,
+                gitignoreTemplate === noneGitignoreTemplate
+                  ? null
+                  : gitignoreTemplate,
             });
             setWorkspaceGitStatus(initialized.status);
             setWorkspaceGitStatusPath(workspacePath);
@@ -1502,6 +1582,90 @@ export function ProjectSidebar({
       setCreatingProject(false);
     }
   };
+
+  const workspaceNeedsGitInitialization = Boolean(
+    workspaceGitStatusForCreatePanel?.valid &&
+      !workspaceGitStatusForCreatePanel.is_git_repo,
+  );
+  const createProjectGitInitializationPanel =
+    !editingProject && workspaceNeedsGitInitialization ? (
+      <div className="rounded-lg border border-[var(--hairline)] bg-[var(--surface-2)] px-3 py-2.5">
+        <div className="flex items-start gap-2 text-[12px] leading-relaxed text-[var(--ink-tertiary)]">
+          <GitBranch className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>
+            {translate(
+              "sidebar.gitMissing",
+              "Current directory is not a Git repository.",
+            )}
+          </span>
+        </div>
+        <div className="mt-2.5 space-y-2.5">
+          <label className="flex cursor-pointer items-center gap-2 text-[12px] font-medium text-[var(--ink-subtle)]">
+            <input
+              type="checkbox"
+              checked={initializeWorkspaceGit}
+              onChange={(event) =>
+                setInitializeWorkspaceGit(event.target.checked)
+              }
+              disabled={creatingProject}
+              className="peer sr-only"
+            />
+            <span
+              aria-hidden="true"
+              className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-[4px] border transition ${
+                initializeWorkspaceGit
+                  ? "border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)]"
+                  : "border-[var(--hairline-strong)] bg-[var(--surface-1)] text-transparent peer-hover:border-[var(--ink-tertiary)]"
+              }`}
+            >
+              <Check className="h-3 w-3" />
+            </span>
+            {translate("sidebar.initializeGit", "Initialize Git repository")}
+          </label>
+          {initializeWorkspaceGit && (
+            <div>
+              <label className="mb-1.5 block text-[11px] font-semibold tracking-[0.04em] text-[var(--ink-tertiary)]">
+                {translate("sidebar.gitignoreTemplate", ".gitignore template")}
+              </label>
+              <DropdownSelect
+                selectionMode="single"
+                value={gitignoreTemplate}
+                onChange={(value) => setGitignoreTemplate(value)}
+                options={gitignoreOptions}
+                showSearch={gitignoreOptions.length > 6}
+                searchPlaceholder={translate(
+                  "sidebar.gitignoreSearchPlaceholder",
+                  "Search templates...",
+                )}
+                disabled={creatingProject}
+                triggerIcon={
+                  <FileText className="h-3 w-3 text-[var(--ink-tertiary)]" />
+                }
+                triggerClassName="border-[var(--hairline)] bg-[var(--surface-1)] px-2.5 py-1.5 text-[12px] hover:border-[var(--hairline-strong)] hover:bg-[var(--surface-3)]"
+                panelClassName="z-[1010] max-w-none"
+                maxPanelHeightClassName="max-h-[240px]"
+              />
+              {gitignoreTemplatesLoadFailed && (
+                <div className="mt-1.5 text-[11px] leading-relaxed text-amber-400">
+                  {translate(
+                    "sidebar.gitignoreTemplatesLoadFailed",
+                    "Template catalog could not be loaded; common templates are shown.",
+                  )}
+                </div>
+              )}
+              {gitignoreTemplatesLoading && !gitignoreTemplatesLoadFailed && (
+                <div className="mt-1.5 text-[11px] leading-relaxed text-[var(--ink-tertiary)]">
+                  {translate(
+                    "sidebar.gitignoreTemplatesLoading",
+                    "Loading templates...",
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    ) : null;
 
   return (
     <nav
@@ -1822,6 +1986,8 @@ export function ProjectSidebar({
                     </button>
                   </div>
 
+                  {createProjectGitInitializationPanel}
+
                   {workspaceBrowserOpen && (
                     <div className="overflow-hidden rounded-lg bg-transparent">
                       <div className="flex items-center gap-1.5 border-b border-[var(--hairline)] px-1 py-1.5">
@@ -1990,6 +2156,7 @@ export function ProjectSidebar({
                                         if (entry.is_directory) {
                                           void loadWorkspaceDirectory(
                                             entry.path,
+                                            entry.is_git_repo,
                                           );
                                         }
                                       }}
@@ -2021,102 +2188,6 @@ export function ProjectSidebar({
                       </div>
                     </div>
                   )}
-                  {!editingProject &&
-                    currentWorkspacePath &&
-                    (workspaceGitDetecting ||
-                      workspaceGitStatusForCurrentPath) && (
-                      <div className="rounded-lg border border-[var(--hairline)] bg-[var(--surface-2)] px-3 py-2.5">
-                        {workspaceGitDetecting ? (
-                          <div className="flex items-center gap-2 text-[12px] text-[var(--ink-tertiary)]">
-                            <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                            {translate(
-                              "sidebar.gitChecking",
-                              "Checking Git status...",
-                            )}
-                          </div>
-                        ) : workspaceGitStatusForCurrentPath?.valid &&
-                          workspaceGitStatusForCurrentPath.is_git_repo ? (
-                          <div className="inline-flex items-center gap-2 rounded-[4px] border border-[color-mix(in_srgb,var(--success)_24%,transparent)] bg-[color-mix(in_srgb,var(--success)_10%,transparent)] px-2 py-1 text-[12px] text-[var(--success)]">
-                            <GitBranch className="h-3.5 w-3.5" />
-                            {translate(
-                              "sidebar.gitDetected",
-                              "Git repository detected.",
-                            )}
-                          </div>
-                        ) : workspaceGitStatusForCurrentPath?.valid ? (
-                          <div className="space-y-2.5">
-                            <div className="flex items-start gap-2 text-[12px] leading-relaxed text-[var(--ink-tertiary)]">
-                              <GitBranch className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                              <span>
-                                {translate(
-                                  "sidebar.gitMissing",
-                                  "Current directory is not a Git repository.",
-                                )}
-                              </span>
-                            </div>
-                            <label className="flex cursor-pointer items-center gap-2 text-[12px] font-medium text-[var(--ink-subtle)]">
-                              <input
-                                type="checkbox"
-                                checked={initializeWorkspaceGit}
-                                onChange={(event) =>
-                                  setInitializeWorkspaceGit(
-                                    event.target.checked,
-                                  )
-                                }
-                                disabled={creatingProject}
-                                className="peer sr-only"
-                              />
-                              <span
-                                aria-hidden="true"
-                                className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-[4px] border transition ${
-                                  initializeWorkspaceGit
-                                    ? "border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)]"
-                                    : "border-[var(--hairline-strong)] bg-[var(--surface-1)] text-transparent peer-hover:border-[var(--ink-tertiary)]"
-                                }`}
-                              >
-                                <Check className="h-3 w-3" />
-                              </span>
-                              {translate(
-                                "sidebar.initializeGit",
-                                "Initialize Git repository",
-                              )}
-                            </label>
-                            {initializeWorkspaceGit && (
-                              <div>
-                                <label className="mb-1.5 block text-[11px] font-semibold tracking-[0.04em] text-[var(--ink-tertiary)]">
-                                  {translate(
-                                    "sidebar.gitignoreTemplate",
-                                    ".gitignore template",
-                                  )}
-                                </label>
-                                <DropdownSelect
-                                  selectionMode="single"
-                                  value={gitignoreTemplate}
-                                  onChange={(value) =>
-                                    setGitignoreTemplate(
-                                      value as GitignoreTemplate,
-                                    )
-                                  }
-                                  options={gitignoreOptions}
-                                  showSearch={false}
-                                  disabled={creatingProject}
-                                  triggerIcon={
-                                    <FileText className="h-3 w-3 text-[var(--ink-tertiary)]" />
-                                  }
-                                  triggerClassName="border-[var(--hairline)] bg-[var(--surface-1)] px-2.5 py-1.5 text-[12px] hover:border-[var(--hairline-strong)] hover:bg-[var(--surface-3)]"
-                                  panelClassName="z-[1010] max-w-none"
-                                  maxPanelHeightClassName="max-h-[144px]"
-                                />
-                              </div>
-                            )}
-                          </div>
-                        ) : workspaceGitStatusForCurrentPath?.error ? (
-                          <div className="text-[12px] leading-relaxed text-red-400">
-                            {workspaceGitStatusForCurrentPath.error}
-                          </div>
-                        ) : null}
-                      </div>
-                    )}
                 </div>
                 {createError && (
                   <div className="text-[13px] text-red-400">{createError}</div>

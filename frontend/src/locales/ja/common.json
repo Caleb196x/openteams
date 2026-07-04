@@ -152,6 +152,7 @@
   "onboarding.project.gitError.invalid_gitignore_template": "その .gitignore テンプレートは利用できません。別のテンプレートを選択してください。",
   "onboarding.project.gitError.git_init_failed": "このフォルダーで Git を初期化できませんでした。",
   "onboarding.project.gitError.gitignore_write_failed": "Git は初期化されましたが、.gitignore ファイルを書き込めませんでした。",
+  "onboarding.project.gitError.gitignore_commit_failed": "Git は初期化されましたが、生成された .gitignore をコミットできませんでした。",
   "onboarding.project.initializeGit": "Initialize Git repository",
   "onboarding.project.initializeAction": "Initialize",
   "onboarding.project.initializeFailed": "Failed to initialize Git repository.",

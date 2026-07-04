@@ -153,6 +153,7 @@
   "onboarding.project.gitError.invalid_gitignore_template": "That .gitignore template is unavailable. Choose another template.",
   "onboarding.project.gitError.git_init_failed": "Git could not be initialized in this folder.",
   "onboarding.project.gitError.gitignore_write_failed": "Git was initialized, but the .gitignore file could not be written.",
+  "onboarding.project.gitError.gitignore_commit_failed": "Git was initialized, but the generated .gitignore could not be committed.",
   "onboarding.project.initializeGit": "Initialize Git repository",
   "onboarding.project.initializeAction": "Initialize",
   "onboarding.project.initializeFailed": "Failed to initialize Git repository.",
