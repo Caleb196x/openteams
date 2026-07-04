@@ -150,6 +150,16 @@ check(
 );
 
 check(
+  "isolates commit message drafts by session scope",
+  source.includes("type ScopedTextState = Record<string, string>") &&
+    source.includes("commitMessagesByScope") &&
+    source.includes('const commitMessage = commitMessagesByScope[scopeKey] ?? "";') &&
+    source.includes("setCommitMessageForScope(scopeKey, event.target.value)") &&
+    source.includes('setCommitMessageForScope(commitScopeKey, "");'),
+  source,
+);
+
+check(
   "records late async errors under their original session scope",
   source.includes("const actionScopeKey = scopeKeyRef.current") &&
     source.includes("const operationScopeKey = scopeKeyRef.current") &&
