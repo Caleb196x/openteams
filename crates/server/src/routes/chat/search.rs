@@ -141,6 +141,11 @@ async fn search_chat_records(
     let q = query.q.as_deref().unwrap_or_default().trim();
 
     if query.mode == Some(ChatSearchMode::Worktree) {
+        if !q.is_empty() {
+            return Ok(ChatSearchResponse {
+                results: search_worktree_messages(pool, query.project_id, q).await?,
+            });
+        }
         return Ok(ChatSearchResponse {
             results: search_worktrees(pool, query.project_id, q).await?,
         });
@@ -305,6 +310,67 @@ async fn search_messages(
                m.created_at
         FROM chat_messages m
         INNER JOIN chat_sessions s ON s.id = m.session_id
+        WHERE s.status = 'active'
+          AND ((?1 IS NULL AND s.project_id IS NULL) OR s.project_id = ?1)
+          AND LOWER(m.content) LIKE LOWER(?2) ESCAPE '\'
+        ORDER BY m.created_at DESC
+        LIMIT ?3
+        "#,
+    )
+    .bind(project_id)
+    .bind(pattern)
+    .bind(SEARCH_RESULT_LIMIT)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let sender_label = sender_label(&row.sender_type).to_string();
+            ChatSearchResult::Message {
+                message_id: row.id,
+                session_id: row.session_id,
+                session_title: session_title(row.session_title),
+                snippet: snippet_for(&row.content, q),
+                sender_type: row.sender_type,
+                sender_id: row.sender_id,
+                sender_label,
+                message_time: row.created_at,
+            }
+        })
+        .collect())
+}
+
+async fn search_worktree_messages(
+    pool: &SqlitePool,
+    project_id: Option<Uuid>,
+    q: &str,
+) -> Result<Vec<ChatSearchResult>, sqlx::Error> {
+    let pattern = like_pattern(q);
+    let rows = sqlx::query_as::<_, MessageSearchRow>(
+        r#"
+        SELECT m.id,
+               m.session_id,
+               s.title AS session_title,
+               m.sender_type,
+               m.sender_id,
+               m.content,
+               m.created_at
+        FROM chat_messages m
+        INNER JOIN chat_sessions s ON s.id = m.session_id
+        INNER JOIN chat_session_worktrees w
+          ON w.id = (
+            SELECT w2.id
+            FROM chat_session_worktrees w2
+            WHERE w2.session_id = s.id
+              AND w2.status IN (
+                'creating', 'active', 'dirty', 'merging',
+                'needs_conflict_resolution', 'merged',
+                'cleanup_pending', 'cleanup_failed'
+              )
+            ORDER BY w2.updated_at DESC, w2.created_at DESC
+            LIMIT 1
+          )
         WHERE s.status = 'active'
           AND ((?1 IS NULL AND s.project_id IS NULL) OR s.project_id = ?1)
           AND LOWER(m.content) LIKE LOWER(?2) ESCAPE '\'
@@ -1109,7 +1175,7 @@ mod tests {
             &pool,
             ChatSearchQuery {
                 project_id: Some(project_id),
-                q: Some("scope-worktree".to_string()),
+                q: None,
                 mode: Some(ChatSearchMode::Worktree),
             },
         )
@@ -1275,6 +1341,148 @@ mod tests {
                 assert_eq!(path_summary, "openteams/session-feature");
             }
             other => panic!("expected worktree result, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn worktree_mode_query_searches_messages_inside_current_worktree_sessions() {
+        let pool = setup_pool().await;
+        let project_id = Uuid::new_v4();
+        let other_project_id = Uuid::new_v4();
+        let worktree_session_id = Uuid::new_v4();
+        let plain_session_id = Uuid::new_v4();
+        let archived_session_id = Uuid::new_v4();
+        let other_project_session_id = Uuid::new_v4();
+        let worktree_message_id = Uuid::new_v4();
+
+        insert_session(
+            &pool,
+            worktree_session_id,
+            Some(project_id),
+            "Worktree message holder",
+            "2026-07-04T00:00:00Z",
+        )
+        .await;
+        insert_session(
+            &pool,
+            plain_session_id,
+            Some(project_id),
+            "Plain message holder",
+            "2026-07-04T00:01:00Z",
+        )
+        .await;
+        insert_session_with_status(
+            &pool,
+            archived_session_id,
+            Some(project_id),
+            "Archived worktree message holder",
+            "archived",
+            "2026-07-04T00:02:00Z",
+        )
+        .await;
+        insert_session(
+            &pool,
+            other_project_session_id,
+            Some(other_project_id),
+            "Other project worktree message holder",
+            "2026-07-04T00:03:00Z",
+        )
+        .await;
+        insert_worktree(
+            &pool,
+            Uuid::new_v4(),
+            worktree_session_id,
+            "active",
+            "session/message-scope",
+            "C:/tmp/openteams/message-scope",
+            "2026-07-04T00:04:00Z",
+        )
+        .await;
+        insert_worktree(
+            &pool,
+            Uuid::new_v4(),
+            archived_session_id,
+            "active",
+            "session/archived-message-scope",
+            "C:/tmp/openteams/archived-message-scope",
+            "2026-07-04T00:05:00Z",
+        )
+        .await;
+        insert_worktree(
+            &pool,
+            Uuid::new_v4(),
+            other_project_session_id,
+            "active",
+            "session/other-message-scope",
+            "C:/tmp/openteams/other-message-scope",
+            "2026-07-04T00:06:00Z",
+        )
+        .await;
+        insert_message(
+            &pool,
+            worktree_message_id,
+            worktree_session_id,
+            "agent",
+            "The scoped worktree message contains a needle",
+            "2026-07-04T00:07:00Z",
+        )
+        .await;
+        insert_message(
+            &pool,
+            Uuid::new_v4(),
+            plain_session_id,
+            "user",
+            "The plain session also contains a needle",
+            "2026-07-04T00:08:00Z",
+        )
+        .await;
+        insert_message(
+            &pool,
+            Uuid::new_v4(),
+            archived_session_id,
+            "user",
+            "The archived worktree session contains a needle",
+            "2026-07-04T00:09:00Z",
+        )
+        .await;
+        insert_message(
+            &pool,
+            Uuid::new_v4(),
+            other_project_session_id,
+            "user",
+            "The other project worktree session contains a needle",
+            "2026-07-04T00:10:00Z",
+        )
+        .await;
+
+        let response = search_chat_records(
+            &pool,
+            ChatSearchQuery {
+                project_id: Some(project_id),
+                q: Some("needle".to_string()),
+                mode: Some(ChatSearchMode::Worktree),
+            },
+        )
+        .await
+        .expect("search");
+
+        assert_eq!(response.results.len(), 1);
+        match &response.results[0] {
+            ChatSearchResult::Message {
+                message_id,
+                session_id,
+                session_title,
+                sender_type,
+                sender_label,
+                ..
+            } => {
+                assert_eq!(*message_id, worktree_message_id);
+                assert_eq!(*session_id, worktree_session_id);
+                assert_eq!(session_title, "Worktree message holder");
+                assert_eq!(*sender_type, ChatSenderType::Agent);
+                assert_eq!(sender_label, "Agent");
+            }
+            other => panic!("expected scoped worktree message result, got {other:?}"),
         }
     }
 }

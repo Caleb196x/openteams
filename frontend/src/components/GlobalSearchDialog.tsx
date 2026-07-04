@@ -7,7 +7,7 @@ import React, {
 } from "react";
 import { createPortal } from "react-dom";
 import {
-  GitBranch,
+  FolderGit2,
   MessageSquareText,
   RefreshCw,
   Search,
@@ -98,7 +98,7 @@ const resultIcon = (result: ChatSearchResult) =>
   result.type === "message"
     ? MessageSquareText
     : result.type === "worktree"
-      ? GitBranch
+      ? FolderGit2
       : Search;
 
 export function GlobalSearchDialog({
@@ -158,13 +158,14 @@ export function GlobalSearchDialog({
     setError(null);
     setSelectedIndex(-1);
 
-    if (trimmedQuery.length === 0) {
+    const canSearch = trimmedQuery.length > 0 || worktreeModeActive;
+    if (!canSearch) {
       setResults([]);
       setLoading(false);
       return;
     }
 
-    const delayMs = 180;
+    const delayMs = trimmedQuery.length > 0 ? 180 : 0;
     setLoading(true);
 
     const timer = window.setTimeout(() => {
@@ -193,7 +194,15 @@ export function GlobalSearchDialog({
     }, delayMs);
 
     return () => window.clearTimeout(timer);
-  }, [open, projectId, query, retryVersion, search, searchMode]);
+  }, [
+    open,
+    projectId,
+    query,
+    retryVersion,
+    search,
+    searchMode,
+    worktreeModeActive,
+  ]);
 
   const selectedResult = useMemo(
     () => (selectedIndex >= 0 ? results[selectedIndex] : undefined),
@@ -248,16 +257,19 @@ export function GlobalSearchDialog({
 
   const clearQuery = () => {
     setQuery("");
-    setResults([]);
     setError(null);
     setSelectedIndex(-1);
-    setLoading(false);
+    if (!worktreeModeActive) {
+      setResults([]);
+      setLoading(false);
+    }
     inputRef.current?.focus();
   };
 
   if (!open) return null;
 
   const hasQuery = query.trim().length > 0;
+  const showResultsPanel = hasQuery || worktreeModeActive;
 
   const dialog = (
     <div
@@ -314,11 +326,11 @@ export function GlobalSearchDialog({
                 : "text-[rgba(255,255,255,0.42)] hover:bg-[rgba(255,255,255,0.045)] hover:text-[rgba(255,255,255,0.72)]"
             }`}
           >
-            <GitBranch strokeWidth={1.75} className="h-3.5 w-3.5" />
+            <FolderGit2 strokeWidth={1.6} className="h-3.5 w-3.5" />
           </button>
         </div>
 
-        {hasQuery && (
+        {showResultsPanel && (
           <div
             data-global-search-results-panel="true"
             className="max-h-[min(520px,calc(100vh-128px))] overflow-y-auto bg-[#17181A] p-1.5"
