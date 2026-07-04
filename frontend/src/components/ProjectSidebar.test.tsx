@@ -812,9 +812,37 @@ check(
   "create project modal offers Git initialization for non-Git workspaces",
   componentSource.includes("chatSessionsApi.validateWorkspacePath") &&
     componentSource.includes("chatSessionsApi.initializeWorkspaceGit") &&
+    componentSource.includes("chatSessionsApi.listGitignoreTemplates") &&
     componentSource.includes("const gitignoreTemplates") &&
     componentSource.includes('"sidebar.initializeGit"') &&
     componentSource.includes('"sidebar.gitignoreTemplate"'),
+  componentSource,
+);
+check(
+  "create project modal only shows Git initialization when the selected workspace needs it",
+  componentSource.includes("workspaceNeedsGitInitialization") &&
+    componentSource.includes("workspaceGitStatusForCreatePanel?.valid") &&
+    componentSource.includes("!workspaceGitStatusForCreatePanel.is_git_repo") &&
+    !componentSource.includes('"sidebar.gitSelectWorkspace"'),
+  componentSource,
+);
+check(
+  "create project modal keeps the Git initialization panel stable while a new path is validating",
+  componentSource.includes("workspaceGitStatusForCurrentPath ?? workspaceGitStatus"),
+  componentSource,
+);
+check(
+  "create project modal keeps Git initialization above the directory tree",
+  componentSource.indexOf("{createProjectGitInitializationPanel}") <
+    componentSource.indexOf("{workspaceBrowserOpen &&"),
+  componentSource,
+);
+check(
+  "create project directory navigation selects the current workspace directly",
+  componentSource.includes("setProjectWorkspacePath(response.current_path)") &&
+    componentSource.includes("knownGitRepo") &&
+    componentSource.includes("entry.is_git_repo") &&
+    !componentSource.includes('"sidebar.useCurrentFolder"'),
   componentSource,
 );
 check(
