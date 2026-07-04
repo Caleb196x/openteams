@@ -249,6 +249,13 @@ const messages: FixtureMessage[] = [
     content: "Needle fallback content from another project.",
     createdAt: "2026-07-04T00:19:00Z",
   },
+  {
+    id: "message-worktree-scoped",
+    sessionId: "session-worktree-main",
+    senderType: ChatSenderType.agent,
+    content: "Worktree scoped content from the isolated session.",
+    createdAt: "2026-07-04T00:23:00Z",
+  },
 ];
 
 const worktrees: FixtureWorktree[] = [
@@ -345,18 +352,35 @@ const fixtureSearch = (params: ChatSearchQuery): ChatSearchResponse => {
   const mode = params.mode ?? ChatSearchMode.all;
 
   if (mode === ChatSearchMode.worktree) {
+    const scopedWorktreeSessionIds = new Set(
+      worktrees
+        .filter((worktree) => {
+          const session = sessionById.get(worktree.sessionId);
+          return !!session && scopedSession(session, projectId);
+        })
+        .map((worktree) => worktree.sessionId),
+    );
+    if (q) {
+      return {
+        results: messages
+          .filter(
+            (message) =>
+              scopedWorktreeSessionIds.has(message.sessionId) &&
+              includesQuery(message.content, q),
+          )
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+          .map((message) =>
+            toMessageResult(
+              message,
+              sessionById.get(message.sessionId) as FixtureSession,
+            ),
+          ),
+      };
+    }
     return {
       results: newestFirst(worktrees)
         .filter((worktree) => {
-          const session = sessionById.get(worktree.sessionId);
-          if (!session || !scopedSession(session, projectId)) return false;
-          if (!q) return true;
-          return (
-            includesQuery(session.title, q) ||
-            includesQuery(worktree.branchName, q) ||
-            includesQuery(worktree.worktreePath, q) ||
-            includesQuery(worktree.status, q)
-          );
+          return scopedWorktreeSessionIds.has(worktree.sessionId);
         })
         .map((worktree) =>
           toWorktreeResult(
@@ -686,15 +710,27 @@ check(
 
 await openSearch();
 await click(getFilterButton());
-await wait(30);
-await setInputValue("worktree-filter");
-await wait(220);
+await wait(40);
 check(
-  "worktree filter requests worktree mode and shows scoped worktree sessions",
+  "worktree filter lists scoped isolated workspace sessions before typing",
   getFilterButton().getAttribute("aria-pressed") === "true" &&
     fetchCalls.at(-1)?.mode === ChatSearchMode.worktree &&
+    fetchCalls.at(-1)?.q === "" &&
     getOptions().length === 1 &&
     getOptions()[0]?.textContent?.includes("Worktree QA session") === true &&
+    !document.body.textContent?.includes("Other project worktree"),
+  { fetchCalls, body: document.body.textContent },
+);
+await setInputValue("isolated session");
+await wait(220);
+check(
+  "typing with worktree filter searches messages inside scoped worktree sessions",
+  getFilterButton().getAttribute("aria-pressed") === "true" &&
+    fetchCalls.at(-1)?.mode === ChatSearchMode.worktree &&
+    fetchCalls.at(-1)?.q === "isolated session" &&
+    getOptions().length === 1 &&
+    getOptions()[0]?.textContent?.includes("Worktree QA session") === true &&
+    getOptions()[0]?.textContent?.includes("Worktree scoped content") === true &&
     !document.body.textContent?.includes("Other project worktree"),
   { fetchCalls, body: document.body.textContent },
 );

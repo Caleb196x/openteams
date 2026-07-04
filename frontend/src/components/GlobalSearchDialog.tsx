@@ -158,13 +158,14 @@ export function GlobalSearchDialog({
     setError(null);
     setSelectedIndex(-1);
 
-    if (trimmedQuery.length === 0) {
+    const canSearch = trimmedQuery.length > 0 || worktreeModeActive;
+    if (!canSearch) {
       setResults([]);
       setLoading(false);
       return;
     }
 
-    const delayMs = 180;
+    const delayMs = trimmedQuery.length > 0 ? 180 : 0;
     setLoading(true);
 
     const timer = window.setTimeout(() => {
@@ -193,7 +194,15 @@ export function GlobalSearchDialog({
     }, delayMs);
 
     return () => window.clearTimeout(timer);
-  }, [open, projectId, query, retryVersion, search, searchMode]);
+  }, [
+    open,
+    projectId,
+    query,
+    retryVersion,
+    search,
+    searchMode,
+    worktreeModeActive,
+  ]);
 
   const selectedResult = useMemo(
     () => (selectedIndex >= 0 ? results[selectedIndex] : undefined),
@@ -248,16 +257,19 @@ export function GlobalSearchDialog({
 
   const clearQuery = () => {
     setQuery("");
-    setResults([]);
     setError(null);
     setSelectedIndex(-1);
-    setLoading(false);
+    if (!worktreeModeActive) {
+      setResults([]);
+      setLoading(false);
+    }
     inputRef.current?.focus();
   };
 
   if (!open) return null;
 
   const hasQuery = query.trim().length > 0;
+  const showResultsPanel = hasQuery || worktreeModeActive;
 
   const dialog = (
     <div
@@ -318,7 +330,7 @@ export function GlobalSearchDialog({
           </button>
         </div>
 
-        {hasQuery && (
+        {showResultsPanel && (
           <div
             data-global-search-results-panel="true"
             className="max-h-[min(520px,calc(100vh-128px))] overflow-y-auto bg-[#17181A] p-1.5"

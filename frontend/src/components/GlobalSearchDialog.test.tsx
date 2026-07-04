@@ -124,6 +124,17 @@ const worktreeResult: ChatSearchResult = {
   path_summary: "sessions/wt-1",
   updated_at: "2026-07-04T00:00:00Z",
 };
+const worktreeMessageResult: ChatSearchResult = {
+  type: "message",
+  message_id: "msg-worktree-1",
+  session_id: "sess-3",
+  session_title: "Worktree QA",
+  snippet: "worktree scoped message",
+  sender_type: ChatSenderType.agent,
+  sender_id: null,
+  sender_label: "Agent",
+  message_time: "2026-07-04T00:01:00Z",
+};
 
 let activeRoot: Root | null = null;
 
@@ -224,7 +235,9 @@ const main = async () => {
   const search: SearchRequest = async (params) => {
     searchCalls.push(params);
     if (params.mode === ChatSearchMode.worktree) {
-      return { results: [worktreeResult] };
+      return {
+        results: params.q?.trim() ? [worktreeMessageResult] : [worktreeResult],
+      };
     }
     return { results: [sessionResult, messageResult, worktreeResult] };
   };
@@ -345,7 +358,16 @@ const main = async () => {
   await renderDialog({ search });
   await wait(20);
   await click(getFilterButton());
-  await wait(20);
+  await wait(40);
+  check(
+    "clicking the worktree icon lists current isolated workspace sessions",
+    getFilterButton().getAttribute("aria-pressed") === "true" &&
+      searchCalls.at(-1)?.mode === ChatSearchMode.worktree &&
+      searchCalls.at(-1)?.q === "" &&
+      getResultsPanel() !== null &&
+      document.body.textContent?.includes("Worktree QA") === true,
+    searchCalls,
+  );
   await setInputValue("qa");
   await wait(220);
   check(
@@ -353,6 +375,13 @@ const main = async () => {
     getFilterButton().getAttribute("aria-pressed") === "true" &&
       searchCalls.at(-1)?.mode === ChatSearchMode.worktree &&
       document.body.textContent?.includes("Worktree QA") === true,
+    searchCalls,
+  );
+
+  check(
+    "typing in worktree mode searches messages within isolated workspace sessions",
+    searchCalls.at(-1)?.q === "qa" &&
+      document.body.textContent?.includes("worktree scoped message") === true,
     searchCalls,
   );
 
