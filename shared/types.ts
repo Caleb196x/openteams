@@ -10,14 +10,6 @@ export type CreateProject = { name: string, repositories: Array<CreateProjectRep
 
 export type UpdateProject = { name: string | null, description: string | null, status: string | null, default_workspace_path: string | null, active_repo_id: string | null, };
 
-export type SearchResult = { path: string, is_file: boolean, match_type: SearchMatchType,
-/**
- * Ranking score based on git history (higher = more recently/frequently edited)
- */
-score: bigint, };
-
-export type SearchMatchType = "FileName" | "DirectoryName" | "FullPath";
-
 export type ProjectMember = { id: string, project_id: string, member_type: ProjectMemberType, user_id: string | null, agent_id: string | null, member_name: string | null, role: string | null, display_order: bigint, default_workspace_path: string | null, allowed_skill_ids: string[], execution_config: MemberExecutionConfig, is_default: boolean, created_at: Date, updated_at: Date, };
 
 export enum ProjectMemberType { human = "human", agent = "agent" }
@@ -783,8 +775,6 @@ export type GitRemote = { name: string, url: string, };
 export type DirectoryEntry = { name: string, path: string, is_directory: boolean, is_git_repo: boolean, last_modified: bigint | null, };
 
 export type DirectoryListResponse = { entries: Array<DirectoryEntry>, current_path: string, };
-
-export type SearchMode = "taskform" | "settings";
 
 export type WorkflowCardAgent = { session_agent_id: string, workflow_agent_session_id: string | null, agent_id: string, name: string, };
 
