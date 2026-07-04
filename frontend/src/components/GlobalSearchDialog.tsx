@@ -6,7 +6,13 @@ import React, {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { GitBranch, MessageSquareText, RefreshCw, Search } from "lucide-react";
+import {
+  GitBranch,
+  MessageSquareText,
+  RefreshCw,
+  Search,
+  X,
+} from "lucide-react";
 import { chatSearchApi } from "@/lib/api";
 import { useAppScale } from "@/context/AppScaleContext";
 import {
@@ -146,13 +152,20 @@ export function GlobalSearchDialog({
       return;
     }
 
+    const trimmedQuery = query.trim();
     const requestId = requestSeqRef.current + 1;
     requestSeqRef.current = requestId;
-    const trimmedQuery = query.trim();
-    const delayMs = trimmedQuery.length > 0 ? 180 : 0;
-    setLoading(true);
     setError(null);
     setSelectedIndex(-1);
+
+    if (trimmedQuery.length === 0) {
+      setResults([]);
+      setLoading(false);
+      return;
+    }
+
+    const delayMs = 180;
+    setLoading(true);
 
     const timer = window.setTimeout(() => {
       void search({
@@ -230,11 +243,21 @@ export function GlobalSearchDialog({
     const nextMode = worktreeModeActive
       ? ChatSearchMode.all
       : ChatSearchMode.worktree;
-    if (nextMode === ChatSearchMode.worktree) setQuery("");
     setSearchMode(nextMode);
   };
 
+  const clearQuery = () => {
+    setQuery("");
+    setResults([]);
+    setError(null);
+    setSelectedIndex(-1);
+    setLoading(false);
+    inputRef.current?.focus();
+  };
+
   if (!open) return null;
+
+  const hasQuery = query.trim().length > 0;
 
   const dialog = (
     <div
@@ -250,7 +273,7 @@ export function GlobalSearchDialog({
         role="dialog"
         aria-modal="true"
         aria-label="全局搜索"
-        className="relative flex max-h-[min(520px,calc(100vh-32px))] w-full max-w-xl flex-col overflow-hidden rounded-[10px] border border-[rgba(255,255,255,0.08)] bg-[#17181A]/95 text-[var(--ink)] shadow-[0_28px_72px_rgba(0,0,0,0.48),0_2px_8px_rgba(0,0,0,0.32),inset_0_1px_0_rgba(255,255,255,0.04)] backdrop-blur-xl"
+        className="relative flex max-h-[min(640px,calc(100vh-32px))] w-full max-w-xl flex-col overflow-hidden rounded-[10px] border border-[rgba(255,255,255,0.08)] bg-[#17181A]/95 text-[var(--ink)] shadow-[0_28px_72px_rgba(0,0,0,0.48),0_2px_8px_rgba(0,0,0,0.32),inset_0_1px_0_rgba(255,255,255,0.04)] backdrop-blur-xl"
       >
         <div className="flex items-center gap-3 border-b border-[rgba(255,255,255,0.045)] bg-[rgba(255,255,255,0.018)] px-4 py-2.5">
           <Search
@@ -264,8 +287,20 @@ export function GlobalSearchDialog({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="搜索会话、事项和消息"
-            className="min-w-0 flex-1 bg-transparent text-[16px] leading-6 text-[rgba(255,255,255,0.9)] outline-none placeholder:text-[rgba(255,255,255,0.36)]"
+            className="global-search-input min-w-0 flex-1 bg-transparent text-[16px] leading-6 text-[rgba(255,255,255,0.9)] outline-none placeholder:text-[rgba(255,255,255,0.36)]"
           />
+          {query.length > 0 && (
+            <button
+              type="button"
+              data-global-search-clear="true"
+              aria-label="Clear search"
+              title="Clear search"
+              onClick={clearQuery}
+              className="global-search-clear-button flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md transition"
+            >
+              <X aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={1.4} />
+            </button>
+          )}
           <button
             type="button"
             data-search-worktree-filter="true"
@@ -283,8 +318,12 @@ export function GlobalSearchDialog({
           </button>
         </div>
 
-        <div className="min-h-40 overflow-y-auto bg-[#17181A] p-1.5">
-          {loading ? (
+        {hasQuery && (
+          <div
+            data-global-search-results-panel="true"
+            className="max-h-[min(520px,calc(100vh-128px))] overflow-y-auto bg-[#17181A] p-1.5"
+          >
+            {loading ? (
             <div className="space-y-1" aria-label="搜索加载中">
               {Array.from({ length: 4 }).map((_, index) => (
                 <div
@@ -348,22 +387,23 @@ export function GlobalSearchDialog({
                       <ResultIcon strokeWidth={1.75} className="h-3.5 w-3.5" />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[14px] font-medium leading-[18px] text-[#f2f2f2]">
+                      <span className="block truncate text-[13px] font-medium leading-[17px] text-[#f2f2f2]">
                         {resultTitle(result)}
                       </span>
-                      <span className="block truncate text-[12px] leading-[16px] text-[rgba(255,255,255,0.4)]">
+                      <span className="block truncate text-[11px] leading-[15px] text-[rgba(255,255,255,0.4)]">
                         {resultSnippet(result)}
                       </span>
                     </span>
-                    <span className="shrink-0 rounded-[4px] bg-[rgba(255,255,255,0.04)] px-1.5 py-0.5 text-[11px] leading-4 text-[rgba(255,255,255,0.42)]">
+                    <span className="shrink-0 rounded-[4px] bg-[rgba(255,255,255,0.04)] px-1.5 py-0.5 text-[10px] leading-4 text-[rgba(255,255,255,0.42)]">
                       {resultMeta(result)}
                     </span>
                   </button>
                 );
               })}
             </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
       </section>
     </div>
   );
