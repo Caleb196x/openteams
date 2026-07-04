@@ -565,7 +565,7 @@ body[data-mode="light"] .animate-shimmer::after {
   --team-template-description: var(--team-template-muted);
   --team-template-icon: #8a8f98;
   --team-template-tag-text: var(--team-template-muted);
-  background: var(--team-template-canvas);
+  background: transparent;
 }
 
 body[data-mode="light"] .team-template-page {
