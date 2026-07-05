@@ -163,6 +163,14 @@ check(
   source,
 );
 check(
+  "opens the source-control handling panel for inbox worktree cleanup focus",
+  source.includes("SOURCE_CONTROL_REFRESH_REQUESTED_EVENT") &&
+    source.includes("SourceControlRefreshRequestedDetail") &&
+    source.includes("setIsRelatedFilesOpen(true)") &&
+    source.includes("detail.sessionId !== activeSessionId"),
+  source,
+);
+check(
   "keeps the member invite action fixed outside the avatar rail and uses click filtering",
   memberRailIndex >= 0 &&
     memberRailCloseIndex > memberRailIndex &&
