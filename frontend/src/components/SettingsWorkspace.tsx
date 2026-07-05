@@ -39,13 +39,12 @@ import {
 import { mockFrontendApi } from '@/lib/mockFrontendApi';
 import type { SettingsOptionsMock } from '@/mockApiData';
 import type { GitHubAccount, Session, UserSystemInfo } from '@/types';
+import { SoundFile, type NotificationConfig } from '../../../shared/types';
 
-type NotificationToggleKey =
-  | 'newMessage'
-  | 'workflowStatus'
-  | 'agentActivity'
-  | 'systemBanner'
-  | 'soundEnabled';
+type NotificationConfigField =
+  | 'push_enabled'
+  | 'sound_enabled'
+  | 'sound_file';
 
 const trimTrailingPathSeparators = (path: string): string =>
   path.replace(/[\\/]+$/, '');
@@ -122,6 +121,41 @@ const getDefaultWorktreeSessionsDir = (
   );
 };
 
+const DEFAULT_NOTIFICATION_CONFIG: NotificationConfig = {
+  sound_enabled: true,
+  push_enabled: true,
+  sound_file: SoundFile.ABSTRACT_SOUND3,
+};
+
+const SOUND_FILE_VALUES = new Set<string>(Object.values(SoundFile));
+
+const notificationConfigFrom = (value: unknown): NotificationConfig => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return DEFAULT_NOTIFICATION_CONFIG;
+  }
+
+  const candidate = value as {
+    sound_enabled?: unknown;
+    push_enabled?: unknown;
+    sound_file?: unknown;
+  };
+  return {
+    sound_enabled:
+      typeof candidate.sound_enabled === 'boolean'
+        ? candidate.sound_enabled
+        : DEFAULT_NOTIFICATION_CONFIG.sound_enabled,
+    push_enabled:
+      typeof candidate.push_enabled === 'boolean'
+        ? candidate.push_enabled
+        : DEFAULT_NOTIFICATION_CONFIG.push_enabled,
+    sound_file:
+      typeof candidate.sound_file === 'string' &&
+      SOUND_FILE_VALUES.has(candidate.sound_file)
+        ? (candidate.sound_file as SoundFile)
+        : DEFAULT_NOTIFICATION_CONFIG.sound_file,
+  };
+};
+
 interface NotificationSettingRowProps {
   title: string;
   description: string;
@@ -129,6 +163,7 @@ interface NotificationSettingRowProps {
   onToggle?: () => void;
   control?: React.ReactNode;
   divided?: boolean;
+  disabled?: boolean;
 }
 
 const NotificationSettingRow: React.FC<NotificationSettingRowProps> = ({
@@ -138,33 +173,43 @@ const NotificationSettingRow: React.FC<NotificationSettingRowProps> = ({
   onToggle,
   control,
   divided = true,
-}) => (
-  <div className={`flex items-center justify-between gap-5 px-5 py-4 ${divided ? 'border-b border-[var(--hairline)]' : ''}`}>
-    <div className="min-w-0">
-      <p className="text-sm leading-tight text-[var(--ink)]">{title}</p>
-      <p className="mt-1 text-sm leading-snug text-[var(--ink-subtle)]">{description}</p>
-    </div>
-    {control ?? (
-      <button
-        type="button"
-        aria-label={title}
-        aria-pressed={checked}
-        onClick={onToggle}
-        className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors ${
-          checked
-            ? 'border-[var(--primary)] bg-[var(--primary)]'
-            : 'border-[var(--hairline-strong)] bg-[var(--surface-3)]'
-        }`}
-      >
-        <span
-          className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
-            checked ? 'translate-x-5' : 'translate-x-0'
+  disabled = false,
+}) => {
+  const toggleDisabled = disabled || !onToggle;
+
+  return (
+    <div className={`flex items-center justify-between gap-5 px-5 py-4 ${divided ? 'border-b border-[var(--hairline)]' : ''}`}>
+      <div className="min-w-0">
+        <p className="text-sm leading-tight text-[var(--ink)]">{title}</p>
+        <p className="mt-1 text-sm leading-snug text-[var(--ink-subtle)]">{description}</p>
+      </div>
+      {control ?? (
+        <button
+          type="button"
+          aria-label={title}
+          aria-pressed={checked}
+          disabled={toggleDisabled}
+          onClick={toggleDisabled ? undefined : onToggle}
+          className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors ${
+            checked
+              ? 'border-[var(--primary)] bg-[var(--primary)]'
+              : 'border-[var(--hairline-strong)] bg-[var(--surface-3)]'
+          } ${
+            toggleDisabled
+              ? 'cursor-not-allowed opacity-60'
+              : 'cursor-pointer'
           }`}
-        />
-      </button>
-    )}
-  </div>
-);
+        >
+          <span
+            className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+              checked ? 'translate-x-5' : 'translate-x-0'
+            }`}
+          />
+        </button>
+      )}
+    </div>
+  );
+};
 
 const sessionErrorMessage = (error: unknown, fallback: string) =>
   error instanceof Error ? `${fallback}: ${error.message}` : fallback;
@@ -192,14 +237,10 @@ export const SettingsWorkspace: React.FC = () => {
   const [githubAccount, setGithubAccount] = useState<GitHubAccount | null>(
     null,
   );
-  const [notificationToggles, setNotificationToggles] = useState<Record<NotificationToggleKey, boolean>>({
-    newMessage: true,
-    workflowStatus: true,
-    agentActivity: true,
-    systemBanner: true,
-    soundEnabled: true,
-  });
-  const [notificationSound, setNotificationSound] = useState('soft-chime');
+  const [notificationSavingField, setNotificationSavingField] =
+    useState<NotificationConfigField | null>(null);
+  const [notificationSettingsMessage, setNotificationSettingsMessage] =
+    useState<string | null>(null);
   const [restoringArchivedSessionId, setRestoringArchivedSessionId] =
     useState<string | null>(null);
   const [deletingArchivedSession, setDeletingArchivedSession] =
@@ -240,6 +281,11 @@ export const SettingsWorkspace: React.FC = () => {
       id: String(size),
       label: t('settings.appearance.chatMessageFontSizeOption', { size }),
     }));
+  const notificationConfig = notificationConfigFrom(
+    configAsync.data?.notifications,
+  );
+  const notificationSettingsDisabled =
+    !configAsync.data || Boolean(notificationSavingField);
 
   useEffect(() => {
     let cancelled = false;
@@ -296,11 +342,53 @@ export const SettingsWorkspace: React.FC = () => {
     return translated && translated !== key ? translated : fallback;
   };
 
-  const handleToggleNotification = (key: NotificationToggleKey) => {
-    setNotificationToggles((current) => ({
-      ...current,
-      [key]: !current[key],
-    }));
+  const persistNotificationConfig = async (
+    patch: Partial<NotificationConfig>,
+    field: NotificationConfigField,
+  ) => {
+    const currentConfig = configAsync.data;
+    if (!currentConfig || notificationSavingField) return;
+
+    const currentNotifications = notificationConfigFrom(
+      currentConfig.notifications,
+    );
+    const nextNotifications: NotificationConfig = {
+      ...currentNotifications,
+      ...patch,
+    };
+    if (
+      nextNotifications.push_enabled === currentNotifications.push_enabled &&
+      nextNotifications.sound_enabled === currentNotifications.sound_enabled &&
+      nextNotifications.sound_file === currentNotifications.sound_file
+    ) {
+      return;
+    }
+
+    setNotificationSavingField(field);
+    setNotificationSettingsMessage(null);
+    try {
+      await systemApi.saveConfig({
+        ...currentConfig,
+        notifications: {
+          sound_enabled: nextNotifications.sound_enabled,
+          push_enabled: nextNotifications.push_enabled,
+          sound_file: nextNotifications.sound_file,
+        },
+      });
+      await refreshConfig();
+    } catch (error) {
+      setNotificationSettingsMessage(
+        sessionErrorMessage(
+          error,
+          translate(
+            'settings.notifications.saveFailed',
+            'Failed to save notification settings.',
+          ),
+        ),
+      );
+    } finally {
+      setNotificationSavingField(null);
+    }
   };
 
   const handleRestoreArchivedSession = async (session: Session) => {
@@ -682,43 +770,55 @@ export const SettingsWorkspace: React.FC = () => {
         );
 
       case 'notifications': {
-        const inboxRows: Array<{
-          key: NotificationToggleKey;
-          titleKey: string;
-          descKey: string;
-        }> = [
-          {
-            key: 'newMessage',
-            titleKey: 'settings.notifications.newMessage.title',
-            descKey: 'settings.notifications.newMessage.desc',
-          },
-          {
-            key: 'workflowStatus',
-            titleKey: 'settings.notifications.workflowStatus.title',
-            descKey: 'settings.notifications.workflowStatus.desc',
-          },
-          {
-            key: 'agentActivity',
-            titleKey: 'settings.notifications.agentActivity.title',
-            descKey: 'settings.notifications.agentActivity.desc',
-          },
-        ];
         const soundOptions: DropdownSelectOption[] = [
           {
-            id: 'soft-chime',
-            label: t('settings.notifications.sound.softChime'),
+            id: SoundFile.ABSTRACT_SOUND1,
+            label: translate(
+              'settings.notifications.sound.abstractSound1',
+              'Abstract sound 1',
+            ),
           },
           {
-            id: 'bright-ping',
-            label: t('settings.notifications.sound.brightPing'),
+            id: SoundFile.ABSTRACT_SOUND2,
+            label: translate(
+              'settings.notifications.sound.abstractSound2',
+              'Abstract sound 2',
+            ),
           },
           {
-            id: 'low-bell',
-            label: t('settings.notifications.sound.lowBell'),
+            id: SoundFile.ABSTRACT_SOUND3,
+            label: translate(
+              'settings.notifications.sound.abstractSound3',
+              'Abstract sound 3',
+            ),
           },
           {
-            id: 'none',
-            label: t('settings.notifications.sound.none'),
+            id: SoundFile.ABSTRACT_SOUND4,
+            label: translate(
+              'settings.notifications.sound.abstractSound4',
+              'Abstract sound 4',
+            ),
+          },
+          {
+            id: SoundFile.PHONE_VIBRATION,
+            label: translate(
+              'settings.notifications.sound.phoneVibration',
+              'Phone vibration',
+            ),
+          },
+          {
+            id: SoundFile.ROOSTER,
+            label: translate(
+              'settings.notifications.sound.rooster',
+              'Rooster',
+            ),
+          },
+          {
+            id: SoundFile.COW_MOOING,
+            label: translate(
+              'settings.notifications.sound.cowMooing',
+              'Cow mooing',
+            ),
           },
         ];
 
@@ -731,16 +831,20 @@ export const SettingsWorkspace: React.FC = () => {
               </div>
 
               <div className="rounded-lg border border-[var(--hairline)] bg-[var(--surface-1)]">
-                {inboxRows.map((row, index) => (
-                  <NotificationSettingRow
-                    key={row.key}
-                    title={t(row.titleKey)}
-                    description={t(row.descKey)}
-                    checked={notificationToggles[row.key]}
-                    onToggle={() => handleToggleNotification(row.key)}
-                    divided={index < inboxRows.length - 1}
-                  />
-                ))}
+                <div className="px-5 py-4">
+                  <p className="text-sm leading-tight text-[var(--ink)]">
+                    {translate(
+                      'settings.notifications.inboxAlwaysOn.title',
+                      'Persistent Bell inbox',
+                    )}
+                  </p>
+                  <p className="mt-1 text-sm leading-snug text-[var(--ink-subtle)]">
+                    {translate(
+                      'settings.notifications.inboxAlwaysOn.desc',
+                      'Agent messages, workflow actions, approvals, worktree conflicts and failures are stored in the Bell inbox.',
+                    )}
+                  </p>
+                </div>
               </div>
             </section>
 
@@ -750,18 +854,36 @@ export const SettingsWorkspace: React.FC = () => {
                 <p className="mt-1 text-sm leading-relaxed text-[var(--ink-subtle)]">{t('settings.notifications.system.desc')}</p>
               </div>
 
+              {notificationSettingsMessage && (
+                <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+                  {notificationSettingsMessage}
+                </p>
+              )}
+
               <div className="rounded-lg border border-[var(--hairline)] bg-[var(--surface-1)]">
                 <NotificationSettingRow
                   title={t('settings.notifications.systemBanner.title')}
                   description={t('settings.notifications.systemBanner.desc')}
-                  checked={notificationToggles.systemBanner}
-                  onToggle={() => handleToggleNotification('systemBanner')}
+                  checked={notificationConfig.push_enabled}
+                  disabled={notificationSettingsDisabled}
+                  onToggle={() =>
+                    void persistNotificationConfig(
+                      { push_enabled: !notificationConfig.push_enabled },
+                      'push_enabled',
+                    )
+                  }
                 />
                 <NotificationSettingRow
                   title={t('settings.notifications.soundEnabled.title')}
                   description={t('settings.notifications.soundEnabled.desc')}
-                  checked={notificationToggles.soundEnabled}
-                  onToggle={() => handleToggleNotification('soundEnabled')}
+                  checked={notificationConfig.sound_enabled}
+                  disabled={notificationSettingsDisabled}
+                  onToggle={() =>
+                    void persistNotificationConfig(
+                      { sound_enabled: !notificationConfig.sound_enabled },
+                      'sound_enabled',
+                    )
+                  }
                 />
                 <NotificationSettingRow
                   title={t('settings.notifications.soundSelect.title')}
@@ -769,12 +891,20 @@ export const SettingsWorkspace: React.FC = () => {
                   divided={false}
                   control={
                     <DropdownSelect
-                      value={notificationSound}
+                      value={notificationConfig.sound_file}
                       options={soundOptions}
                       showSearch={false}
-                      disabled={!notificationToggles.soundEnabled}
+                      disabled={
+                        notificationSettingsDisabled ||
+                        !notificationConfig.sound_enabled
+                      }
                       placeholder={t('settings.notifications.soundSelect.placeholder')}
-                      onChange={(value) => setNotificationSound(value)}
+                      onChange={(value) =>
+                        void persistNotificationConfig(
+                          { sound_file: value as SoundFile },
+                          'sound_file',
+                        )
+                      }
                       className="w-[180px] shrink-0"
                       maxPanelHeightClassName="max-h-[180px]"
                     />

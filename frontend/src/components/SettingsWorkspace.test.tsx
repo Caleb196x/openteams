@@ -47,11 +47,43 @@ const requiredLocaleKeys = [
   'settings.appearance.systemTheme',
 ];
 
+const requiredNotificationLocaleKeys = [
+  'settings.notifications.inboxAlwaysOn.title',
+  'settings.notifications.inboxAlwaysOn.desc',
+  'settings.notifications.saveFailed',
+  'settings.notifications.sound.abstractSound1',
+  'settings.notifications.sound.abstractSound2',
+  'settings.notifications.sound.abstractSound3',
+  'settings.notifications.sound.abstractSound4',
+  'settings.notifications.sound.phoneVibration',
+  'settings.notifications.sound.rooster',
+  'settings.notifications.sound.cowMooing',
+];
+
 check(
   'adds a follow-system theme option to General settings',
   settingsSource.includes("setTheme('system')") &&
     settingsSource.includes('themePreference') &&
     settingsSource.includes('settings.appearance.systemTheme'),
+  settingsSource,
+);
+
+check(
+  'wires notification settings to persisted backend notification config',
+  settingsSource.includes('persistNotificationConfig') &&
+    settingsSource.includes('systemApi.saveConfig') &&
+    settingsSource.includes('push_enabled') &&
+    settingsSource.includes('sound_enabled') &&
+    settingsSource.includes('sound_file') &&
+    settingsSource.includes('SoundFile.ABSTRACT_SOUND3'),
+  settingsSource,
+);
+
+check(
+  'notification settings do not expose unsupported inbox event toggles',
+  !settingsSource.includes("key: 'newMessage'") &&
+    !settingsSource.includes("key: 'workflowStatus'") &&
+    !settingsSource.includes("key: 'agentActivity'"),
   settingsSource,
 );
 
@@ -95,6 +127,13 @@ for (const locale of ['en', 'zh', 'ja', 'ko', 'fr', 'es']) {
   check(
     `locale ${locale} contains archived session settings keys`,
     requiredLocaleKeys.every((key) => localeSource.includes(`"${key}"`)),
+    localeSource,
+  );
+  check(
+    `locale ${locale} contains persisted notification settings keys`,
+    requiredNotificationLocaleKeys.every((key) =>
+      localeSource.includes(`"${key}"`),
+    ),
     localeSource,
   );
 }
