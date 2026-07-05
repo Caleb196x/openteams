@@ -28,6 +28,12 @@ const source = readFileSync(
   new URL("./InboxNotificationsPopover.tsx", import.meta.url),
   "utf8",
 );
+const badgeStart = source.indexOf("{unreadCount > 0 && (");
+const badgeEnd = source.indexOf("{inboxBadgeLabel(unreadCount)}", badgeStart);
+const badgeSource =
+  badgeStart >= 0 && badgeEnd > badgeStart
+    ? source.slice(badgeStart, badgeEnd)
+    : "";
 
 const unreadItem: InboxItem = {
   id: "inbox-unread",
@@ -75,6 +81,15 @@ check(
   "renders Bell trigger with capped unread badge",
   html.includes("Open notifications") && html.includes("99+"),
   html,
+);
+
+check(
+  "renders unread badge as brand-colored text without circular background",
+  badgeSource.includes("text-[var(--primary)]") &&
+    !badgeSource.includes("rounded-full") &&
+    !badgeSource.includes("bg-red-500") &&
+    !badgeSource.includes("text-white"),
+  badgeSource,
 );
 
 check(
