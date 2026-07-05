@@ -284,12 +284,14 @@ export function InboxNotificationsPopover({
         )}
         aria-expanded={open}
       >
-        <Bell className="h-3.5 w-3.5" />
-        {unreadCount > 0 && (
-          <span className="absolute -right-1.5 -top-1 font-mono text-[10px] font-semibold leading-none tabular-nums text-[var(--primary)]">
-            {inboxBadgeLabel(unreadCount)}
-          </span>
-        )}
+        <span className="relative inline-flex h-3.5 w-3.5 items-center justify-center">
+          <Bell className="h-3.5 w-3.5" />
+          {unreadCount > 0 && (
+            <span className="pointer-events-none absolute -right-1 -top-1.5 font-mono text-[10px] font-semibold leading-none tabular-nums text-[#f3f4f6] drop-shadow-[0_1px_1px_rgba(0,0,0,0.75)]">
+              {inboxBadgeLabel(unreadCount)}
+            </span>
+          )}
+        </span>
       </button>
 
       {open &&

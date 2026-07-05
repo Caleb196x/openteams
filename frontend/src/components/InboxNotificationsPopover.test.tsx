@@ -84,8 +84,10 @@ check(
 );
 
 check(
-  "renders unread badge as brand-colored text without circular background",
-  badgeSource.includes("text-[var(--primary)]") &&
+  "renders unread badge as light-gray text over the Bell top-right",
+  source.includes("relative inline-flex h-3.5 w-3.5") &&
+    badgeSource.includes("-right-1 -top-1.5") &&
+    badgeSource.includes("text-[#f3f4f6]") &&
     !badgeSource.includes("rounded-full") &&
     !badgeSource.includes("bg-red-500") &&
     !badgeSource.includes("text-white"),
