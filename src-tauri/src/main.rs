@@ -8,6 +8,7 @@ use std::{
 
 use directories::ProjectDirs;
 use portpicker::pick_unused_port;
+use serde::{Deserialize, Serialize};
 use tauri::{
     api::process::{Command as SidecarCommand, CommandChild},
     Manager,
@@ -15,6 +16,52 @@ use tauri::{
 
 struct BackendState {
     child: Mutex<Option<CommandChild>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SelectDirectoryDialogRequest {
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    initial_directory: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct SelectDirectoryDialogResponse {
+    path: Option<String>,
+    cancelled: bool,
+}
+
+fn clean_optional_string(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+#[tauri::command]
+async fn select_directory_dialog(
+    window: tauri::Window,
+    payload: SelectDirectoryDialogRequest,
+) -> Result<SelectDirectoryDialogResponse, String> {
+    let title = clean_optional_string(payload.title);
+    let initial_directory =
+        clean_optional_string(payload.initial_directory).filter(|path| Path::new(path).is_dir());
+
+    let mut builder = tauri::api::dialog::blocking::FileDialogBuilder::new().set_parent(&window);
+    if let Some(title) = title.as_deref() {
+        builder = builder.set_title(title);
+    }
+    if let Some(initial_directory) = initial_directory.as_deref() {
+        builder = builder.set_directory(initial_directory);
+    }
+
+    let path = builder
+        .pick_folder()
+        .map(|path| path.to_string_lossy().to_string());
+    Ok(SelectDirectoryDialogResponse {
+        cancelled: path.is_none(),
+        path,
+    })
 }
 
 /// Delete all user data (database, config, cache, workspaces)
@@ -313,7 +360,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             delete_all_user_data,
             delete_cache_data,
-            reveal_path_in_file_manager
+            reveal_path_in_file_manager,
+            select_directory_dialog
         ])
         .setup(|app| {
             let port = pick_unused_port().unwrap_or(3999);

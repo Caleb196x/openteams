@@ -45,16 +45,22 @@ import {
   chatRuntimeApi,
   chatSessionsApi,
   cliConfigApi,
+  inboxApi,
   projectApi,
   sessionAgentsApi,
   skillsApi,
   systemApi,
   workflowApi,
 } from '@/lib/api';
-import type {
-  CreateProjectRequest,
-  Project,
-  ProjectMemberWithRuntime,
+import {
+  type CreateProjectRequest,
+  type InboxItem,
+  type InboxSummary,
+  SoundFile,
+  type NotificationConfig,
+  type NotificationInboxSourcesConfig,
+  type Project,
+  type ProjectMemberWithRuntime,
 } from '../../../shared/types';
 import {
   effectiveSessionAgentModelName,
@@ -262,8 +268,187 @@ const LIVE_DELTA_ACTIVITY_LINE_PREFIX = 'live-delta-';
 const CHAT_STREAM_RECONNECT_BASE_DELAY_MS = 1000;
 const CHAT_STREAM_RECONNECT_MAX_DELAY_MS = 30000;
 const SIDEBAR_RUNNING_INDICATOR_POLL_MS = 5000;
+const INBOX_REFRESH_INTERVAL_MS = 30000;
+const INBOX_LIGHT_REFRESH_DELAY_MS = 800;
+const INBOX_LIST_LIMIT = 25;
 const CHAT_MESSAGE_FONT_SIZE_DEFAULT = 14;
 export const CHAT_MESSAGE_FONT_SIZE_OPTIONS = [13, 14, 15, 16] as const;
+
+const EMPTY_INBOX_SUMMARY: InboxSummary = {
+  unread_count: 0n,
+  unread_by_severity: [],
+  unread_by_kind: [],
+};
+
+type InboxNotificationSource = keyof NotificationInboxSourcesConfig;
+
+const DEFAULT_NOTIFICATION_INBOX_SOURCES: NotificationInboxSourcesConfig = {
+  chat_message: true,
+  workflow_action: true,
+  approval: true,
+  worktree: true,
+  failure: true,
+};
+
+const DEFAULT_NOTIFICATION_CONFIG: NotificationConfig = {
+  sound_enabled: true,
+  push_enabled: true,
+  sound_file: SoundFile.ABSTRACT_SOUND3,
+  inbox_sources: DEFAULT_NOTIFICATION_INBOX_SOURCES,
+};
+
+const SOUND_FILE_VALUES = new Set<string>(Object.values(SoundFile));
+
+const notificationInboxSourcesFrom = (
+  value: unknown,
+): NotificationInboxSourcesConfig => {
+  const candidate =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Partial<Record<InboxNotificationSource, unknown>>)
+      : {};
+  return {
+    chat_message:
+      typeof candidate.chat_message === 'boolean'
+        ? candidate.chat_message
+        : DEFAULT_NOTIFICATION_INBOX_SOURCES.chat_message,
+    workflow_action:
+      typeof candidate.workflow_action === 'boolean'
+        ? candidate.workflow_action
+        : DEFAULT_NOTIFICATION_INBOX_SOURCES.workflow_action,
+    approval:
+      typeof candidate.approval === 'boolean'
+        ? candidate.approval
+        : DEFAULT_NOTIFICATION_INBOX_SOURCES.approval,
+    worktree:
+      typeof candidate.worktree === 'boolean'
+        ? candidate.worktree
+        : DEFAULT_NOTIFICATION_INBOX_SOURCES.worktree,
+    failure:
+      typeof candidate.failure === 'boolean'
+        ? candidate.failure
+        : DEFAULT_NOTIFICATION_INBOX_SOURCES.failure,
+  };
+};
+
+const notificationConfigFromWorkspaceConfig = (
+  config: Config | null,
+): NotificationConfig => {
+  const value = config?.notifications;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return DEFAULT_NOTIFICATION_CONFIG;
+  }
+
+  const candidate = value as {
+    sound_enabled?: unknown;
+    push_enabled?: unknown;
+    sound_file?: unknown;
+    inbox_sources?: unknown;
+  };
+  return {
+    sound_enabled:
+      typeof candidate.sound_enabled === 'boolean'
+        ? candidate.sound_enabled
+        : DEFAULT_NOTIFICATION_CONFIG.sound_enabled,
+    push_enabled:
+      typeof candidate.push_enabled === 'boolean'
+        ? candidate.push_enabled
+        : DEFAULT_NOTIFICATION_CONFIG.push_enabled,
+    sound_file:
+      typeof candidate.sound_file === 'string' &&
+      SOUND_FILE_VALUES.has(candidate.sound_file)
+        ? (candidate.sound_file as SoundFile)
+        : DEFAULT_NOTIFICATION_CONFIG.sound_file,
+    inbox_sources: notificationInboxSourcesFrom(candidate.inbox_sources),
+  };
+};
+
+const inboxNotificationSourceForKind = (
+  kind: string,
+): InboxNotificationSource | null => {
+  if (kind === 'chat_message') return 'chat_message';
+  if (
+    kind === 'chat_agent_failed' ||
+    kind === 'chat_mention_failed' ||
+    kind === 'workflow_execution_failed'
+  ) {
+    return 'failure';
+  }
+  if (kind === 'executor_approval') return 'approval';
+  if (kind.startsWith('worktree_')) return 'worktree';
+  if (kind.startsWith('workflow_')) return 'workflow_action';
+  return null;
+};
+
+const inboxSourceEnabledForKind = (
+  sources: NotificationInboxSourcesConfig,
+  kind: string,
+): boolean => {
+  const source = inboxNotificationSourceForKind(kind);
+  return source ? sources[source] : true;
+};
+
+const filterInboxItemsForEnabledSources = (
+  config: Config | null,
+  items: InboxItem[],
+): InboxItem[] => {
+  if (!config) return items;
+  const notificationConfig = notificationConfigFromWorkspaceConfig(config);
+  return items.filter((item) =>
+    inboxSourceEnabledForKind(notificationConfig.inbox_sources, item.kind),
+  );
+};
+
+const inboxCountValue = (value: bigint | number): bigint =>
+  typeof value === 'bigint' ? value : BigInt(value);
+
+const filterInboxSummaryForEnabledSources = (
+  config: Config | null,
+  summary: InboxSummary,
+): InboxSummary => {
+  if (!config) return summary;
+  const notificationConfig = notificationConfigFromWorkspaceConfig(config);
+  const unread_by_kind = summary.unread_by_kind.filter((entry) =>
+    inboxSourceEnabledForKind(notificationConfig.inbox_sources, entry.key),
+  );
+  const unread_count = unread_by_kind.reduce(
+    (total, entry) => total + inboxCountValue(entry.count),
+    0n,
+  );
+  return {
+    ...summary,
+    unread_count,
+    unread_by_kind,
+    unread_by_severity: [],
+  };
+};
+
+const inboxNotificationSettingsSignature = (config: Config | null): string => {
+  const notificationConfig = notificationConfigFromWorkspaceConfig(config);
+  return JSON.stringify({
+    sound_enabled: notificationConfig.sound_enabled,
+    sound_file: notificationConfig.sound_file,
+    inbox_sources: notificationConfig.inbox_sources,
+  });
+};
+
+const playInboxNotificationSound = (
+  config: Config | null,
+  newItems: InboxItem[],
+) => {
+  if (!config) return;
+  if (typeof Audio === 'undefined' || newItems.length === 0) return;
+
+  const notificationConfig = notificationConfigFromWorkspaceConfig(config);
+  if (!notificationConfig.sound_enabled) return;
+
+  const audio = new Audio(
+    `/api/sounds/${encodeURIComponent(notificationConfig.sound_file)}`,
+  );
+  void audio.play().catch(() => undefined);
+};
+
+const isAutoReadableInboxItem = (item: InboxItem): boolean =>
+  item.kind === 'chat_message' || item.source_type === 'chat_message';
 
 const isThemePreference = (
   value: string | null | undefined,
@@ -1238,6 +1423,13 @@ interface WorkspaceContextProps {
   config: Config | null;
   configAsync: AsyncResourceState<Config | null>;
   refreshConfig: () => Promise<void>;
+  inboxSummaryAsync: AsyncResourceState<InboxSummary>;
+  inboxItemsAsync: AsyncResourceState<InboxItem[]>;
+  refreshInbox: () => Promise<void>;
+  markInboxItemRead: (itemId: string) => Promise<void>;
+  markInboxItemsRead: (itemIds: string[]) => Promise<void>;
+  markAllInboxRead: () => Promise<void>;
+  archiveInboxItem: (itemId: string) => Promise<void>;
   workflowCard: WorkflowCardProjection | null;
   workflowCardAsync: AsyncResourceState<WorkflowCardProjection | null>;
   refreshWorkflowCard: (messageId: string) => Promise<void>;
@@ -1349,6 +1541,12 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
   const [configAsync, setConfigAsync] = useState<
     AsyncResourceState<Config | null>
   >(() => initialAsync(null));
+  const [inboxSummaryAsync, setInboxSummaryAsync] = useState<
+    AsyncResourceState<InboxSummary>
+  >(() => initialAsync(EMPTY_INBOX_SUMMARY));
+  const [inboxItemsAsync, setInboxItemsAsync] = useState<
+    AsyncResourceState<InboxItem[]>
+  >(() => initialAsync([]));
   const [workflowCardAsync, setWorkflowCardAsync] = useState<
     AsyncResourceState<WorkflowCardProjection | null>
   >(() => initialAsync(null));
@@ -1357,6 +1555,15 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
   >(() => initialAsync(null));
   const messagesRequestIdRef = useRef(0);
   const queueRequestIdRef = useRef(0);
+  const inboxRequestIdRef = useRef(0);
+  const inboxLightRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const inboxSoundProjectIdRef = useRef<string | null>(null);
+  const inboxSoundSettingsSignatureRef = useRef<string | null>(null);
+  const inboxSoundPrimedRef = useRef(false);
+  const inboxUnreadSoundIdsRef = useRef<Set<string>>(new Set());
+  const autoMarkedInboxItemIdsRef = useRef<Set<string>>(new Set());
   const workspaceChangesRequestIdRef = useRef(0);
   const initialRefreshStartedRef = useRef(false);
   const initialRefreshCompletedRef = useRef(false);
@@ -2266,6 +2473,181 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   }, []);
 
+  const refreshInbox = useCallback(async (): Promise<void> => {
+    const projectId = selectedProjectIdRef.current;
+    const requestId = inboxRequestIdRef.current + 1;
+    inboxRequestIdRef.current = requestId;
+
+    if (!projectId) {
+      inboxSoundProjectIdRef.current = null;
+      inboxSoundSettingsSignatureRef.current =
+        inboxNotificationSettingsSignature(configAsync.data);
+      inboxSoundPrimedRef.current = false;
+      inboxUnreadSoundIdsRef.current = new Set();
+      setInboxSummaryAsync(succeed(EMPTY_INBOX_SUMMARY));
+      setInboxItemsAsync(succeed([]));
+      return;
+    }
+    const settingsSignature = inboxNotificationSettingsSignature(
+      configAsync.data,
+    );
+    if (inboxSoundProjectIdRef.current !== projectId) {
+      inboxSoundProjectIdRef.current = projectId;
+      inboxSoundPrimedRef.current = false;
+      inboxUnreadSoundIdsRef.current = new Set();
+    }
+    if (inboxSoundSettingsSignatureRef.current !== settingsSignature) {
+      inboxSoundSettingsSignatureRef.current = settingsSignature;
+      inboxSoundPrimedRef.current = false;
+      inboxUnreadSoundIdsRef.current = new Set();
+    }
+
+    setInboxSummaryAsync(beginLoad);
+    setInboxItemsAsync(beginLoad);
+    try {
+      const [summary, itemsResponse] = await Promise.all([
+        inboxApi.getSummary({ project_id: projectId, session_id: null }),
+        inboxApi.listItems({
+          project_id: projectId,
+          session_id: null,
+          unread: true,
+          archived: false,
+          limit: INBOX_LIST_LIMIT,
+        }),
+      ]);
+      if (
+        inboxRequestIdRef.current !== requestId ||
+        selectedProjectIdRef.current !== projectId
+      ) {
+        return;
+      }
+      const visibleSummary = filterInboxSummaryForEnabledSources(
+        configAsync.data,
+        summary,
+      );
+      const visibleItems = filterInboxItemsForEnabledSources(
+        configAsync.data,
+        itemsResponse.items,
+      );
+      const unreadItemIds = new Set(visibleItems.map((item) => item.id));
+      const newUnreadItems = visibleItems.filter(
+        (item) => !inboxUnreadSoundIdsRef.current.has(item.id),
+      );
+      if (inboxSoundPrimedRef.current) {
+        playInboxNotificationSound(configAsync.data, newUnreadItems);
+      }
+      inboxUnreadSoundIdsRef.current = unreadItemIds;
+      inboxSoundPrimedRef.current = true;
+      setInboxSummaryAsync(succeed(visibleSummary));
+      setInboxItemsAsync(succeed(visibleItems));
+    } catch (err) {
+      if (inboxRequestIdRef.current !== requestId) return;
+      setInboxSummaryAsync((prev) => fail(prev, err));
+      setInboxItemsAsync((prev) => fail(prev, err));
+    }
+  }, [configAsync.data]);
+
+  const scheduleInboxRefresh = useCallback(() => {
+    if (inboxLightRefreshTimerRef.current) return;
+    inboxLightRefreshTimerRef.current = setTimeout(() => {
+      inboxLightRefreshTimerRef.current = null;
+      void refreshInbox();
+    }, INBOX_LIGHT_REFRESH_DELAY_MS);
+  }, [refreshInbox]);
+
+  const removeInboxItemsFromList = useCallback((itemIds: string[]) => {
+    if (itemIds.length === 0) return;
+    const ids = new Set(itemIds);
+    setInboxItemsAsync((prev) => {
+      const nextItems = prev.data.filter((item) => !ids.has(item.id));
+      return nextItems.length === prev.data.length ? prev : succeed(nextItems);
+    });
+  }, []);
+
+  const markInboxItemRead = useCallback(
+    async (itemId: string): Promise<void> => {
+      if (!itemId) return;
+      await inboxApi.markRead(itemId);
+      removeInboxItemsFromList([itemId]);
+      scheduleInboxRefresh();
+    },
+    [removeInboxItemsFromList, scheduleInboxRefresh],
+  );
+
+  const markInboxItemsRead = useCallback(
+    async (itemIds: string[]): Promise<void> => {
+      const ids = Array.from(new Set(itemIds.filter(Boolean)));
+      if (ids.length === 0) return;
+      await inboxApi.markManyRead({ ids });
+      removeInboxItemsFromList(ids);
+      scheduleInboxRefresh();
+    },
+    [removeInboxItemsFromList, scheduleInboxRefresh],
+  );
+
+  const markAllInboxRead = useCallback(async (): Promise<void> => {
+    const projectId = selectedProjectIdRef.current;
+    await inboxApi.markAllRead({
+      project_id: projectId || null,
+      session_id: null,
+    });
+    setInboxItemsAsync(succeed([]));
+    setInboxSummaryAsync(succeed(EMPTY_INBOX_SUMMARY));
+    scheduleInboxRefresh();
+  }, [scheduleInboxRefresh]);
+
+  const archiveInboxItem = useCallback(
+    async (itemId: string): Promise<void> => {
+      if (!itemId) return;
+      await inboxApi.archive(itemId);
+      removeInboxItemsFromList([itemId]);
+      scheduleInboxRefresh();
+    },
+    [removeInboxItemsFromList, scheduleInboxRefresh],
+  );
+
+  useEffect(() => {
+    if (!activeSessionId) return;
+    const ids = inboxItemsAsync.data
+      .filter(
+        (item) =>
+          item.session_id === activeSessionId &&
+          item.read_at === null &&
+          item.archived_at === null &&
+          isAutoReadableInboxItem(item) &&
+          !autoMarkedInboxItemIdsRef.current.has(item.id),
+      )
+      .map((item) => item.id);
+    if (ids.length === 0) return;
+
+    for (const id of ids) {
+      autoMarkedInboxItemIdsRef.current.add(id);
+    }
+    void markInboxItemsRead(ids).catch(() => {
+      for (const id of ids) {
+        autoMarkedInboxItemIdsRef.current.delete(id);
+      }
+    });
+  }, [activeSessionId, inboxItemsAsync.data, markInboxItemsRead]);
+
+  useEffect(() => {
+    void refreshInbox();
+    if (!selectedProjectId) return undefined;
+    const intervalId = setInterval(() => {
+      void refreshInbox();
+    }, INBOX_REFRESH_INTERVAL_MS);
+    return () => clearInterval(intervalId);
+  }, [refreshInbox, selectedProjectId]);
+
+  useEffect(
+    () => () => {
+      if (inboxLightRefreshTimerRef.current) {
+        clearTimeout(inboxLightRefreshTimerRef.current);
+      }
+    },
+    [],
+  );
+
   const refreshSessionLists = useCallback(async (): Promise<void> => {
     await Promise.all([refreshSessions(), refreshArchivedSessions()]);
   }, [refreshArchivedSessions, refreshSessions]);
@@ -2862,6 +3244,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
       for (const sessionId of runningSidebarSessionIds) {
         void refreshSessionRunningIndicators(sessionId);
       }
+      scheduleInboxRefresh();
     };
 
     const intervalId = window.setInterval(
@@ -2872,6 +3255,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [
     activeSessionId,
     refreshSessionRunningIndicators,
+    scheduleInboxRefresh,
     sessionsAsync.data,
     sessionsAsync.source,
   ]);
@@ -2917,6 +3301,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
       refreshMembers(),
       refreshMessages(),
       refreshMemberQueues(),
+      refreshInbox(),
     ]);
   }, [
     refreshSessions,
@@ -2928,6 +3313,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
     refreshMembers,
     refreshMessages,
     refreshMemberQueues,
+    refreshInbox,
   ]);
 
   // Initial load: hydrate local mock API data first, then try backend-backed
@@ -3437,6 +3823,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
         parsed.session_id === sid
       ) {
         void refreshSessionRunningIndicators(sid);
+        scheduleInboxRefresh();
         return;
       }
 
@@ -3492,6 +3879,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
             return next;
           });
         }
+        scheduleInboxRefresh();
         return;
       }
 
@@ -3609,6 +3997,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
     refreshSessionWorkflowStatus,
     refreshWorkspaceChanges,
     refreshMembers,
+    scheduleInboxRefresh,
     setSessionRunningIndicator,
     setSessionWorkflowRunningIndicator,
     sessionsAsync.source,
@@ -4025,6 +4414,13 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
         config: configAsync.data,
         configAsync,
         refreshConfig,
+        inboxSummaryAsync,
+        inboxItemsAsync,
+        refreshInbox,
+        markInboxItemRead,
+        markInboxItemsRead,
+        markAllInboxRead,
+        archiveInboxItem,
         workflowCard: workflowCardAsync.data,
         workflowCardAsync,
         refreshWorkflowCard,
