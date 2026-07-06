@@ -302,6 +302,30 @@ export enum ChatPermissionTtlType { once = "once", time = "time", session = "ses
 
 export type ChatArtifact = { id: string, session_id: string, name: string, path: string, type: string, created_by: string | null, pinned: boolean, created_at: string, };
 
+export type InboxItem = { id: string, project_id: string | null, session_id: string | null, kind: string, severity: InboxItemSeverity, title: string, body: string | null, source_type: string, source_id: string | null, dedupe_key: string, read_at: Date | null, archived_at: Date | null, created_at: Date, updated_at: Date, };
+
+export enum InboxItemSeverity { info = "info", warning = "warning", error = "error" }
+
+export type InboxSummary = { unread_count: bigint, unread_by_severity: Array<InboxSummaryCount>, unread_by_kind: Array<InboxSummaryCount>, };
+
+export type InboxSummaryCount = { key: string, count: bigint, };
+
+export type MarkInboxItemsReadRequest = { ids: Array<string>, };
+
+export type MarkAllInboxItemsReadRequest = { project_id: string | null, session_id: string | null, };
+
+export type InboxItemsMarkedReadResponse = { marked_count: bigint, };
+
+export type InboxItemsArchivedResponse = { item: InboxItem, };
+
+export type InboxSummaryQuery = { project_id: string | null, session_id: string | null, };
+
+export type InboxItemsQuery = { project_id: string | null, session_id: string | null, unread: boolean | null, archived: boolean | null, limit: number | null, };
+
+export type InboxItemsResponse = { items: Array<InboxItem>, };
+
+export type InboxItemResponse = { item: InboxItem, };
+
 export type ChatRun = { id: string, session_id: string, session_agent_id: string, workspace_path: string | null, run_index: bigint, run_dir: string, input_path: string | null, output_path: string | null, raw_log_path: string | null, meta_path: string | null, log_state: ChatRunLogState, artifact_state: ChatRunArtifactState, log_truncated: boolean, log_capture_degraded: boolean, pruned_at: string | null, prune_reason: string | null, retention_summary_json: string | null, created_at: string, };
 
 export enum ChatRunLogState { live = "live", tail = "tail", pruned = "pruned" }
@@ -828,7 +852,11 @@ chat_bubble_font_size: ChatBubbleFontSize,
  */
 chat_compression: ChatCompressionConfig, max_agent_chain_depth: number, };
 
-export type NotificationConfig = { sound_enabled: boolean, push_enabled: boolean, sound_file: SoundFile, };
+export type NotificationConfig = { sound_enabled: boolean, push_enabled: boolean, sound_file: SoundFile, inbox_sources: NotificationInboxSourcesConfig, };
+
+export type NotificationInboxSourcesConfig = { chat_message: boolean, workflow_action: boolean, approval: boolean, worktree: boolean, failure: boolean, };
+
+export enum NotificationInboxSource { chat_message = "chat_message", workflow_action = "workflow_action", approval = "approval", worktree = "worktree", failure = "failure" }
 
 export enum ThemeMode { LIGHT = "LIGHT", DARK = "DARK", SYSTEM = "SYSTEM" }
 

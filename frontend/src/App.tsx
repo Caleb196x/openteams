@@ -17,7 +17,6 @@ import { ProjectSidebar } from "@/components/ProjectSidebar";
 import { GlobalSearchDialog } from "@/components/GlobalSearchDialog";
 import {
   OnboardingGuide,
-  compareVersions,
 } from "@/components/onboarding/OnboardingGuide";
 import { GitHubRepositoryPage } from "@/pages/GitHubRepositoryPage";
 import { IssuePage } from "@/pages/IssuePage";
@@ -52,6 +51,8 @@ import {
   onboardingApi,
   projectApi,
   projectWorkItemsApi,
+  versionApi,
+  type VersionCheckResponse,
 } from "@/lib/api";
 import {
   ONBOARDING_GUIDE_RESET_EVENT,
@@ -73,6 +74,7 @@ import {
 import { notifyLinkedWorkItemsChanged } from "@/lib/linkedWorkItemsEvents";
 import { notifySourceControlRefreshRequested } from "@/lib/sourceControlEvents";
 import { resolveGlobalSearchNavigationAction } from "@/lib/globalSearchNavigation";
+import { notifyInboxWorkflowFocus } from "@/lib/inboxNavigation";
 import { mapSession } from "@/lib/mappers";
 import { mockFrontendApi } from "@/lib/mockFrontendApi";
 import { projectDisplayName } from "@/lib/projectDisplay";
@@ -90,6 +92,7 @@ import {
   type ChatMemberPreset,
   type ChatSearchResult,
   type ChatTeamPreset,
+  type InboxItem,
   OnboardingAppearance,
   type OnboardingState,
   ProjectMemberType,
@@ -228,6 +231,7 @@ const compactViewportLayoutRelief = 0.06;
 const compactViewportFontScale = 1.06;
 const blankTeamId = "blank_team";
 const currentUpgradeVersion = rootPackage.version || "0.0.0";
+const versionUpdateCheckIntervalMs = 2 * 60 * 60 * 1000;
 
 type OnboardingOverlay =
   | { mode: "onboarding"; state: OnboardingState | null }
@@ -263,6 +267,51 @@ const chatSessionUpdatePayload = (
   default_workspace_path: null,
   ...patch,
 });
+
+const inboxSourcesKeptUnread = new Set([
+  "workflow_input",
+  "workflow_continue",
+  "workflow_review",
+  "workflow_final_review",
+  "workflow_approval",
+  "executor_approval",
+  "worktree_conflict",
+  "worktree_cleanup",
+]);
+
+const inboxKindsKeptUnread = new Set([
+  "workflow_input",
+  "workflow_review",
+  "workflow_final_review",
+  "workflow_approval",
+  "executor_approval",
+  "worktree_conflict",
+  "worktree_cleanup_failed",
+  "workflow_execution_failed",
+  "chat_agent_failed",
+  "chat_mention_failed",
+]);
+
+const shouldKeepInboxItemUnreadOnOpen = (item: InboxItem): boolean =>
+  inboxSourcesKeptUnread.has(item.source_type) ||
+  inboxKindsKeptUnread.has(item.kind);
+
+const isWorktreeConflictInboxItem = (item: InboxItem): boolean =>
+  item.kind === "worktree_conflict" ||
+  item.source_type === "worktree_conflict";
+
+const isWorktreeCleanupFailedInboxItem = (item: InboxItem): boolean =>
+  item.kind === "worktree_cleanup_failed" ||
+  item.source_type === "worktree_cleanup";
+
+const isExecutorApprovalInboxItem = (item: InboxItem): boolean =>
+  item.kind === "executor_approval" ||
+  item.source_type === "executor_approval";
+
+const isWorkflowInboxItem = (item: InboxItem): boolean =>
+  item.source_type.startsWith("workflow_") ||
+  item.kind.startsWith("workflow_") ||
+  isExecutorApprovalInboxItem(item);
 
 const findWorkflowProjectAgent = (projectMembers: ProjectMemberWithRuntime[]) =>
   projectMembers.find(
@@ -475,6 +524,12 @@ function WorkspaceLayout() {
     weeklyCost,
     showToast,
     setActiveSettingsTab,
+    inboxSummaryAsync,
+    inboxItemsAsync,
+    refreshInbox,
+    markInboxItemRead,
+    markAllInboxRead,
+    archiveInboxItem,
   } = useWorkspace();
   const appScale = React.useContext(AppScaleContext);
 
@@ -491,6 +546,10 @@ function WorkspaceLayout() {
     useState<OnboardingState | null>(null);
   const [onboardingAppTransitionActive, setOnboardingAppTransitionActive] =
     useState(false);
+  const [versionUpdateInfo, setVersionUpdateInfo] =
+    useState<VersionCheckResponse | null>(null);
+  const [versionUpdateToast, setVersionUpdateToast] =
+    useState<VersionCheckResponse | null>(null);
   const [openTabs, setOpenTabs] = useState<WorkspaceTab[]>(() =>
     activeSessionId ? [createSessionTab(activeSessionId)] : [],
   );
@@ -517,6 +576,8 @@ function WorkspaceLayout() {
     scale: 1,
   });
   const onboardingAppTransitionTimerRef = useRef<number | null>(null);
+  const versionUpdateCheckInFlightRef = useRef(false);
+  const versionUpdateNotifiedVersionRef = useRef<string | null>(null);
 
   const loadLeadMember = useCallback(
     async (projectId: string): Promise<Member | null> => {
@@ -663,14 +724,6 @@ function WorkspaceLayout() {
     if (!nextState.onboarding_completed_at) {
       return { mode: "onboarding", state: nextState };
     }
-    if (
-      compareVersions(
-        nextState.last_seen_upgrade_version,
-        currentUpgradeVersion,
-      ) < 0
-    ) {
-      return { mode: "upgrade", state: nextState };
-    }
     return null;
   };
 
@@ -811,6 +864,55 @@ function WorkspaceLayout() {
     };
   }, []);
 
+  const checkForVersionUpdate = useCallback(async () => {
+    if (versionUpdateCheckInFlightRef.current) return null;
+    versionUpdateCheckInFlightRef.current = true;
+    try {
+      const info = await versionApi.check();
+      setVersionUpdateInfo(info);
+      if (
+        info.has_update &&
+        versionUpdateNotifiedVersionRef.current !== info.latest_version
+      ) {
+        versionUpdateNotifiedVersionRef.current = info.latest_version;
+        setVersionUpdateToast(info);
+      }
+      return info;
+    } catch (err) {
+      console.error("Failed to check for OpenTeams updates", err);
+      return null;
+    } finally {
+      versionUpdateCheckInFlightRef.current = false;
+    }
+  }, []);
+
+  const openVersionUpdatePage = useCallback(
+    (
+      info?: VersionCheckResponse | null,
+      stateOverride?: OnboardingState | null,
+    ) => {
+      if (info) {
+        setVersionUpdateInfo(info);
+      }
+      setVersionUpdateToast(null);
+      setOnboardingOverlay({
+        mode: "upgrade",
+        state: stateOverride ?? onboardingState,
+      });
+      void checkForVersionUpdate();
+    },
+    [checkForVersionUpdate, onboardingState],
+  );
+
+  useEffect(() => {
+    void checkForVersionUpdate();
+    const intervalId = window.setInterval(
+      () => void checkForVersionUpdate(),
+      versionUpdateCheckIntervalMs,
+    );
+    return () => window.clearInterval(intervalId);
+  }, [checkForVersionUpdate]);
+
   useEffect(() => {
     return () => {
       if (onboardingAppTransitionTimerRef.current !== null) {
@@ -840,7 +942,7 @@ function WorkspaceLayout() {
     const handleUpgradeReplay = (event: Event) => {
       const nextState = (event as CustomEvent<OnboardingState>).detail;
       setOnboardingState(nextState);
-      setOnboardingOverlay({ mode: "upgrade", state: nextState });
+      openVersionUpdatePage(versionUpdateInfo, nextState);
     };
 
     window.addEventListener(ONBOARDING_GUIDE_RESET_EVENT, handleGuideReset);
@@ -855,7 +957,7 @@ function WorkspaceLayout() {
         handleUpgradeReplay,
       );
     };
-  }, []);
+  }, [openVersionUpdatePage, versionUpdateInfo]);
 
   useEffect(() => {
     if (!isSidebarResizing) return;
@@ -1220,6 +1322,49 @@ function WorkspaceLayout() {
     });
     setActiveTabId(nextTab.id);
     setActiveSessionId(sessionId);
+  };
+
+  const openInboxSessionTab = (sessionId: string) => {
+    replaceActiveTab(createSessionTab(sessionId));
+    setActiveSessionId(sessionId);
+    closeMobileSidebar();
+  };
+
+  const handleInboxItemOpen = (item: InboxItem) => {
+    const sessionId = item.session_id ?? activeSessionId;
+    const projectId = item.project_id ?? selectedProjectId;
+    if (projectId && projectId !== selectedProjectId) {
+      setSelectedProjectId(projectId);
+    }
+
+    if (sessionId && projectId && isWorktreeConflictInboxItem(item)) {
+      openWorktreeConflictTab(projectId, sessionId);
+      closeMobileSidebar();
+    } else if (sessionId && isWorktreeCleanupFailedInboxItem(item)) {
+      openInboxSessionTab(sessionId);
+      window.setTimeout(() => {
+        notifySourceControlRefreshRequested({
+          projectId,
+          sessionId,
+        });
+      }, 0);
+    } else if (sessionId) {
+      openInboxSessionTab(sessionId);
+      if (isWorkflowInboxItem(item)) {
+        window.setTimeout(() => {
+          notifyInboxWorkflowFocus({
+            sessionId,
+            kind: item.kind,
+            sourceType: item.source_type,
+            sourceId: item.source_id,
+          });
+        }, 0);
+      }
+    }
+
+    if (!shouldKeepInboxItemUnreadOnOpen(item)) {
+      void markInboxItemRead(item.id).catch(() => undefined);
+    }
   };
 
   const closeWorktreeConflictTab = (
@@ -1879,14 +2024,12 @@ function WorkspaceLayout() {
 
   const handleOnboardingStateChange = (nextState: OnboardingState) => {
     setOnboardingState(nextState);
-    setOnboardingOverlay((current) =>
-      current ? { ...current, state: nextState } : current,
-    );
   };
 
-  const handleUpgradeRead = (nextState: OnboardingState) => {
-    setOnboardingState(nextState);
-    setOnboardingOverlay(null);
+  const handleInstallVersionUpdate = async () => {
+    await versionApi.updateNpx();
+    showToast(t('onboarding.upgrade.installStarted'), 'success');
+    await versionApi.restart();
   };
 
   const currentProject = projects.find(
@@ -1921,6 +2064,15 @@ function WorkspaceLayout() {
     onCreateProject: handleCreateProject,
     onUpdateProject: handleUpdateProject,
     onDeleteProject: handleDeleteProject,
+    inboxSummary: inboxSummaryAsync.data,
+    inboxItems: inboxItemsAsync.data,
+    inboxLoading: inboxSummaryAsync.loading || inboxItemsAsync.loading,
+    inboxError: inboxSummaryAsync.error ?? inboxItemsAsync.error,
+    onRefreshInbox: refreshInbox,
+    onInboxItemOpen: handleInboxItemOpen,
+    onMarkInboxItemRead: markInboxItemRead,
+    onMarkAllInboxRead: markAllInboxRead,
+    onArchiveInboxItem: archiveInboxItem,
     teamPresets,
   };
   return (
@@ -1931,6 +2083,22 @@ function WorkspaceLayout() {
     >
       {toast && (
         <NotificationToast message={toast.message} tone={toast.tone} />
+      )}
+      {versionUpdateToast && (
+        <NotificationToast
+          title={t('onboarding.upgrade.toastTitle', {
+            version: versionUpdateToast.latest_version,
+          })}
+          message={t('onboarding.upgrade.toastMessage', {
+            current: versionUpdateToast.current_version,
+            latest: versionUpdateToast.latest_version,
+          })}
+          tone="info"
+          actionLabel={t('onboarding.upgrade.toastAction')}
+          onAction={() => openVersionUpdatePage(versionUpdateToast)}
+          onClose={() => setVersionUpdateToast(null)}
+          className="min-h-[92px] max-w-[min(430px,calc(100vw-40px))] py-4"
+        />
       )}
 
       <CreateAgentSessionModal
@@ -1972,7 +2140,8 @@ function WorkspaceLayout() {
           onClose={() => setOnboardingOverlay(null)}
           onComplete={handleOnboardingCompleted}
           onStateChange={handleOnboardingStateChange}
-          onUpgradeRead={handleUpgradeRead}
+          versionUpdateInfo={versionUpdateInfo}
+          onInstallUpdate={handleInstallVersionUpdate}
         />
       )}
 

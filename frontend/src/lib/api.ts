@@ -124,6 +124,22 @@ export interface ChatMessageMutationResponse {
   message: BackendChatMessage;
   runtime: ChatSessionRuntimeSnapshot;
 }
+
+export interface VersionCheckResponse {
+  current_version: string;
+  latest_version: string;
+  has_update: boolean;
+  deploy_mode: string;
+  release_url: string;
+  release_notes: string | null;
+  published_at: string | null;
+}
+
+export interface UpdateNpxResponse {
+  success: boolean;
+  message: string;
+}
+
 import type {
   AddProjectMemberRequest,
   ChatTeamPreset,
@@ -144,7 +160,17 @@ import type {
   UpdateProjectMemberRequest,
   UpdateTeamPresetRequest,
   ChatRunFilesResponse,
+  InboxItem,
+  InboxItemResponse,
+  InboxItemsArchivedResponse,
+  InboxItemsMarkedReadResponse,
+  InboxItemsQuery,
+  InboxItemsResponse,
+  InboxSummary,
+  InboxSummaryQuery,
   MarkUpgradeReadRequest,
+  MarkAllInboxItemsReadRequest,
+  MarkInboxItemsReadRequest,
   OnboardingState,
   UpdateOnboardingStateRequest,
 } from "../../../shared/types";
@@ -157,6 +183,7 @@ import {
 } from "./apiCore";
 import { buildStatsApi } from "./buildStatsApi";
 import { cliConfigApi } from "./cliConfigApi";
+import { getTauriInvoke } from "./tauriBridge";
 
 export { ApiError } from "./apiCore";
 export { buildStatsApi } from "./buildStatsApi";
@@ -381,6 +408,92 @@ export const onboardingApi = {
 };
 
 // -----------------------------------------------------------------------------
+// Version updates
+// -----------------------------------------------------------------------------
+
+export const versionApi = {
+  check: async (): Promise<VersionCheckResponse> => {
+    const r = await makeRequest("/api/version/check", { cache: "no-store" });
+    return handleApiResponse<VersionCheckResponse>(r);
+  },
+  updateNpx: async (): Promise<UpdateNpxResponse> => {
+    const r = await makeRequest("/api/version/update-npx", { method: "POST" });
+    return handleApiResponse<UpdateNpxResponse>(r);
+  },
+  restart: async (): Promise<UpdateNpxResponse> => {
+    const r = await makeRequest("/api/version/restart", { method: "POST" });
+    return handleApiResponse<UpdateNpxResponse>(r);
+  },
+};
+
+// -----------------------------------------------------------------------------
+// Inbox notifications
+// -----------------------------------------------------------------------------
+
+export const inboxApi = {
+  getSummary: async (
+    query: Partial<InboxSummaryQuery> = {},
+  ): Promise<InboxSummary> => {
+    const r = await makeRequest(
+      `/api/inbox/summary${qs({
+        project_id: query.project_id,
+        session_id: query.session_id,
+      })}`,
+      { cache: "no-store" },
+    );
+    return handleApiResponse<InboxSummary>(r);
+  },
+  listItems: async (
+    query: Partial<InboxItemsQuery> = {},
+  ): Promise<InboxItemsResponse> => {
+    const r = await makeRequest(
+      `/api/inbox/items${qs({
+        project_id: query.project_id,
+        session_id: query.session_id,
+        unread: query.unread,
+        archived: query.archived,
+        limit: query.limit,
+      })}`,
+      { cache: "no-store" },
+    );
+    return handleApiResponse<InboxItemsResponse>(r);
+  },
+  markRead: async (itemId: string): Promise<InboxItem> => {
+    const r = await makeRequest(
+      `/api/inbox/items/${encodeURIComponent(itemId)}/mark-read`,
+      { method: "POST" },
+    );
+    const response = await handleApiResponse<InboxItemResponse>(r);
+    return response.item;
+  },
+  markManyRead: async (
+    data: MarkInboxItemsReadRequest,
+  ): Promise<InboxItemsMarkedReadResponse> => {
+    const r = await makeRequest("/api/inbox/items/mark-read", {
+      method: "POST",
+      body: jsonBody(data),
+    });
+    return handleApiResponse<InboxItemsMarkedReadResponse>(r);
+  },
+  markAllRead: async (
+    data: MarkAllInboxItemsReadRequest,
+  ): Promise<InboxItemsMarkedReadResponse> => {
+    const r = await makeRequest("/api/inbox/items/mark-all-read", {
+      method: "POST",
+      body: jsonBody(data),
+    });
+    return handleApiResponse<InboxItemsMarkedReadResponse>(r);
+  },
+  archive: async (itemId: string): Promise<InboxItemsArchivedResponse> => {
+    const r = await makeRequest(
+      `/api/inbox/items/${encodeURIComponent(itemId)}/archive`,
+      { method: "POST" },
+    );
+    return handleApiResponse<InboxItemsArchivedResponse>(r);
+  },
+};
+
+// -----------------------------------------------------------------------------
 // Filesystem
 // -----------------------------------------------------------------------------
 
@@ -393,6 +506,30 @@ export interface SelectDirectoryResponse {
   path: string | null;
   cancelled: boolean;
 }
+
+const isSelectDirectoryResponse = (
+  value: unknown,
+): value is SelectDirectoryResponse => {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<SelectDirectoryResponse>;
+  return (
+    typeof candidate.cancelled === "boolean" &&
+    (candidate.path === null || typeof candidate.path === "string")
+  );
+};
+
+const selectDirectoryViaTauri = async (
+  data: SelectDirectoryRequest,
+): Promise<SelectDirectoryResponse | null> => {
+  const invoke = getTauriInvoke();
+  if (!invoke) return null;
+
+  const response = await invoke("select_directory_dialog", { payload: data });
+  if (!isSelectDirectoryResponse(response)) {
+    throw new ApiError("Invalid directory picker response");
+  }
+  return response;
+};
 
 export interface CreateDirectoryRequest {
   parent_path: string;
@@ -438,6 +575,9 @@ export const filesystemApi = {
   selectDirectory: async (
     data: SelectDirectoryRequest = {},
   ): Promise<SelectDirectoryResponse> => {
+    const nativeResponse = await selectDirectoryViaTauri(data);
+    if (nativeResponse) return nativeResponse;
+
     const r = await makeRequest("/api/filesystem/select-directory", {
       method: "POST",
       body: jsonBody(data),
@@ -2318,6 +2458,8 @@ export const api = {
   cliConfig: cliConfigApi,
   buildStats: buildStatsApi,
   onboarding: onboardingApi,
+  version: versionApi,
+  inbox: inboxApi,
   profiles: profilesApi,
   teamPresets: teamPresetsApi,
   githubAuth: githubAuthApi,

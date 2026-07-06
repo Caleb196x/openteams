@@ -1,23 +1,6 @@
 import { filesystemApi } from './api';
+import { getTauriInvoke } from './tauriBridge';
 import type { OpenInExplorerResponse } from '@/types';
-
-type TauriInvoke = (
-  command: string,
-  args?: Record<string, unknown>,
-) => Promise<unknown>;
-
-type TauriGlobal = {
-  invoke?: TauriInvoke;
-  tauri?: {
-    invoke?: TauriInvoke;
-  };
-};
-
-const getTauriInvoke = (): TauriInvoke | null => {
-  const tauriGlobal = (window as Window & { __TAURI__?: TauriGlobal })
-    .__TAURI__;
-  return tauriGlobal?.tauri?.invoke ?? tauriGlobal?.invoke ?? null;
-};
 
 const isAbsolutePath = (path: string): boolean =>
   /^[a-zA-Z]:[\\/]/.test(path) || path.startsWith('\\\\') || path.startsWith('/');
