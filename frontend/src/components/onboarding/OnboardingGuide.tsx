@@ -768,7 +768,7 @@ export function OnboardingGuide({
     setProjectName((current) =>
       sanitizeProjectName(
         nextInitialState?.project_name ??
-          (current.trim() ? current : defaultProjectName),
+          (current.trim() ? current : projectNameForScenario(nextScenario)),
       ),
     );
     setProjectNameTouched((current) =>
@@ -1148,7 +1148,7 @@ export function OnboardingGuide({
     setSelectedScenario(scenarioKey);
     setTeamConfig(nextTeamConfig);
     if (!projectNameTouched) {
-      setProjectName(defaultProjectName);
+      setProjectName(projectNameForScenario(scenarioKey));
     }
     setState((current) =>
       current
