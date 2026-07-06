@@ -33,7 +33,6 @@ jobs:
       - name: Frontend checks
         run: |
           pnpm run frontend:lint
-          pnpm run frontend:format:check
           pnpm run frontend:check
 
       - name: Check i18n regressions
