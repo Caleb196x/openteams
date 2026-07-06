@@ -167,6 +167,7 @@ import {
 } from "./apiCore";
 import { buildStatsApi } from "./buildStatsApi";
 import { cliConfigApi } from "./cliConfigApi";
+import { getTauriInvoke } from "./tauriBridge";
 
 export { ApiError } from "./apiCore";
 export { buildStatsApi } from "./buildStatsApi";
@@ -471,6 +472,30 @@ export interface SelectDirectoryResponse {
   cancelled: boolean;
 }
 
+const isSelectDirectoryResponse = (
+  value: unknown,
+): value is SelectDirectoryResponse => {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<SelectDirectoryResponse>;
+  return (
+    typeof candidate.cancelled === "boolean" &&
+    (candidate.path === null || typeof candidate.path === "string")
+  );
+};
+
+const selectDirectoryViaTauri = async (
+  data: SelectDirectoryRequest,
+): Promise<SelectDirectoryResponse | null> => {
+  const invoke = getTauriInvoke();
+  if (!invoke) return null;
+
+  const response = await invoke("select_directory_dialog", { payload: data });
+  if (!isSelectDirectoryResponse(response)) {
+    throw new ApiError("Invalid directory picker response");
+  }
+  return response;
+};
+
 export interface CreateDirectoryRequest {
   parent_path: string;
   name?: string | null;
@@ -515,6 +540,9 @@ export const filesystemApi = {
   selectDirectory: async (
     data: SelectDirectoryRequest = {},
   ): Promise<SelectDirectoryResponse> => {
+    const nativeResponse = await selectDirectoryViaTauri(data);
+    if (nativeResponse) return nativeResponse;
+
     const r = await makeRequest("/api/filesystem/select-directory", {
       method: "POST",
       body: jsonBody(data),
