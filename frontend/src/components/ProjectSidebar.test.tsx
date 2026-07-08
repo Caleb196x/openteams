@@ -846,6 +846,7 @@ check(
 check(
   "create project modal uses searchable team select",
   componentSource.includes("<DropdownSelect") &&
+    componentSource.includes("{!editingProject && (") &&
     componentSource.includes('selectionMode="single"') &&
     componentSource.includes('"sidebar.searchTeams"'),
   componentSource,

@@ -1261,6 +1261,7 @@ export function ProjectSidebar({
     setEditingProject(draft);
     setProjectName(draft.name);
     setProjectWorkspacePath(draft.defaultWorkspacePath ?? "");
+    setSelectedTeamId(blankTeamId);
     setCreateError(null);
     setWorkspaceGitStatus(null);
     setWorkspaceGitStatusPath("");
@@ -1307,6 +1308,7 @@ export function ProjectSidebar({
   const resetProjectForm = () => {
     setProjectName("");
     setProjectWorkspacePath("");
+    setSelectedTeamId(blankTeamId);
     setEditingProject(null);
     setWorkspaceGitStatus(null);
     setWorkspaceGitStatusPath("");
@@ -1321,6 +1323,7 @@ export function ProjectSidebar({
     setCreateError(null);
     setWorkspaceBrowserOpen(false);
     setEditingProject(null);
+    setSelectedTeamId(blankTeamId);
     setWorkspaceGitStatus(null);
     setWorkspaceGitStatusPath("");
     setWorkspaceGitDetecting(false);
@@ -1952,35 +1955,37 @@ export function ProjectSidebar({
                   />
                 </div>
 
-                <div>
-                  <label className={createProjectLabelClass}>
-                    {translate("sidebar.assignTeam", "Assign team")}
-                  </label>
-                  <DropdownSelect
-                    selectionMode="single"
-                    value={selectedTeamId}
-                    onChange={(value) => setSelectedTeamId(value)}
-                    options={teamOptions}
-                    placeholder={translate(
-                      "sidebar.assignTeamPlaceholder",
-                      "Select a team",
-                    )}
-                    searchPlaceholder={translate(
-                      "sidebar.searchTeams",
-                      "Search teams...",
-                    )}
-                    emptyLabel={translate(
-                      "sidebar.noTeamMatch",
-                      "No teams match this search.",
-                    )}
-                    triggerIcon={
-                      <Users className="h-3 w-3 text-[var(--ink-tertiary)]" />
-                    }
-                    triggerClassName="border-[var(--hairline)] bg-[var(--surface-2)] hover:border-[var(--hairline-strong)] hover:bg-[var(--surface-3)]"
-                    panelClassName="z-[1010] max-w-none"
-                    maxPanelHeightClassName="max-h-[240px]"
-                  />
-                </div>
+                {!editingProject && (
+                  <div>
+                    <label className={createProjectLabelClass}>
+                      {translate("sidebar.assignTeam", "Assign team")}
+                    </label>
+                    <DropdownSelect
+                      selectionMode="single"
+                      value={selectedTeamId}
+                      onChange={(value) => setSelectedTeamId(value)}
+                      options={teamOptions}
+                      placeholder={translate(
+                        "sidebar.assignTeamPlaceholder",
+                        "Select a team",
+                      )}
+                      searchPlaceholder={translate(
+                        "sidebar.searchTeams",
+                        "Search teams...",
+                      )}
+                      emptyLabel={translate(
+                        "sidebar.noTeamMatch",
+                        "No teams match this search.",
+                      )}
+                      triggerIcon={
+                        <Users className="h-3 w-3 text-[var(--ink-tertiary)]" />
+                      }
+                      triggerClassName="border-[var(--hairline)] bg-[var(--surface-2)] hover:border-[var(--hairline-strong)] hover:bg-[var(--surface-3)]"
+                      panelClassName="z-[1010] max-w-none"
+                      maxPanelHeightClassName="max-h-[240px]"
+                    />
+                  </div>
+                )}
 
                 <div className="space-y-2">
                   <label className={createProjectLabelClass}>
