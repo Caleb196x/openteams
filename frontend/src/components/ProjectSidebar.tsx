@@ -1716,11 +1716,11 @@ export function ProjectSidebar({
         />
       </div>
 
-      <div className="px-3 py-1.5">
+      <div className="px-2.5 py-1.5">
         <button
           ref={projectSwitcherTriggerRef}
           type="button"
-          className="flex w-full items-center gap-[6px] rounded-sm border border-transparent px-[6px] py-[5px] text-left transition hover:border-[var(--hairline)] hover:bg-[var(--surface-1)]"
+          className={`${sidebarItemClass} cursor-pointer border-transparent hover:border-[var(--hairline)] hover:bg-[var(--surface-1)]`}
           onClick={toggleProjectSwitcher}
           aria-expanded={projectSwitcherOpen}
           aria-label={translate(
@@ -2720,7 +2720,7 @@ export function ProjectSidebar({
           }`}
           data-section="Build stats"
         >
-          <div className="flex items-center gap-1 px-2.5 py-2">
+          <div className="flex items-center gap-1 px-[7px] py-2">
             <button
               type="button"
               className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-sm text-left outline-none transition hover:text-[var(--ink)] focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
@@ -2740,7 +2740,7 @@ export function ProjectSidebar({
             </button>
             <button
               type="button"
-              className="flex shrink-0 cursor-pointer items-center gap-1 rounded-sm px-1 py-0.5 font-mono text-[10px] text-[var(--ink-tertiary)] transition hover:bg-[var(--surface-2)] hover:text-[var(--ink)] focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
+              className="-mr-1 flex shrink-0 cursor-pointer items-center gap-1 rounded-sm px-1 py-0.5 font-mono text-[10px] text-[var(--ink-tertiary)] transition hover:bg-[var(--surface-2)] hover:text-[var(--ink)] focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
               onClick={() => setBuildStatsVisible((visible) => !visible)}
               aria-expanded={buildStatsVisible}
               aria-controls="project-sidebar-build-stats"
@@ -2801,7 +2801,7 @@ export function ProjectSidebar({
           {sessions.length > 0 ? (
             <>
               <div
-                className={`space-y-1 pr-1 ${
+                className={`space-y-1 ${
                   sessionsExpanded ? "h-52 overflow-y-auto" : "overflow-visible"
                 }`}
                 data-sidebar-session-list="true"
