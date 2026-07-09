@@ -268,34 +268,6 @@ const chatSessionUpdatePayload = (
   ...patch,
 });
 
-const inboxSourcesKeptUnread = new Set([
-  "workflow_input",
-  "workflow_continue",
-  "workflow_review",
-  "workflow_final_review",
-  "workflow_approval",
-  "executor_approval",
-  "worktree_conflict",
-  "worktree_cleanup",
-]);
-
-const inboxKindsKeptUnread = new Set([
-  "workflow_input",
-  "workflow_review",
-  "workflow_final_review",
-  "workflow_approval",
-  "executor_approval",
-  "worktree_conflict",
-  "worktree_cleanup_failed",
-  "workflow_execution_failed",
-  "chat_agent_failed",
-  "chat_mention_failed",
-]);
-
-const shouldKeepInboxItemUnreadOnOpen = (item: InboxItem): boolean =>
-  inboxSourcesKeptUnread.has(item.source_type) ||
-  inboxKindsKeptUnread.has(item.kind);
-
 const isWorktreeConflictInboxItem = (item: InboxItem): boolean =>
   item.kind === "worktree_conflict" ||
   item.source_type === "worktree_conflict";
@@ -1333,6 +1305,7 @@ function WorkspaceLayout() {
   const handleInboxItemOpen = (item: InboxItem) => {
     const sessionId = item.session_id ?? activeSessionId;
     const projectId = item.project_id ?? selectedProjectId;
+    let openedTarget = false;
     if (projectId && projectId !== selectedProjectId) {
       setSelectedProjectId(projectId);
     }
@@ -1340,8 +1313,10 @@ function WorkspaceLayout() {
     if (sessionId && projectId && isWorktreeConflictInboxItem(item)) {
       openWorktreeConflictTab(projectId, sessionId);
       closeMobileSidebar();
+      openedTarget = true;
     } else if (sessionId && isWorktreeCleanupFailedInboxItem(item)) {
       openInboxSessionTab(sessionId);
+      openedTarget = true;
       window.setTimeout(() => {
         notifySourceControlRefreshRequested({
           projectId,
@@ -1350,6 +1325,7 @@ function WorkspaceLayout() {
       }, 0);
     } else if (sessionId) {
       openInboxSessionTab(sessionId);
+      openedTarget = true;
       if (isWorkflowInboxItem(item)) {
         window.setTimeout(() => {
           notifyInboxWorkflowFocus({
@@ -1362,7 +1338,7 @@ function WorkspaceLayout() {
       }
     }
 
-    if (!shouldKeepInboxItemUnreadOnOpen(item)) {
+    if (openedTarget) {
       void markInboxItemRead(item.id).catch(() => undefined);
     }
   };

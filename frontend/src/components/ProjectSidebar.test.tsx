@@ -792,9 +792,10 @@ check(
   appSource,
 );
 check(
-  "keeps actionable inbox items unread while routing to handling views",
-  appSource.includes("shouldKeepInboxItemUnreadOnOpen") &&
-    appSource.includes("inboxKindsKeptUnread") &&
+  "marks routed inbox items read while opening handling views",
+  appSource.includes("let openedTarget = false") &&
+    appSource.includes("openedTarget = true") &&
+    appSource.includes("if (openedTarget)") &&
     appSource.includes("notifyInboxWorkflowFocus") &&
     appSource.includes("isExecutorApprovalInboxItem") &&
     appSource.includes("openWorktreeConflictTab(projectId, sessionId)") &&
