@@ -72,6 +72,66 @@ struct StreamingText {
 }
 
 #[derive(Default)]
+struct EmptyHtmlCommentFilter {
+    pending: String,
+}
+
+impl EmptyHtmlCommentFilter {
+    fn filter_append(&mut self, chunk: &str) -> String {
+        let mut value = String::new();
+        value.push_str(&self.pending);
+        value.push_str(chunk);
+        self.pending.clear();
+
+        if let Some(start) = trailing_incomplete_empty_html_comment_start(&value) {
+            self.pending.push_str(&value[start..]);
+            return strip_empty_html_comments(&value[..start]);
+        }
+
+        strip_empty_html_comments(&value)
+    }
+
+    fn clear(&mut self) {
+        self.pending.clear();
+    }
+}
+
+fn strip_empty_html_comments(value: &str) -> String {
+    let mut output = String::new();
+    let mut rest = value;
+
+    while let Some(start) = rest.find("<!--") {
+        output.push_str(&rest[..start]);
+        let after_start = &rest[start + 4..];
+        let Some(end) = after_start.find("-->") else {
+            output.push_str(&rest[start..]);
+            return output;
+        };
+
+        let body = &after_start[..end];
+        let after_end = &after_start[end + 3..];
+        if body.trim().is_empty() {
+            rest = after_end;
+        } else {
+            output.push_str(&rest[start..start + 4 + end + 3]);
+            rest = after_end;
+        }
+    }
+
+    output.push_str(rest);
+    output
+}
+
+fn trailing_incomplete_empty_html_comment_start(value: &str) -> Option<usize> {
+    let start = value.rfind("<!--")?;
+    let tail = &value[start + 4..];
+    if tail.contains("-->") || !tail.trim().is_empty() {
+        return None;
+    }
+    Some(start)
+}
+
+#[derive(Default)]
 struct CommandState {
     index: Option<usize>,
     command: String,
@@ -262,6 +322,7 @@ struct LogState {
     entry_index: EntryIndexProvider,
     assistant: Option<StreamingText>,
     thinking: Option<StreamingText>,
+    thinking_comment_filter: EmptyHtmlCommentFilter,
     commands: HashMap<String, CommandState>,
     mcp_tools: HashMap<String, McpToolState>,
     patches: HashMap<String, PatchState>,
@@ -289,6 +350,7 @@ impl LogState {
             entry_index,
             assistant: None,
             thinking: None,
+            thinking_comment_filter: EmptyHtmlCommentFilter::default(),
             commands: HashMap::new(),
             mcp_tools: HashMap::new(),
             patches: HashMap::new(),
@@ -309,6 +371,11 @@ impl LogState {
         if let Some(thread_id) = context.thread_id {
             self.current_thread_id = Some(thread_id);
         }
+    }
+
+    fn reset_thinking(&mut self) {
+        self.thinking = None;
+        self.thinking_comment_filter.clear();
     }
 
     fn streaming_text_update(
@@ -364,18 +431,23 @@ impl LogState {
     }
 
     fn assistant_message_append(&mut self, content: String) -> (NormalizedEntry, usize, bool) {
+        self.thinking_comment_filter.clear();
         self.streaming_text_append(content, StreamingTextKind::Assistant)
     }
 
     fn thinking_append(&mut self, content: String) -> (NormalizedEntry, usize, bool) {
+        let content = self.thinking_comment_filter.filter_append(&content);
         self.streaming_text_append(content, StreamingTextKind::Thinking)
     }
 
     fn assistant_message(&mut self, content: String) -> (NormalizedEntry, usize, bool) {
+        self.thinking_comment_filter.clear();
         self.streaming_text_set(content, StreamingTextKind::Assistant)
     }
 
     fn thinking(&mut self, content: String) -> (NormalizedEntry, usize, bool) {
+        self.thinking_comment_filter.clear();
+        let content = strip_empty_html_comments(&content);
         self.streaming_text_set(content, StreamingTextKind::Thinking)
     }
 }
@@ -636,7 +708,7 @@ pub fn normalize_logs(msg_store: Arc<MsgStore>, worktree_path: &Path) {
                     );
                 }
                 EventMsg::AgentMessageContentDelta(event) => {
-                    state.thinking = None;
+                    state.reset_thinking();
                     let (entry, index, is_new) = state.assistant_message_append(event.delta);
                     upsert_normalized_entry(&msg_store, index, entry, is_new);
                 }
@@ -646,7 +718,7 @@ pub fn normalize_logs(msg_store: Arc<MsgStore>, worktree_path: &Path) {
                     upsert_normalized_entry(&msg_store, index, entry, is_new);
                 }
                 EventMsg::AgentMessage(AgentMessageEvent { message, .. }) => {
-                    state.thinking = None;
+                    state.reset_thinking();
                     let (entry, index, is_new) = state.assistant_message(message);
                     upsert_normalized_entry(&msg_store, index, entry, is_new);
                     state.assistant = None;
@@ -655,14 +727,14 @@ pub fn normalize_logs(msg_store: Arc<MsgStore>, worktree_path: &Path) {
                     state.assistant = None;
                     let (entry, index, is_new) = state.thinking(text);
                     upsert_normalized_entry(&msg_store, index, entry, is_new);
-                    state.thinking = None;
+                    state.reset_thinking();
                 }
                 EventMsg::AgentReasoningSectionBreak(AgentReasoningSectionBreakEvent {
                     item_id: _,
                     summary_index: _,
                 }) => {
                     state.assistant = None;
-                    state.thinking = None;
+                    state.reset_thinking();
                 }
                 EventMsg::ExecApprovalRequest(ExecApprovalRequestEvent {
                     call_id,
@@ -675,7 +747,7 @@ pub fn normalize_logs(msg_store: Arc<MsgStore>, worktree_path: &Path) {
                     ..
                 }) => {
                     state.assistant = None;
-                    state.thinking = None;
+                    state.reset_thinking();
 
                     let command_text = if command.is_empty() {
                         reason
@@ -715,7 +787,7 @@ pub fn normalize_logs(msg_store: Arc<MsgStore>, worktree_path: &Path) {
                     ..
                 }) => {
                     state.assistant = None;
-                    state.thinking = None;
+                    state.reset_thinking();
 
                     let normalized = normalize_file_changes(&worktree_path_str, &changes);
                     let patch_state = state.patches.entry(call_id.clone()).or_default();
@@ -785,7 +857,7 @@ pub fn normalize_logs(msg_store: Arc<MsgStore>, worktree_path: &Path) {
                     ..
                 }) => {
                     state.assistant = None;
-                    state.thinking = None;
+                    state.reset_thinking();
                     let command_text = command.join(" ");
                     if command_text.is_empty() {
                         continue;
@@ -882,7 +954,7 @@ pub fn normalize_logs(msg_store: Arc<MsgStore>, worktree_path: &Path) {
                     ..
                 }) => {
                     state.assistant = None;
-                    state.thinking = None;
+                    state.reset_thinking();
                     state.mcp_tools.insert(
                         call_id.clone(),
                         McpToolState {
@@ -948,7 +1020,7 @@ pub fn normalize_logs(msg_store: Arc<MsgStore>, worktree_path: &Path) {
                     call_id, changes, ..
                 }) => {
                     state.assistant = None;
-                    state.thinking = None;
+                    state.reset_thinking();
                     let normalized = normalize_file_changes(&worktree_path_str, &changes);
                     if let Some(patch_state) = state.patches.get_mut(&call_id) {
                         let mut iter = normalized.into_iter();
@@ -1042,7 +1114,7 @@ pub fn normalize_logs(msg_store: Arc<MsgStore>, worktree_path: &Path) {
                 }
                 EventMsg::WebSearchBegin(WebSearchBeginEvent { call_id }) => {
                     state.assistant = None;
-                    state.thinking = None;
+                    state.reset_thinking();
                     state
                         .web_searches
                         .insert(call_id.clone(), WebSearchState::new());
@@ -1053,7 +1125,7 @@ pub fn normalize_logs(msg_store: Arc<MsgStore>, worktree_path: &Path) {
                 }
                 EventMsg::WebSearchEnd(WebSearchEndEvent { call_id, query, .. }) => {
                     state.assistant = None;
-                    state.thinking = None;
+                    state.reset_thinking();
                     if let Some(mut entry) = state.web_searches.remove(&call_id) {
                         entry.status = ToolStatus::Success;
                         entry.query = Some(query.clone());
@@ -1067,8 +1139,8 @@ pub fn normalize_logs(msg_store: Arc<MsgStore>, worktree_path: &Path) {
                 }
                 EventMsg::ViewImageToolCall(ViewImageToolCallEvent { call_id: _, path }) => {
                     state.assistant = None;
-                    state.thinking = None;
-                    let path_str = path.to_string_lossy().to_string();
+                    state.reset_thinking();
+                    let path_str = path.inferred_native_path_string();
                     let relative_path = make_path_relative(&path_str, &worktree_path_str);
                     add_normalized_entry(
                         &msg_store,
@@ -1239,6 +1311,8 @@ pub fn normalize_logs(msg_store: Arc<MsgStore>, worktree_path: &Path) {
                 | EventMsg::ThreadSettingsApplied(..)
                 | EventMsg::ThreadGoalUpdated(..)
                 | EventMsg::ThreadRolledBack(..)
+                | EventMsg::TurnModerationMetadata(..)
+                | EventMsg::SafetyBuffering(..)
                 | EventMsg::TurnStarted(..)
                 | EventMsg::UserMessage(..)
                 | EventMsg::TurnDiff(..)
@@ -1284,7 +1358,8 @@ pub fn normalize_logs(msg_store: Arc<MsgStore>, worktree_path: &Path) {
                 | EventMsg::CollabCloseBegin(..)
                 | EventMsg::CollabCloseEnd(..)
                 | EventMsg::CollabResumeBegin(..)
-                | EventMsg::CollabResumeEnd(..) => {}
+                | EventMsg::CollabResumeEnd(..)
+                | EventMsg::SubAgentActivity(..) => {}
             }
         }
     });
@@ -1344,7 +1419,8 @@ fn handle_jsonrpc_request(
         | ServerRequest::PermissionsRequestApproval { .. }
         | ServerRequest::DynamicToolCall { .. }
         | ServerRequest::ChatgptAuthTokensRefresh { .. }
-        | ServerRequest::AttestationGenerate { .. } => {}
+        | ServerRequest::AttestationGenerate { .. }
+        | ServerRequest::CurrentTimeRead { .. } => {}
     }
 }
 
@@ -1373,7 +1449,7 @@ fn handle_server_notification(
             handle_v2_item_completed(payload.item, state, msg_store, entry_index, worktree_path);
         }
         ServerNotification::AgentMessageDelta(payload) => {
-            state.thinking = None;
+            state.reset_thinking();
             let (entry, index, is_new) = state.assistant_message_append(payload.delta);
             upsert_normalized_entry(msg_store, index, entry, is_new);
         }
@@ -1389,7 +1465,7 @@ fn handle_server_notification(
         }
         ServerNotification::ReasoningSummaryPartAdded(_) => {
             state.assistant = None;
-            state.thinking = None;
+            state.reset_thinking();
         }
         ServerNotification::CommandExecutionOutputDelta(payload) => {
             if let Some(command_state) = state.commands.get_mut(&payload.item_id)
@@ -1403,7 +1479,7 @@ fn handle_server_notification(
         }
         ServerNotification::FileChangeOutputDelta(payload) => {
             state.assistant = None;
-            state.thinking = None;
+            state.reset_thinking();
 
             if payload.delta.trim_start().starts_with("Success.")
                 && let Some(patch_state) = state.patches.get_mut(&payload.item_id)
@@ -1413,7 +1489,7 @@ fn handle_server_notification(
         }
         ServerNotification::FileChangePatchUpdated(payload) => {
             state.assistant = None;
-            state.thinking = None;
+            state.reset_thinking();
             let normalized = normalize_v2_file_changes(worktree_path, &payload.changes);
             let patch_state = state.patches.entry(payload.item_id.clone()).or_default();
             sync_patch_entries(
@@ -1682,7 +1758,7 @@ fn handle_v2_item_started(
             ..
         } => {
             state.assistant = None;
-            state.thinking = None;
+            state.reset_thinking();
             let command_state = state
                 .commands
                 .entry(id.clone())
@@ -1703,7 +1779,7 @@ fn handle_v2_item_started(
         }
         ThreadItem::FileChange { id, changes, .. } => {
             state.assistant = None;
-            state.thinking = None;
+            state.reset_thinking();
             let normalized = normalize_v2_file_changes(worktree_path, &changes);
             let patch_state = state.patches.entry(id.clone()).or_default();
             sync_patch_entries(
@@ -1724,7 +1800,7 @@ fn handle_v2_item_started(
             ..
         } => {
             state.assistant = None;
-            state.thinking = None;
+            state.reset_thinking();
             let invocation = McpInvocation {
                 server,
                 tool,
@@ -1744,11 +1820,11 @@ fn handle_v2_item_started(
                 tool_state.index = Some(index);
             }
         }
-        ThreadItem::WebSearch { id, query, .. } => {
+        ThreadItem::WebSearch(item) => {
             state.assistant = None;
-            state.thinking = None;
-            let web_search_state = state.web_searches.entry(id).or_default();
-            web_search_state.query = Some(query);
+            state.reset_thinking();
+            let web_search_state = state.web_searches.entry(item.id).or_default();
+            web_search_state.query = Some(item.query);
             if let Some(index) = web_search_state.index {
                 replace_normalized_entry(msg_store, index, web_search_state.to_normalized_entry());
             } else {
@@ -1762,8 +1838,8 @@ fn handle_v2_item_started(
         }
         ThreadItem::ImageView { path, .. } => {
             state.assistant = None;
-            state.thinking = None;
-            let path = path.as_path().to_string_lossy();
+            state.reset_thinking();
+            let path = path.render_for_ui();
             let relative_path = make_path_relative(&path, worktree_path);
             add_normalized_entry(
                 msg_store,
@@ -1783,7 +1859,7 @@ fn handle_v2_item_started(
             );
         }
         ThreadItem::AgentMessage { text, .. } if !text.is_empty() => {
-            state.thinking = None;
+            state.reset_thinking();
             let (entry, index, is_new) = state.assistant_message(text);
             upsert_normalized_entry(msg_store, index, entry, is_new);
             state.assistant = None;
@@ -1827,7 +1903,7 @@ fn handle_v2_item_completed(
 ) {
     match item {
         ThreadItem::AgentMessage { text, .. } => {
-            state.thinking = None;
+            state.reset_thinking();
             let (entry, index, is_new) = state.assistant_message(text);
             upsert_normalized_entry(msg_store, index, entry, is_new);
             state.assistant = None;
@@ -1844,7 +1920,7 @@ fn handle_v2_item_completed(
                 state.assistant = None;
                 let (entry, index, is_new) = state.thinking(text);
                 upsert_normalized_entry(msg_store, index, entry, is_new);
-                state.thinking = None;
+                state.reset_thinking();
             }
         }
         ThreadItem::CommandExecution {
@@ -1923,10 +1999,10 @@ fn handle_v2_item_completed(
                 }
             }
         }
-        ThreadItem::WebSearch { id, query, .. } => {
-            if let Some(mut entry) = state.web_searches.remove(&id) {
+        ThreadItem::WebSearch(item) => {
+            if let Some(mut entry) = state.web_searches.remove(&item.id) {
                 entry.status = ToolStatus::Success;
-                entry.query = Some(query);
+                entry.query = Some(item.query);
                 if let Some(index) = entry.index {
                     replace_normalized_entry(msg_store, index, entry.to_normalized_entry());
                 }
@@ -2435,6 +2511,52 @@ mod tests {
             eventually_has_normalized_entry(&msg_store, |entry| {
                 matches!(entry.entry_type, NormalizedEntryType::Thinking)
                     && entry.content == "Reading the new app-server stream"
+            })
+            .await
+        );
+    }
+
+    #[tokio::test]
+    async fn normalize_logs_filters_split_empty_html_comment_from_app_server_reasoning_delta() {
+        let msg_store = std::sync::Arc::new(MsgStore::new());
+        super::normalize_logs(msg_store.clone(), std::path::Path::new("E:/workspace"));
+        tokio::task::yield_now().await;
+
+        let first = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "item/reasoning/summaryTextDelta",
+            "params": {
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "itemId": "item-1",
+                "delta": "**Preparing final JSON array artifact**\n\n<!--",
+                "summaryIndex": 0
+            }
+        })
+        .to_string();
+        let second = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "item/reasoning/summaryTextDelta",
+            "params": {
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "itemId": "item-1",
+                "delta": " -->",
+                "summaryIndex": 0
+            }
+        })
+        .to_string();
+        msg_store.push_stdout(format!("{first}\n{second}\n"));
+        msg_store.push_finished();
+
+        assert!(
+            eventually_has_normalized_entry(&msg_store, |entry| {
+                matches!(entry.entry_type, NormalizedEntryType::Thinking)
+                    && entry
+                        .content
+                        .contains("**Preparing final JSON array artifact**")
+                    && !entry.content.contains("<!--")
+                    && !entry.content.contains("-->")
             })
             .await
         );
