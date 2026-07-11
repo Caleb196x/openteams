@@ -139,7 +139,28 @@
     "CODEX": {
       "DEFAULT": {
         "CODEX": {
-          "model": "gpt-5.5",
+          "model": "gpt-5.6-sol",
+          "sandbox": "danger-full-access",
+          "model_reasoning_summary": "auto"
+        }
+      },
+      "GPT_5.6_SOL": {
+        "CODEX": {
+          "model": "gpt-5.6-sol",
+          "sandbox": "danger-full-access",
+          "model_reasoning_summary": "auto"
+        }
+      },
+      "GPT_5.6_TERRA": {
+        "CODEX": {
+          "model": "gpt-5.6-terra",
+          "sandbox": "danger-full-access",
+          "model_reasoning_summary": "auto"
+        }
+      },
+      "GPT_5.6_LUNA": {
+        "CODEX": {
+          "model": "gpt-5.6-luna",
           "sandbox": "danger-full-access",
           "model_reasoning_summary": "auto"
         }
@@ -183,18 +204,39 @@
     "OPENCODE": {
       "DEFAULT": {
         "OPENCODE": {
+          "model": "opencode/glm-5-free",
           "auto_approve": true
         }
       },
       "PLAN": {
         "OPENCODE": {
+          "model": "opencode/glm-5-free",
           "mode": "plan",
           "auto_approve": true
         }
       },
       "APPROVALS": {
         "OPENCODE": {
+          "model": "opencode/glm-5-free",
           "auto_approve": false
+        }
+      },
+      "opencode/glm-5-free": {
+        "OPENCODE": {
+          "model": "opencode/glm-5-free",
+          "auto_approve": true
+        }
+      },
+      "opencode/kimi-k2.5-free": {
+        "OPENCODE": {
+          "model": "opencode/kimi-k2.5-free",
+          "auto_approve": true
+        }
+      },
+      "opencode/minimax-m2.5-free": {
+        "OPENCODE": {
+          "model": "opencode/minimax-m2.5-free",
+          "auto_approve": true
         }
       }
     },

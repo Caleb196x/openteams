@@ -27,6 +27,7 @@ export interface AgentActivityDisplayRow {
   content: string;
   title: string;
   detail?: string;
+  resultDetail?: string;
   toolKind?: AgentActivityToolKind;
   toolStatus?: AgentActivityToolStatus;
   sourceLineIds: string[];
@@ -239,14 +240,30 @@ const labelForToolActivity = (
 const contentForRow = (title: string, detail?: string): string =>
   detail ? `${title}: ${detail}` : title;
 
+const stripEmptyHtmlCommentPrefixes = (content: string): string =>
+  content
+    .split(/\r\n|\r|\n/)
+    .map((line) => line.replace(/^(?:\s*<!--\s*-->\s*)+/u, ""))
+    .join("\n")
+    .trim();
+
+const isCodexActivityLine = (line: ChatRunActivityLine): boolean =>
+  line.agent_name.toLocaleLowerCase().includes("codex");
+
+const displayContentForLine = (line: ChatRunActivityLine): string =>
+  isCodexActivityLine(line)
+    ? stripEmptyHtmlCommentPrefixes(line.content)
+    : line.content;
+
 const displayRowFromLine = (
   line: ChatRunActivityLine,
+  content = line.content,
 ): AgentActivityDisplayRow => ({
   row_id: line.line_id,
   line_type: line.line_type,
   sequence: line.sequence,
-  content: line.content,
-  title: line.content,
+  content,
+  title: content,
   sourceLineIds: [line.line_id],
   ...(line.line_type === "tool" ? { toolKind: "activity" as const } : {}),
 });
@@ -289,12 +306,21 @@ const applyParsedToolToRow = (
   translate?: AgentActivityTranslator,
 ): AgentActivityDisplayRow => {
   const title = labelForToolActivity(parsed.kind, parsed.status, translate);
+  const existingDetail = row.detail?.trim();
+  const resultPrefix = existingDetail ? `${existingDetail}:` : undefined;
+  const hasResultDetail =
+    resultPrefix !== undefined && parsed.detail.startsWith(resultPrefix);
+  const detail = hasResultDetail ? existingDetail : parsed.detail;
+  const resultDetail = hasResultDetail
+    ? parsed.detail.slice(resultPrefix.length).trim()
+    : undefined;
   return {
     ...row,
     line_type: "tool",
     content: contentForRow(title, parsed.detail),
     title,
-    detail: parsed.detail || undefined,
+    detail: detail || undefined,
+    resultDetail: resultDetail || undefined,
     toolKind: parsed.kind,
     toolStatus: parsed.status,
     sourceLineIds: [...row.sourceLineIds, line.line_id],
@@ -310,13 +336,19 @@ export const formatAgentActivityLines = (
 
   for (const line of lines) {
     if (line.line_type !== "tool") {
-      rows.push(displayRowFromLine(line));
+      const content = displayContentForLine(line);
+      if (content.trim()) {
+        rows.push(displayRowFromLine(line, content));
+      }
       continue;
     }
 
     const parsed = parseToolActivityContent(line.content);
     if (!parsed) {
-      rows.push(displayRowFromLine(line));
+      const content = displayContentForLine(line);
+      if (content.trim()) {
+        rows.push(displayRowFromLine(line, content));
+      }
       continue;
     }
 
