@@ -24,6 +24,7 @@ export interface AgentActivityDisplayRow {
   row_id: string;
   line_type: ChatRunActivityLine["line_type"];
   sequence: number;
+  agentName: string;
   content: string;
   title: string;
   detail?: string;
@@ -269,6 +270,7 @@ const displayRowFromLine = (
   row_id: line.line_id,
   line_type: line.line_type,
   sequence: line.sequence,
+  agentName: line.agent_name,
   content,
   title: content,
   sourceLineIds: [line.line_id],
@@ -375,6 +377,7 @@ export const formatAgentActivityLines = (
         row_id: line.line_id,
         line_type: "tool",
         sequence: line.sequence,
+        agentName: line.agent_name,
         content: contentForRow(title, parsed.detail),
         title,
         detail: parsed.detail || undefined,

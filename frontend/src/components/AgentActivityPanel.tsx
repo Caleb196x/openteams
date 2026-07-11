@@ -7,6 +7,7 @@ import React, {
 } from "react";
 import {
   Activity,
+  Bot,
   ChevronRight,
   ClipboardList,
   FilePenLine,
@@ -85,6 +86,9 @@ function isToolCallLine(line: AgentActivityDisplayRow): boolean {
 function isToolRunning(line: AgentActivityDisplayRow): boolean {
   return line.toolStatus === "running" || line.toolStatus === "waiting_approval";
 }
+
+const panelGroupKeyForLine = (line: AgentActivityDisplayRow): string =>
+  line.agentName.trim() || "Agent";
 
 const renderSimpleBoldMarkdown = (content: string): React.ReactNode => {
   const parts: React.ReactNode[] = [];
@@ -289,6 +293,30 @@ export const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
       ),
     [displayRows],
   );
+  const panelRowGroups = useMemo(() => {
+    const groups: Array<{
+      key: string;
+      agentName: string;
+      rows: AgentActivityDisplayRow[];
+    }> = [];
+
+    for (const line of visibleRows) {
+      const agentName = panelGroupKeyForLine(line);
+      const lastGroup = groups[groups.length - 1];
+      if (lastGroup?.agentName === agentName) {
+        lastGroup.rows.push(line);
+        continue;
+      }
+
+      groups.push({
+        key: `${agentName}-${groups.length}`,
+        agentName,
+        rows: [line],
+      });
+    }
+
+    return groups;
+  }, [visibleRows]);
 
   const lastDisplayRow = visibleRows[visibleRows.length - 1];
   const scrollSignal = `${visibleRows.length}:${lastDisplayRow?.row_id ?? ""}:${
@@ -304,6 +332,19 @@ export const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
   if (showEmpty && variant === "inline") return null;
 
   if (variant === "panel") {
+    const renderLine = (line: AgentActivityDisplayRow) =>
+      isToolCallLine(line) ? (
+        <ToolLineItem
+          key={line.row_id}
+          line={line}
+        />
+      ) : (
+        <ContentLineItem
+          key={line.row_id}
+          line={line}
+        />
+      );
+
     if (showLoading) {
       return (
         <div className="wf-log-panel wf-log-panel--empty">
@@ -345,21 +386,23 @@ export const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
         className="wf-log-panel"
         {...scrollHandlers}
       >
-        <div className="wf-log-group-tasks">
-          {visibleRows.map((line) =>
-            isToolCallLine(line) ? (
-              <ToolLineItem
-                key={line.row_id}
-                line={line}
+        {panelRowGroups.map((group) => (
+          <div
+            key={group.key}
+            className="wf-log-group"
+          >
+            <div className="wf-log-group-header">
+              <Bot
+                className="wf-log-group-agent-icon"
+                aria-hidden="true"
               />
-            ) : (
-              <ContentLineItem
-                key={line.row_id}
-                line={line}
-              />
-            ),
-          )}
-        </div>
+              <span className="wf-log-group-agent">{group.agentName}</span>
+            </div>
+            <div className="wf-log-group-tasks">
+              {group.rows.map(renderLine)}
+            </div>
+          </div>
+        ))}
       </div>
     );
   }
