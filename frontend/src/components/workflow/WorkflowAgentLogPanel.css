@@ -27,6 +27,10 @@
   color: var(--ink-tertiary, #62666d);
 }
 
+.wf-log-panel-message--error {
+  color: #e5484d;
+}
+
 /* Scrollbar */
 .wf-log-panel::-webkit-scrollbar {
   width: 6px;
@@ -67,7 +71,15 @@ body[data-mode="light"] .workflow-window-root .wf-log-panel::-webkit-scrollbar-t
 .wf-log-group-header {
   display: flex;
   align-items: center;
+  gap: 6px;
   margin-bottom: 6px;
+}
+
+.wf-log-group-agent-icon {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  color: var(--ink-tertiary, #62666d);
 }
 
 .wf-log-group-agent {

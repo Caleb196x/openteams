@@ -3433,6 +3433,8 @@ export function TeamTemplatesPage() {
         detail,
         workspacePath,
         runtimeResponse.runners,
+      ).map((spec) =>
+        workspacePath ? { ...spec, workspacePath } : spec,
       );
       if (memberSpecs.length === 0) {
         throw new Error(translateWithFallback(t, "teamTemplates.noUsableMembers", "The template has no usable members, so the current team was not replaced."));

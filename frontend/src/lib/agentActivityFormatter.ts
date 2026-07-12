@@ -24,6 +24,7 @@ export interface AgentActivityDisplayRow {
   row_id: string;
   line_type: ChatRunActivityLine["line_type"];
   sequence: number;
+  agentName: string;
   content: string;
   title: string;
   detail?: string;
@@ -37,6 +38,10 @@ export type AgentActivityTranslator = (
   key: string,
   replacements?: Record<string, string | number>,
 ) => string;
+
+export interface AgentActivityFormatOptions {
+  stripEmptyHtmlCommentPrefixes?: boolean;
+}
 
 interface ParsedToolActivity {
   kind: AgentActivityToolKind;
@@ -250,8 +255,11 @@ const stripEmptyHtmlCommentPrefixes = (content: string): string =>
 const isCodexActivityLine = (line: ChatRunActivityLine): boolean =>
   line.agent_name.toLocaleLowerCase().includes("codex");
 
-const displayContentForLine = (line: ChatRunActivityLine): string =>
-  isCodexActivityLine(line)
+const displayContentForLine = (
+  line: ChatRunActivityLine,
+  options?: AgentActivityFormatOptions,
+): string =>
+  options?.stripEmptyHtmlCommentPrefixes || isCodexActivityLine(line)
     ? stripEmptyHtmlCommentPrefixes(line.content)
     : line.content;
 
@@ -262,6 +270,7 @@ const displayRowFromLine = (
   row_id: line.line_id,
   line_type: line.line_type,
   sequence: line.sequence,
+  agentName: line.agent_name,
   content,
   title: content,
   sourceLineIds: [line.line_id],
@@ -330,13 +339,14 @@ const applyParsedToolToRow = (
 export const formatAgentActivityLines = (
   lines: ChatRunActivityLine[],
   translate?: AgentActivityTranslator,
+  options?: AgentActivityFormatOptions,
 ): AgentActivityDisplayRow[] => {
   const rows: AgentActivityDisplayRow[] = [];
   const pendingByKey = new Map<string, number[]>();
 
   for (const line of lines) {
     if (line.line_type !== "tool") {
-      const content = displayContentForLine(line);
+      const content = displayContentForLine(line, options);
       if (content.trim()) {
         rows.push(displayRowFromLine(line, content));
       }
@@ -345,7 +355,7 @@ export const formatAgentActivityLines = (
 
     const parsed = parseToolActivityContent(line.content);
     if (!parsed) {
-      const content = displayContentForLine(line);
+      const content = displayContentForLine(line, options);
       if (content.trim()) {
         rows.push(displayRowFromLine(line, content));
       }
@@ -367,6 +377,7 @@ export const formatAgentActivityLines = (
         row_id: line.line_id,
         line_type: "tool",
         sequence: line.sequence,
+        agentName: line.agent_name,
         content: contentForRow(title, parsed.detail),
         title,
         detail: parsed.detail || undefined,
