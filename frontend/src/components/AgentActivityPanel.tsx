@@ -7,6 +7,7 @@ import React, {
 } from "react";
 import {
   Activity,
+  Bot,
   ChevronRight,
   ClipboardList,
   FilePenLine,
@@ -40,6 +41,8 @@ interface AgentActivityPanelProps {
   state?: ActivityLoadState;
   labels: AgentActivityPanelLabels;
   translate?: AgentActivityTranslator;
+  variant?: "inline" | "panel";
+  stripEmptyHtmlCommentPrefixes?: boolean;
 }
 
 const AGENT_ACTIVITY_AUTO_SCROLL_IDLE_MS = 30000;
@@ -83,6 +86,9 @@ function isToolCallLine(line: AgentActivityDisplayRow): boolean {
 function isToolRunning(line: AgentActivityDisplayRow): boolean {
   return line.toolStatus === "running" || line.toolStatus === "waiting_approval";
 }
+
+const panelGroupKeyForLine = (line: AgentActivityDisplayRow): string =>
+  line.agentName.trim() || "Agent";
 
 const renderSimpleBoldMarkdown = (content: string): React.ReactNode => {
   const parts: React.ReactNode[] = [];
@@ -268,10 +274,15 @@ export const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
   state = "idle",
   labels,
   translate,
+  variant = "inline",
+  stripEmptyHtmlCommentPrefixes = false,
 }) => {
   const displayRows = useMemo(
-    () => formatAgentActivityLines(lines, translate),
-    [lines, translate],
+    () =>
+      formatAgentActivityLines(lines, translate, {
+        stripEmptyHtmlCommentPrefixes,
+      }),
+    [lines, stripEmptyHtmlCommentPrefixes, translate],
   );
 
   // Filter: hide tool calls that are still running
@@ -282,6 +293,30 @@ export const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
       ),
     [displayRows],
   );
+  const panelRowGroups = useMemo(() => {
+    const groups: Array<{
+      key: string;
+      agentName: string;
+      rows: AgentActivityDisplayRow[];
+    }> = [];
+
+    for (const line of visibleRows) {
+      const agentName = panelGroupKeyForLine(line);
+      const lastGroup = groups[groups.length - 1];
+      if (lastGroup?.agentName === agentName) {
+        lastGroup.rows.push(line);
+        continue;
+      }
+
+      groups.push({
+        key: `${agentName}-${groups.length}`,
+        agentName,
+        rows: [line],
+      });
+    }
+
+    return groups;
+  }, [visibleRows]);
 
   const lastDisplayRow = visibleRows[visibleRows.length - 1];
   const scrollSignal = `${visibleRows.length}:${lastDisplayRow?.row_id ?? ""}:${
@@ -294,7 +329,83 @@ export const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
   const showEmpty =
     !showLoading && !showPruned && !showError && visibleRows.length === 0;
 
-  if (showEmpty) return null;
+  if (showEmpty && variant === "inline") return null;
+
+  if (variant === "panel") {
+    const renderLine = (line: AgentActivityDisplayRow) =>
+      isToolCallLine(line) ? (
+        <ToolLineItem
+          key={line.row_id}
+          line={line}
+        />
+      ) : (
+        <ContentLineItem
+          key={line.row_id}
+          line={line}
+        />
+      );
+
+    if (showLoading) {
+      return (
+        <div className="wf-log-panel wf-log-panel--empty">
+          <span className="wf-log-spinner" />
+          <span className="wf-log-panel-message">{labels.loading}</span>
+        </div>
+      );
+    }
+
+    if (showPruned) {
+      return (
+        <div className="wf-log-panel wf-log-panel--empty">
+          <span className="wf-log-panel-message">{labels.cleaned}</span>
+        </div>
+      );
+    }
+
+    if (showError) {
+      return (
+        <div className="wf-log-panel wf-log-panel--empty">
+          <span className="wf-log-panel-message wf-log-panel-message--error">
+            {labels.error}
+          </span>
+        </div>
+      );
+    }
+
+    if (showEmpty) {
+      return (
+        <div className="wf-log-panel wf-log-panel--empty">
+          <span className="wf-log-panel-message">{labels.empty}</span>
+        </div>
+      );
+    }
+
+    return (
+      <div
+        ref={scrollRef}
+        className="wf-log-panel"
+        {...scrollHandlers}
+      >
+        {panelRowGroups.map((group) => (
+          <div
+            key={group.key}
+            className="wf-log-group"
+          >
+            <div className="wf-log-group-header">
+              <Bot
+                className="wf-log-group-agent-icon"
+                aria-hidden="true"
+              />
+              <span className="wf-log-group-agent">{group.agentName}</span>
+            </div>
+            <div className="wf-log-group-tasks">
+              {group.rows.map(renderLine)}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="wf-log-panel-inline">
