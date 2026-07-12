@@ -7,7 +7,10 @@ import {
   Trash2,
   WifiCog,
 } from 'lucide-react';
-import type { ModelDraft } from './CustomProviderEditor';
+import {
+  CUSTOM_PROVIDER_NUMERIC_DEFAULTS,
+  type ModelDraft,
+} from './customProviderForm';
 import {
   Field,
   inputClassName,
@@ -132,6 +135,7 @@ export function CustomProviderModelCard({
             <Field label={copy('settings.providers.custom.modelId', 'Model ID')}>
               <input
                 className={technicalInputClassName}
+                required
                 value={model.id}
                 onChange={(event) =>
                   onUpdate((current) => ({ ...current, id: event.target.value }))
@@ -233,7 +237,9 @@ export function CustomProviderModelCard({
                       contextLimit: event.target.value,
                     }))
                   }
-                  placeholder="262144"
+                  placeholder={String(
+                    CUSTOM_PROVIDER_NUMERIC_DEFAULTS.contextLimit,
+                  )}
                 />
               </Field>
               <Field
@@ -253,7 +259,9 @@ export function CustomProviderModelCard({
                       outputLimit: event.target.value,
                     }))
                   }
-                  placeholder="32768"
+                  placeholder={String(
+                    CUSTOM_PROVIDER_NUMERIC_DEFAULTS.outputLimit,
+                  )}
                 />
               </Field>
               <div className="provider-property-row">
@@ -279,7 +287,7 @@ export function CustomProviderModelCard({
                         ...current,
                         thinkingEnabled: checked,
                         thinkingBudget: checked
-                          ? current.thinkingBudget || '9216'
+                          ? current.thinkingBudget
                           : '',
                       }))
                     }
@@ -304,7 +312,9 @@ export function CustomProviderModelCard({
                       thinkingBudget: event.target.value,
                     }))
                   }
-                  placeholder="9216"
+                  placeholder={String(
+                    CUSTOM_PROVIDER_NUMERIC_DEFAULTS.thinkingBudget,
+                  )}
                 />
               </Field>
             </div>

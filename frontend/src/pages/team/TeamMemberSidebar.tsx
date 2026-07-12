@@ -95,13 +95,10 @@ type TeamMemberSidebarProps = {
 };
 
 type TeamAddMemberButtonProps = {
-  agents: BackendChatAgent[];
-  members: ProjectMemberWithExecution[];
   openRequestKey?: number;
-  runtimeOptions: TeamAddableRuntime[];
+  runtimeOptions?: TeamAddableRuntime[];
   saving: boolean;
   t: TranslateFn;
-  onAddMember: (agentId: string) => void;
   onCreateMember: (runnerType: BaseCodingAgent) => void;
 };
 
@@ -112,13 +109,10 @@ type TeamAddableRuntime = {
 };
 
 export function TeamAddMemberButton({
-  agents,
-  members,
   openRequestKey,
-  runtimeOptions,
+  runtimeOptions = [],
   saving,
   t,
-  onAddMember,
   onCreateMember,
 }: TeamAddMemberButtonProps) {
   const [showAddMenu, setShowAddMenu] = useState(false);
@@ -145,21 +139,6 @@ export function TeamAddMemberButton({
     setShowAddMenu(true);
   }, [openRequestKey]);
 
-  const availableAgents = useMemo(() => {
-    const memberAgentIds = new Set(
-      members.map((member) => member.agent_id).filter(Boolean),
-    );
-    return agents.filter((agent) => !memberAgentIds.has(agent.id));
-  }, [agents, members]);
-
-  const filteredAgents = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-    if (!query) return availableAgents;
-    return availableAgents.filter((agent) =>
-      agent.name.toLowerCase().includes(query),
-    );
-  }, [availableAgents, searchQuery]);
-
   const filteredRuntimeOptions = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     if (!query) return runtimeOptions;
@@ -170,8 +149,7 @@ export function TeamAddMemberButton({
     );
   }, [runtimeOptions, searchQuery]);
 
-  const hasAddOptions =
-    filteredAgents.length > 0 || filteredRuntimeOptions.length > 0;
+  const hasAddOptions = filteredRuntimeOptions.length > 0;
 
   return (
     <div className="relative" ref={menuRef}>
@@ -214,37 +192,7 @@ export function TeamAddMemberButton({
                 </p>
               </div>
             ) : (
-              <>
-                {filteredAgents.map((agent) => (
-                  <button
-                    key={agent.id}
-                    type="button"
-                    onClick={() => {
-                      onAddMember(agent.id);
-                      setShowAddMenu(false);
-                      setSearchQuery("");
-                    }}
-                    className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-[var(--surface-2)]"
-                  >
-                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--surface-3)] text-[var(--ink-subtle)]">
-                      <Bot className="h-4 w-4" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[13px] font-medium text-[var(--ink)]">
-                        {agent.name}
-                      </p>
-                      <p className="truncate text-[11px] text-[var(--ink-tertiary)]">
-                        {compactRunnerLabel(
-                          normalizeRunnerType(agent.runner_type),
-                          t("teamPage.fallback.runtime"),
-                        )}
-                      </p>
-                    </div>
-                    <Plus className="h-3.5 w-3.5 text-[var(--ink-tertiary)]" />
-                  </button>
-                ))}
-
-                {filteredRuntimeOptions.map((option) => (
+              filteredRuntimeOptions.map((option) => (
                   <button
                     key={option.runnerType}
                     type="button"
@@ -269,8 +217,7 @@ export function TeamAddMemberButton({
                     </div>
                     <Plus className="h-3.5 w-3.5 text-[var(--ink-tertiary)]" />
                   </button>
-                ))}
-              </>
+                ))
             )}
           </div>
         </div>

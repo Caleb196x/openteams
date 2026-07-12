@@ -458,12 +458,14 @@ export function TeamPage() {
   );
   const addableRuntimeOptions = useMemo(
     () =>
-      runners.map((runner) => ({
-        label: getRunnerLabel(runner.runner_type),
-        modelName:
-          runtimeConfiguredModel(runner) || runner.discovered_models[0] || null,
-        runnerType: runner.runner_type,
-      })),
+      runners
+        .filter((runner) => getRuntimeDisplayState(runner) === "available")
+        .map((runner) => ({
+          label: getRunnerLabel(runner.runner_type),
+          modelName:
+            runtimeConfiguredModel(runner) || runner.discovered_models[0] || null,
+          runnerType: runner.runner_type,
+        })),
     [runners],
   );
   const selectedRuntime = useMemo(
@@ -1225,23 +1227,6 @@ export function TeamPage() {
     );
   };
 
-  const addMember = async (agentId: string) => {
-    const agent = agents.find((item) => item.id === agentId);
-    if (!selectedProjectId || !agent) return;
-    setSaving(true);
-    setError(null);
-    setNotice(null);
-    try {
-      await addProjectMemberForAgent(agent);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : t("teamPage.error.addMember"),
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const createMemberFromRuntime = async (runnerType: BaseCodingAgent) => {
     if (!selectedProjectId) return;
     setSaving(true);
@@ -1368,12 +1353,9 @@ export function TeamPage() {
           teamDataReady ? (
             <div ref={addMemberActionRef}>
               <TeamAddMemberButton
-                agents={agents}
-                members={currentProjectMembers}
                 openRequestKey={addMemberMenuRequestId}
                 runtimeOptions={addableRuntimeOptions}
                 saving={saving}
-                onAddMember={addMember}
                 onCreateMember={createMemberFromRuntime}
                 t={t}
               />
@@ -1467,7 +1449,6 @@ export function TeamPage() {
               workspacePath={workspacePath}
               onMcpServersChange={handleMcpServersChange}
               onTeamProtocolChange={handleTeamProtocolChange}
-              onTeamProtocolSave={() => void saveTeamProtocol()}
               onToggleMcpServer={toggleMcpServer}
               setAllowedSkillIds={setAllowedSkillIds}
               setIsLeader={setIsLeader}

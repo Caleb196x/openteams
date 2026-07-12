@@ -60,18 +60,17 @@ check(
 );
 
 check(
-  "add member menu includes every runtime option by default",
+  "add member menu includes only available runtimes and omits removed agents",
   source.includes("const addableRuntimeOptions = useMemo(") &&
-    source.includes("runners.map((runner) => ({") &&
-    !source.includes(
-      "runners\n        .filter((runner) => getRuntimeDisplayState(runner) === \"available\")\n        .map((runner) => ({",
+    source.includes(
+      ".filter((runner) => getRuntimeDisplayState(runner) === \"available\")",
     ) &&
     sidebarSource.includes("filteredRuntimeOptions.map((option) => (") &&
-    sidebarSource.includes(
-      "filteredAgents.length > 0 || filteredRuntimeOptions.length > 0",
-    ) &&
-    !sidebarSource.includes("const showRuntimeOptions") &&
-    !sidebarSource.includes("showRuntimeOptions &&"),
+    sidebarSource.includes("const hasAddOptions = filteredRuntimeOptions.length > 0") &&
+    sidebarSource.includes("runtimeOptions = []") &&
+    !sidebarSource.includes("availableAgents") &&
+    !sidebarSource.includes("filteredAgents") &&
+    !sidebarSource.includes("onAddMember"),
   { source, sidebarSource },
 );
 
@@ -117,9 +116,20 @@ check(
     source.includes("projectApi.updateTeamProtocol(selectedProjectId") &&
     !source.includes("chatSessionsApi.getTeamProtocol(") &&
     !source.includes("teamProtocolSessionId") &&
-    configTabsSource.includes("onTeamProtocolSave") &&
-    configTabsSource.includes('t("teamPage.action.saveTeamProtocol")'),
+    !configTabsSource.includes("onTeamProtocolSave") &&
+    !configTabsSource.includes('t("teamPage.action.saveTeamProtocol")'),
   { source, configTabsSource },
+);
+
+check(
+  "team protocol and role definition render markdown and switch to editing on interaction",
+  configTabsSource.includes("function MarkdownEditableField") &&
+    configTabsSource.includes("<AgentMarkdown content={value} fontSize={14} />") &&
+    configTabsSource.includes('value={roleDefinition}') &&
+    configTabsSource.includes('value={\n            teamProtocolLoading') &&
+    configTabsSource.includes("if (!disabled) setEditing(true)") &&
+    configTabsSource.includes("onBlur={() => setEditing(false)}"),
+  configTabsSource,
 );
 
 check(

@@ -83,7 +83,6 @@ type TeamConfigTabsProps = {
   workspacePath: string;
   onMcpServersChange: (value: string) => void;
   onTeamProtocolChange: (value: string) => void;
-  onTeamProtocolSave: () => void;
   onToggleMcpServer: (serverKey: string) => void;
   setAllowedSkillIds: (ids: string[]) => void;
   setIsLeader: (value: boolean | ((current: boolean) => boolean)) => void;
@@ -155,6 +154,68 @@ function SettingRow({
         )}
       </div>
       <div className="min-w-0">{children}</div>
+    </div>
+  );
+}
+
+function MarkdownEditableField({
+  disabled = false,
+  minHeightClassName,
+  onChange,
+  placeholder,
+  value,
+}: {
+  disabled?: boolean;
+  minHeightClassName: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  value: string;
+}) {
+  const [editing, setEditing] = useState(false);
+
+  if (editing && !disabled) {
+    return (
+      <textarea
+        autoFocus
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onBlur={() => setEditing(false)}
+        spellCheck={false}
+        placeholder={placeholder}
+        className={cx(
+          "block w-full resize-y overflow-y-auto rounded-[12px] border border-[var(--hairline)] bg-[var(--surface-2)] px-5 py-5 font-mono text-[14px] leading-relaxed text-[var(--ink)] outline-none transition-colors placeholder:text-[var(--ink-muted)] focus:border-[var(--hairline-strong)] focus:ring-2 focus:ring-[var(--primary-focus)]/35",
+          minHeightClassName,
+        )}
+      />
+    );
+  }
+
+  return (
+    <div
+      role={disabled ? undefined : "button"}
+      tabIndex={disabled ? undefined : 0}
+      onClick={() => {
+        if (!disabled) setEditing(true);
+      }}
+      onKeyDown={(event) => {
+        if (!disabled && (event.key === "Enter" || event.key === " ")) {
+          event.preventDefault();
+          setEditing(true);
+        }
+      }}
+      className={cx(
+        "w-full overflow-y-auto rounded-[12px] border border-[var(--hairline)] bg-[var(--surface-2)] px-5 py-5 text-[14px] leading-relaxed transition-colors",
+        minHeightClassName,
+        disabled
+          ? "cursor-not-allowed opacity-70"
+          : "cursor-text hover:border-[var(--hairline-strong)] focus-visible:border-[var(--hairline-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-focus)]/35",
+      )}
+    >
+      {value ? (
+        <AgentMarkdown content={value} fontSize={14} />
+      ) : (
+        <span className="text-[var(--ink-muted)]">{placeholder}</span>
+      )}
     </div>
   );
 }
@@ -612,12 +673,11 @@ function ConfigTab({
           className="!pb-0"
           bodyClassName="!p-0"
         >
-          <textarea
+          <MarkdownEditableField
             value={roleDefinition}
-            onChange={(event) => setRoleDefinition(event.target.value)}
-            spellCheck={false}
+            onChange={setRoleDefinition}
             placeholder={t("teamPage.systemPrompt.placeholder")}
-            className="block h-full min-h-[360px] w-full resize-none overflow-y-auto rounded-[12px] border-0 bg-[var(--surface-3)] px-5 py-5 font-mono text-[14px] leading-relaxed text-[var(--ink)] outline-none transition-colors placeholder:text-[var(--ink-muted)] placeholder:opacity-100 focus:ring-2 focus:ring-[var(--primary-focus)]/50"
+            minHeightClassName="min-h-[360px]"
           />
         </ConfigSection>
       </div>
@@ -830,24 +890,18 @@ function McpConfigTab({
 
 function TeamProtocolTab({
   onTeamProtocolChange,
-  onTeamProtocolSave,
   t,
   teamProtocolContent,
-  teamProtocolDirty,
   teamProtocolError,
   teamProtocolLoading,
-  teamProtocolSaving,
   teamProtocolAvailable,
 }: Pick<
   TeamConfigTabsProps,
   | "onTeamProtocolChange"
-  | "onTeamProtocolSave"
   | "t"
   | "teamProtocolContent"
-  | "teamProtocolDirty"
   | "teamProtocolError"
   | "teamProtocolLoading"
-  | "teamProtocolSaving"
   | "teamProtocolAvailable"
 >) {
   return (
@@ -869,36 +923,17 @@ function TeamProtocolTab({
         description={t("teamPage.teamProtocol.desc")}
         bodyClassName="!p-0"
       >
-        <textarea
+        <MarkdownEditableField
           value={
             teamProtocolLoading
               ? t("teamPage.teamProtocol.loading")
               : teamProtocolContent
           }
-          onChange={(event) => onTeamProtocolChange(event.target.value)}
+          onChange={onTeamProtocolChange}
           disabled={teamProtocolLoading || !teamProtocolAvailable}
-          spellCheck={false}
           placeholder={t("teamPage.teamProtocol.placeholder")}
-          className="block h-full min-h-[480px] w-full resize-none overflow-y-auto rounded-[12px] border-0 bg-[var(--surface-3)] px-5 py-5 font-mono text-[14px] leading-relaxed text-[var(--ink)] outline-none transition-colors placeholder:text-[var(--ink-muted)] placeholder:opacity-100 focus:ring-2 focus:ring-[var(--primary-focus)]/50 disabled:opacity-70"
+          minHeightClassName="min-h-[480px]"
         />
-        <div className="flex items-center justify-end border-t border-[var(--hairline)] px-5 py-4">
-          <button
-            type="button"
-            onClick={onTeamProtocolSave}
-            disabled={
-              !teamProtocolDirty ||
-              teamProtocolLoading ||
-              teamProtocolSaving ||
-              !teamProtocolAvailable
-            }
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-[8px] bg-[var(--primary)] px-4 text-[13px] font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {teamProtocolSaving && (
-              <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-            )}
-            {t("teamPage.action.saveTeamProtocol")}
-          </button>
-        </div>
       </ConfigSection>
     </div>
   );
@@ -1044,13 +1079,10 @@ export function TeamConfigTabs(props: TeamConfigTabsProps) {
         ) : (
           <TeamProtocolTab
             teamProtocolContent={props.teamProtocolContent}
-            teamProtocolDirty={props.teamProtocolDirty}
             teamProtocolError={props.teamProtocolError}
             teamProtocolLoading={props.teamProtocolLoading}
-            teamProtocolSaving={props.teamProtocolSaving}
             teamProtocolAvailable={props.teamProtocolAvailable}
             onTeamProtocolChange={props.onTeamProtocolChange}
-            onTeamProtocolSave={props.onTeamProtocolSave}
             t={t}
           />
         )}

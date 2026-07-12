@@ -461,10 +461,15 @@ check(
     guideSource.indexOf('await onboardingApi.complete') &&
   guideSource.includes('await onboardingApi.complete') &&
     guideSource.includes('path: projectDraft.path') &&
+    guideSource.includes('teamConfig,') &&
     guideSource.includes('created_project_id: createdProject.projectId') &&
     guideSource.includes('await onComplete(state, {') &&
     guideSource.includes('createDefaultSession: true') &&
     appSource.includes('onCreateProjectFromOnboarding={handleCreateOnboardingProject}') &&
+    appSource.includes('onboardingTeamConfig: teamConfig') &&
+    appSource.includes('memberConfig: options?.onboardingTeamConfig') &&
+    appSource.includes('runnerType: onboardingConfig.runner_type') &&
+    appSource.includes('modelName: onboardingConfig.model_name') &&
     appSource.includes('return { projectId: project.id, sessionId: null }') &&
     appSource.includes('handleOnboardingCompleted') &&
     appSource.includes('setIsCreateSessionModalOpen(false)') &&

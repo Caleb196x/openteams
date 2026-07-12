@@ -22,6 +22,7 @@ const tauriCli = path.join(
   'tauri.js'
 );
 const desktopLogoScale = 1.05;
+const windowsCornerRadius = 256;
 
 function commandExists(command) {
   const lookup = process.platform === 'win32' ? 'where' : 'which';
@@ -120,7 +121,91 @@ function renderWithImageMagick(inputSvg, outputPng) {
   return false;
 }
 
+function renderWindowsSourcePng(outputPng) {
+  if (process.platform !== 'win32' || !commandExists('magick')) {
+    return false;
+  }
+
+  const logo = extractSourceLogoImage();
+  const dataUrlMatch = logo.href.match(/^data:image\/png;base64,(.+)$/s);
+  if (!dataUrlMatch) {
+    throw new Error('Desktop icon image layer must contain an embedded PNG.');
+  }
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openteams-icon-layer-'));
+  const logoPng = path.join(tempDir, 'logo-layer.png');
+  const sourceToDesktopScale = 1024 / 512;
+  const width = Math.round(
+    logo.width * sourceToDesktopScale * desktopLogoScale
+  );
+  const height = Math.round(
+    logo.height * sourceToDesktopScale * desktopLogoScale
+  );
+  const originalCenterX =
+    (logo.x + logo.width / 2) * sourceToDesktopScale;
+  const originalCenterY =
+    (logo.y + logo.height / 2) * sourceToDesktopScale;
+  const x = Math.round(originalCenterX - width / 2);
+  const y = Math.round(originalCenterY - height / 2);
+
+  try {
+    fs.writeFileSync(logoPng, Buffer.from(dataUrlMatch[1], 'base64'));
+    run('magick', [
+      '-size',
+      '1024x1024',
+      'xc:none',
+      '-fill',
+      'white',
+      '-stroke',
+      'none',
+      '-draw',
+      `roundrectangle 0,0 1023,1023 ${windowsCornerRadius},${windowsCornerRadius}`,
+      '(',
+      logoPng,
+      '-resize',
+      `${width}x${height}!`,
+      ')',
+      '-geometry',
+      `+${x}+${y}`,
+      '-composite',
+      outputPng,
+    ]);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+
+  return true;
+}
+
+function alphaAtPixel(outputPng, x, y) {
+  const result = run('magick', [
+    outputPng,
+    '-crop',
+    `1x1+${x}+${y}`,
+    '+repage',
+    '-alpha',
+    'extract',
+    '-format',
+    '%[fx:mean]',
+    'info:',
+  ]);
+  return Number.parseFloat(result.stdout.trim());
+}
+
+function validateWindowsRoundedCorners(outputPng) {
+  if (process.platform !== 'win32' || !commandExists('magick')) return;
+
+  const cornerAlpha = alphaAtPixel(outputPng, 0, 0);
+  const centerAlpha = alphaAtPixel(outputPng, 512, 512);
+  if (cornerAlpha > 0.01 || centerAlpha < 0.99) {
+    throw new Error(
+      `Generated Windows icon has an invalid rounded mask (corner alpha=${cornerAlpha}, center alpha=${centerAlpha}).`
+    );
+  }
+}
+
 function renderSourcePng(inputSvg, outputPng) {
+  if (renderWindowsSourcePng(outputPng)) return;
   if (renderWithSips(inputSvg, outputPng)) return;
   if (renderWithQuickLook(inputSvg, outputPng)) return;
   if (renderWithRsvg(inputSvg, outputPng)) return;
@@ -137,6 +222,34 @@ function renderSourcePng(inputSvg, outputPng) {
   throw new Error(
     'No SVG renderer found. Install rsvg-convert or ImageMagick, or run this script on macOS.'
   );
+}
+
+function validateSourcePng(outputPng) {
+  const size = fs.statSync(outputPng).size;
+  if (size < 4096) {
+    throw new Error(
+      `Generated desktop icon is unexpectedly small (${size} bytes); refusing to package a blank icon.`
+    );
+  }
+
+  if (!commandExists('magick')) return;
+
+  const result = run('magick', [
+    outputPng,
+    '-colorspace',
+    'Gray',
+    '-format',
+    '%[fx:mean]',
+    'info:',
+  ]);
+  const mean = Number.parseFloat(result.stdout.trim());
+  if (!Number.isFinite(mean) || mean > 0.995) {
+    throw new Error(
+      `Generated desktop icon is blank or nearly white (mean=${result.stdout.trim()}).`
+    );
+  }
+
+  validateWindowsRoundedCorners(outputPng);
 }
 
 function readSvgNumberAttribute(markup, name) {
@@ -195,6 +308,12 @@ function createDesktopSourceSvg(outputSvg) {
   );
 }
 
+function generatedIconFilesForPlatform() {
+  if (process.platform === 'win32') return ['icon.ico', 'icon.png'];
+  if (process.platform === 'darwin') return ['icon.icns', 'icon.png'];
+  return ['icon.png'];
+}
+
 function syncIcons() {
   if (!fs.existsSync(sourceSvg)) {
     throw new Error(`Missing desktop icon source: ${sourceSvg}`);
@@ -215,10 +334,11 @@ function syncIcons() {
     fs.mkdirSync(generatedDir, { recursive: true });
     createDesktopSourceSvg(desktopSvg);
     renderSourcePng(desktopSvg, sourcePng);
+    validateSourcePng(sourcePng);
     run(process.execPath, [tauriCli, 'icon', sourcePng, '-o', generatedDir], {
       stdio: 'inherit',
     });
-    for (const fileName of ['icon.icns', 'icon.ico', 'icon.png']) {
+    for (const fileName of generatedIconFilesForPlatform()) {
       fs.copyFileSync(
         path.join(generatedDir, fileName),
         path.join(iconsDir, fileName)

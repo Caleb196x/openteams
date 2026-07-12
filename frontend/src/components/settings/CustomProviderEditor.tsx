@@ -20,9 +20,16 @@ import {
   createEmptyCustomProviderEntry,
   DEFAULT_CUSTOM_PROVIDER_NPM,
   isMaskedSecret,
-  normalizeCustomProviderEntry,
   trimToNull,
 } from '@/lib/cliConfigTypes';
+import {
+  buildCustomProvider,
+  CUSTOM_PROVIDER_NUMERIC_DEFAULTS,
+  hasRequiredCustomProviderCredentials,
+  parseIntegerWithDefault,
+  type CustomProviderFormState,
+  type ModelDraft,
+} from './customProviderForm';
 
 type CustomProviderEditorProps = {
   initialProvider: CustomProviderEntry | null;
@@ -32,31 +39,6 @@ type CustomProviderEditorProps = {
     provider: CustomProviderEntry,
     previousProviderId: string | null,
   ) => void;
-};
-
-export type ModelDraft = {
-  contextLimit: string;
-  id: string;
-  inputText: boolean;
-  inputImage: boolean;
-  key: string;
-  name: string;
-  options: Record<string, unknown> | null;
-  outputLimit: string;
-  outputText: boolean;
-  outputImage: boolean;
-  thinkingBudget: string;
-  thinkingEnabled: boolean;
-};
-
-type FormState = {
-  apiKey: string;
-  baseURL: string;
-  id: string;
-  models: ModelDraft[];
-  name: string;
-  npm: string;
-  timeout: string;
 };
 
 type StatusState = {
@@ -87,7 +69,7 @@ function emptyModelDraft(model?: ModelInfo): ModelDraft {
     outputLimit: '',
     outputText: true,
     outputImage: false,
-    thinkingBudget: '9216',
+    thinkingBudget: '',
     thinkingEnabled: true,
   };
 }
@@ -127,7 +109,9 @@ function modelToDraft(id: string, model: CustomModelConfig): ModelDraft {
   };
 }
 
-function createFormState(provider: CustomProviderEntry | null): FormState {
+function createFormState(
+  provider: CustomProviderEntry | null,
+): CustomProviderFormState {
   const entry = provider ?? createEmptyCustomProviderEntry();
   return {
     apiKey: entry.options.api_key ?? '',
@@ -142,82 +126,10 @@ function createFormState(provider: CustomProviderEntry | null): FormState {
   };
 }
 
-function parseInteger(value: string): number | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const parsed = Number(trimmed);
-  if (!Number.isInteger(parsed) || parsed < 0) {
-    throw new Error('invalid-number');
-  }
-  return parsed;
-}
-
-function selectedModalities(text: boolean, image: boolean): string[] | null {
-  const values = [text ? 'text' : null, image ? 'image' : null].filter(
-    Boolean,
-  ) as string[];
-  return values.length > 0 ? values : null;
-}
-
-function modelOptions(model: ModelDraft): Record<string, unknown> | null {
-  const base = Object.fromEntries(
-    Object.entries(model.options ?? {}).filter(([key]) => key !== 'thinking'),
-  );
-  if (!model.thinkingEnabled) {
-    return Object.keys(base).length > 0 ? base : null;
-  }
-  const budget = parseInteger(model.thinkingBudget);
-  if (budget == null) throw new Error('thinking-budget-required');
-  return {
-    ...base,
-    thinking: {
-      type: 'enabled',
-      budgetTokens: budget,
-    },
-  };
-}
-
-function buildProvider(formState: FormState): CustomProviderEntry {
-  const models = formState.models.reduce<Record<string, CustomModelConfig>>(
-    (acc, model) => {
-      const id = model.id.trim();
-      if (!id) throw new Error('model-id-required');
-      acc[id] = {
-        name: trimToNull(model.name),
-        modalities: {
-          input: selectedModalities(model.inputText, model.inputImage),
-          output: selectedModalities(model.outputText, model.outputImage),
-        },
-        options: modelOptions(model),
-        limit: {
-          context: parseInteger(model.contextLimit),
-          output: parseInteger(model.outputLimit),
-        },
-      };
-      return acc;
-    },
-    {},
-  );
-
-  return normalizeCustomProviderEntry({
-    id: formState.id,
-    name: formState.name,
-    npm: formState.npm,
-    options: {
-      api_key: isMaskedSecret(formState.apiKey)
-        ? formState.apiKey
-        : trimToNull(formState.apiKey),
-      baseURL: trimToNull(formState.baseURL),
-      timeout: parseInteger(formState.timeout),
-    },
-    models,
-  });
-}
-
-function canAutoSave(formState: FormState) {
-  if (!trimToNull(formState.id) || !trimToNull(formState.baseURL)) return false;
+function canAutoSave(formState: CustomProviderFormState) {
+  if (!hasRequiredCustomProviderCredentials(formState)) return false;
   try {
-    buildProvider(formState);
+    buildCustomProvider(formState);
     return true;
   } catch {
     return false;
@@ -271,7 +183,8 @@ export function CustomProviderEditor({
   const [formState, setFormState] = useState(() =>
     createFormState(initialProvider),
   );
-  const [savedFormState, setSavedFormState] = useState<FormState | null>(null);
+  const [savedFormState, setSavedFormState] =
+    useState<CustomProviderFormState | null>(null);
   const [status, setStatus] = useState<StatusState>(null);
   const [connectionStatus, setConnectionStatus] = useState<StatusState>(null);
   const [modelTestStatus, setModelTestStatus] =
@@ -292,6 +205,60 @@ export function CustomProviderEditor({
   const copy = (key: string, fallback: string) => {
     const value = t(key);
     return value === key ? fallback : value;
+  };
+
+  const connectionRequirementError = () => {
+    if (!trimToNull(formState.id)) {
+      return copy(
+        'settings.providers.custom.idRequired',
+        'Provider ID is required.',
+      );
+    }
+    if (!trimToNull(formState.baseURL)) {
+      return copy(
+        'settings.providers.custom.baseUrlRequired',
+        'Base URL is required.',
+      );
+    }
+    if (!trimToNull(formState.apiKey)) {
+      return copy(
+        'settings.providers.custom.apiKeyRequired',
+        'API key is required.',
+      );
+    }
+    return null;
+  };
+
+  const providerFormErrorMessage = (error: unknown) => {
+    if (!(error instanceof Error)) {
+      return copy(
+        'settings.providers.custom.saveFailed',
+        'Failed to save custom provider.',
+      );
+    }
+    const messages: Record<string, string> = {
+      'api-key-required': copy(
+        'settings.providers.custom.apiKeyRequired',
+        'API key is required.',
+      ),
+      'base-url-required': copy(
+        'settings.providers.custom.baseUrlRequired',
+        'Base URL is required.',
+      ),
+      'invalid-number': copy(
+        'settings.providers.custom.invalidNumber',
+        'Numeric values must be non-negative integers.',
+      ),
+      'model-id-required': copy(
+        'settings.providers.custom.modelIdRequired',
+        'Model ID is required.',
+      ),
+      'provider-id-required': copy(
+        'settings.providers.custom.idRequired',
+        'Provider ID is required.',
+      ),
+    };
+    return messages[error.message] ?? error.message;
   };
 
   useEffect(() => {
@@ -320,7 +287,9 @@ export function CustomProviderEditor({
     savedFormState != null &&
     JSON.stringify(formState) !== JSON.stringify(savedFormState);
 
-  const updateForm = (updater: (current: FormState) => FormState) => {
+  const updateForm = (
+    updater: (current: CustomProviderFormState) => CustomProviderFormState,
+  ) => {
     setFormState((current) => updater(current));
     setStatus(null);
     setConnectionStatus(null);
@@ -348,17 +317,18 @@ export function CustomProviderEditor({
         ? null
         : trimToNull(formState.apiKey),
       baseURL: trimToNull(formState.baseURL),
-      timeout: parseInteger(formState.timeout),
+      timeout: parseIntegerWithDefault(
+        formState.timeout,
+        CUSTOM_PROVIDER_NUMERIC_DEFAULTS.timeout,
+      ),
     },
   });
 
   const handleDiscoverModels = async () => {
-    if (!trimToNull(formState.baseURL)) {
+    const requirementError = connectionRequirementError();
+    if (requirementError) {
       setModelTestStatus({
-        message: copy(
-          'settings.providers.custom.baseUrlRequired',
-          'Base URL is required before discovering models.',
-        ),
+        message: requirementError,
         tone: 'error',
       });
       return;
@@ -408,12 +378,10 @@ export function CustomProviderEditor({
   };
 
   const handleTestBaseUrl = async () => {
-    if (!trimToNull(formState.baseURL)) {
+    const requirementError = connectionRequirementError();
+    if (requirementError) {
       setConnectionStatus({
-        message: copy(
-          'settings.providers.custom.baseUrlRequired',
-          'Base URL is required.',
-        ),
+        message: requirementError,
         tone: 'error',
       });
       return;
@@ -455,6 +423,11 @@ export function CustomProviderEditor({
       });
       return;
     }
+    const requirementError = connectionRequirementError();
+    if (requirementError) {
+      setModelTestStatus({ message: requirementError, tone: 'error' });
+      return;
+    }
     setModelTestStatus(null);
     setBusyAction(`test-${model.key}`);
     try {
@@ -484,18 +457,7 @@ export function CustomProviderEditor({
   const handleSave = async (options: { silent?: boolean } = {}) => {
     setBusyAction('save');
     try {
-      const provider = buildProvider(formState);
-      if (!provider.id) {
-        throw new Error(copy('settings.providers.custom.idRequired', 'Provider ID is required.'));
-      }
-      if (!provider.options.baseURL) {
-        throw new Error(
-          copy(
-            'settings.providers.custom.baseUrlRequired',
-            'Base URL is required.',
-          ),
-        );
-      }
+      const provider = buildCustomProvider(formState);
       const existingProviderId =
         persistedProviderId ?? (mode === 'edit' ? provider.id : null);
       const saved = existingProviderId
@@ -521,13 +483,7 @@ export function CustomProviderEditor({
         await onSaved(saved.id);
       }
     } catch (error) {
-      const errorMessage =
-        error instanceof Error
-          ? error.message
-          : copy(
-              'settings.providers.custom.saveFailed',
-              'Failed to save custom provider.',
-            );
+      const errorMessage = providerFormErrorMessage(error);
       setStatus({
         message: errorMessage,
         tone: 'error',

@@ -101,6 +101,7 @@ interface OnboardingGuideProps {
     name: string;
     path: string;
     teamId: string | null;
+    teamConfig: OnboardingTeamMemberConfig[];
   }) => Promise<{ projectId: string; sessionId: string | null }>;
   onPreviewLocaleChange: (locale: Locale) => void;
   onPreviewAppearanceChange: (appearance: OnboardingAppearance) => void;
@@ -968,6 +969,7 @@ export function OnboardingGuide({
         name: projectDraft.name,
         path: projectDraft.path,
         teamId: recommendedTeamId,
+        teamConfig,
       });
       const state = await onboardingApi.complete({
         ...currentPayload(finalOnboardingStep),

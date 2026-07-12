@@ -95,6 +95,7 @@ import {
   type InboxItem,
   OnboardingAppearance,
   type OnboardingState,
+  type OnboardingTeamMemberConfig,
   ProjectMemberType,
   type CreateProjectRequest,
   type ProjectMemberWithRuntime,
@@ -241,6 +242,7 @@ type CreateProjectOptions = {
   teamId?: string;
   openSessionComposer?: boolean;
   forceMemberWorkspacePath?: boolean;
+  onboardingTeamConfig?: OnboardingTeamMemberConfig[];
 };
 
 type ChatPresetConfigView = {
@@ -777,18 +779,39 @@ function WorkspaceLayout() {
     workspacePath: string | null,
     teamPreset: ChatTeamPreset,
     runtimes: AgentRuntimeStatus[],
-    options?: { forceWorkspacePath?: boolean },
+    options?: {
+      forceWorkspacePath?: boolean;
+      memberConfig?: OnboardingTeamMemberConfig[];
+    },
   ): Promise<number> => {
     let created = 0;
+    const onboardingConfigByMember = new Map(
+      (options?.memberConfig ?? []).map((member) => [
+        member.member.trim().toLowerCase(),
+        member,
+      ]),
+    );
     const memberSpecs = buildTemplateMemberSpecs(
       teamPreset,
       workspacePath,
       runtimes,
-    ).map((spec) =>
-      options?.forceWorkspacePath && workspacePath
-        ? { ...spec, workspacePath }
-        : spec,
-    );
+    ).map((spec) => {
+      const onboardingConfig = onboardingConfigByMember.get(
+        spec.name.trim().toLowerCase(),
+      );
+      return {
+        ...spec,
+        ...(options?.forceWorkspacePath && workspacePath
+          ? { workspacePath }
+          : {}),
+        ...(onboardingConfig?.runner_type
+          ? { runnerType: onboardingConfig.runner_type }
+          : {}),
+        ...(onboardingConfig?.model_name
+          ? { modelName: onboardingConfig.model_name }
+          : {}),
+      };
+    });
     for (const spec of memberSpecs) {
       await createProjectAgentMember({
         projectId,
@@ -1786,7 +1809,10 @@ function WorkspaceLayout() {
           data.default_workspace_path,
           selectedTeamPreset,
           runtimes,
-          { forceWorkspacePath: options?.forceMemberWorkspacePath === true },
+          {
+            forceWorkspacePath: options?.forceMemberWorkspacePath === true,
+            memberConfig: options?.onboardingTeamConfig,
+          },
         );
         if (templateMemberCount === 0) {
           teamSetupFailed = true;
@@ -1921,10 +1947,12 @@ function WorkspaceLayout() {
     name,
     path,
     teamId,
+    teamConfig,
   }: {
     name: string;
     path: string;
     teamId: string | null;
+    teamConfig: OnboardingTeamMemberConfig[];
   }) => {
     const { project } = await handleCreateProject(
       {
@@ -1938,6 +1966,7 @@ function WorkspaceLayout() {
       {
         teamId: teamId ?? blankTeamId,
         forceMemberWorkspacePath: true,
+        onboardingTeamConfig: teamConfig,
       },
     );
     return { projectId: project.id, sessionId: null };

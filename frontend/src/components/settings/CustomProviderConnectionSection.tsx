@@ -21,6 +21,7 @@ import {
   inputClassName,
   technicalInputClassName,
 } from './providerSettingsUi';
+import { CUSTOM_PROVIDER_NUMERIC_DEFAULTS } from './customProviderForm';
 
 type ConnectionValues = {
   apiKey: string;
@@ -192,6 +193,7 @@ export function CustomProviderConnectionSection({
                 mode === 'edit' ? 'opacity-55' : ''
               }`}
               disabled={mode === 'edit'}
+              required
               value={values.id}
               onChange={(event) => onChange('id', event.target.value)}
               placeholder="deepseek-coder"
@@ -301,7 +303,12 @@ export function CustomProviderConnectionSection({
               type="button"
               className="provider-url-test-button"
               onClick={onTestBaseUrl}
-              disabled={isTestingBaseUrl || values.baseURL.trim().length === 0}
+              disabled={
+                isTestingBaseUrl ||
+                values.id.trim().length === 0 ||
+                values.baseURL.trim().length === 0 ||
+                values.apiKey.trim().length === 0
+              }
               aria-label={copy(
                 'settings.providers.custom.testBaseUrl',
                 'Test Base URL',
@@ -320,6 +327,7 @@ export function CustomProviderConnectionSection({
           </div>
           <input
             className={technicalInputClassName}
+            required
             value={values.baseURL}
             onChange={(event) => onChange('baseURL', event.target.value)}
             placeholder={selectedPackage.placeholder}
@@ -333,6 +341,7 @@ export function CustomProviderConnectionSection({
           <div className="provider-secret-control min-w-0 w-full">
             <input
               className={`${technicalInputClassName} pr-14`}
+              required
               type={showApiKey ? 'text' : 'password'}
               value={values.apiKey}
               onChange={(event) => onChange('apiKey', event.target.value)}
@@ -392,7 +401,9 @@ export function CustomProviderConnectionSection({
                   type="number"
                   value={values.timeout}
                   onChange={(event) => onChange('timeout', event.target.value)}
-                  placeholder="60000"
+                  placeholder={String(
+                    CUSTOM_PROVIDER_NUMERIC_DEFAULTS.timeout,
+                  )}
                 />
               </Field>
             </div>

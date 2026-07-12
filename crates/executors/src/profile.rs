@@ -264,20 +264,18 @@ impl ExecutorConfigs {
             return false;
         };
 
-        let mut changed = false;
-        for (variant, config) in &mut user_profile.configurations {
-            let CodingAgent::Opencode(user_config) = config else {
-                continue;
-            };
+        let original_len = user_profile.configurations.len();
+        user_profile.configurations.retain(|variant, config| {
+            default_profile.configurations.contains_key(variant)
+                && matches!(config, CodingAgent::Opencode(_))
+        });
+        let mut changed = user_profile.configurations.len() != original_len;
 
-            if let Some(CodingAgent::Opencode(default_config)) =
-                default_profile.configurations.get(variant)
+        for config in user_profile.configurations.values_mut() {
+            if let CodingAgent::Opencode(user_config) = config
+                && user_config.model.take().is_some()
             {
-                if user_config.model != default_config.model {
-                    user_config.model.clone_from(&default_config.model);
-                    changed = true;
-                }
-                continue;
+                changed = true;
             }
         }
 
@@ -606,12 +604,31 @@ mod tests {
     }
 
     #[test]
-    fn opencode_user_profile_migration_preserves_custom_model_variants() {
+    fn opencode_user_profile_migration_resets_models_and_preserves_builtin_settings() {
         let defaults = ExecutorConfigs::from_defaults();
         let mut profiles: ExecutorConfigs = serde_json::from_value(serde_json::json!({
             "executors": {
                 "OPENCODE": {
-                    "DEFAULT": { "OPENCODE": { "model": "openai/gpt-5" } },
+                    "DEFAULT": {
+                        "OPENCODE": {
+                            "model": "openai/gpt-5",
+                            "variant": "high",
+                            "auto_approve": false
+                        }
+                    },
+                    "PLAN": {
+                        "OPENCODE": {
+                            "model": "openai/gpt-5",
+                            "mode": "plan",
+                            "auto_compact": false
+                        }
+                    },
+                    "APPROVALS": {
+                        "OPENCODE": {
+                            "model": "openai/gpt-5",
+                            "auto_approve": false
+                        }
+                    },
                     "legacy/model": { "OPENCODE": { "model": "legacy/model" } },
                     "custom-no-model": { "OPENCODE": { "auto_approve": false } },
                     "opencode/glm-5-free": {
@@ -627,20 +644,38 @@ mod tests {
             .executors
             .get(&BaseCodingAgent::Opencode)
             .expect("opencode overrides should remain");
-        assert!(opencode.configurations.contains_key("legacy/model"));
-        assert!(opencode.configurations.contains_key("custom-no-model"));
-        assert!(opencode.configurations.contains_key("opencode/glm-5-free"));
+        assert_eq!(opencode.configurations.len(), 3);
+        assert!(!opencode.configurations.contains_key("legacy/model"));
+        assert!(!opencode.configurations.contains_key("custom-no-model"));
+        assert!(!opencode.configurations.contains_key("opencode/glm-5-free"));
         match opencode.configurations.get("DEFAULT") {
             Some(CodingAgent::Opencode(config)) => {
                 assert_eq!(config.model.as_deref(), None);
+                assert_eq!(config.variant.as_deref(), Some("high"));
+                assert!(!config.auto_approve);
             }
             other => panic!("expected OpenCode DEFAULT override, got {other:?}"),
+        }
+        match opencode.configurations.get("PLAN") {
+            Some(CodingAgent::Opencode(config)) => {
+                assert_eq!(config.model.as_deref(), None);
+                assert_eq!(config.agent.as_deref(), Some("plan"));
+                assert!(!config.auto_compact);
+            }
+            other => panic!("expected OpenCode PLAN override, got {other:?}"),
+        }
+        match opencode.configurations.get("APPROVALS") {
+            Some(CodingAgent::Opencode(config)) => {
+                assert_eq!(config.model.as_deref(), None);
+                assert!(!config.auto_approve);
+            }
+            other => panic!("expected OpenCode APPROVALS override, got {other:?}"),
         }
         assert!(!profiles.migrate_opencode_model_overrides(&defaults));
     }
 
     #[test]
-    fn opencode_user_profile_migration_keeps_custom_only_executor_override() {
+    fn opencode_user_profile_migration_drops_custom_only_executor_override() {
         let defaults = ExecutorConfigs::from_defaults();
         let mut profiles: ExecutorConfigs = serde_json::from_value(serde_json::json!({
             "executors": {
@@ -651,8 +686,8 @@ mod tests {
         }))
         .expect("user profiles should deserialize");
 
-        assert!(!profiles.migrate_opencode_model_overrides(&defaults));
-        assert!(profiles.executors.contains_key(&BaseCodingAgent::Opencode));
+        assert!(profiles.migrate_opencode_model_overrides(&defaults));
+        assert!(!profiles.executors.contains_key(&BaseCodingAgent::Opencode));
     }
 
     #[test]
