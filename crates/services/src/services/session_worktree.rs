@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
 
 use db::models::chat_session_worktree::{
     CreateSessionWorktree, SessionWorktree, SessionWorktreeError as ModelCasError,
@@ -1376,11 +1379,46 @@ impl SessionWorktreeService {
     // -----------------------------------------------------------------
     // (existing cleanup methods follow)
     // -----------------------------------------------------------------
+
+    /// Force-remove every isolated workspace associated with a session before
+    /// the session row is deleted. Session deletion is explicit destructive
+    /// intent, so this path is allowed to remove worktrees in any lifecycle
+    /// state, including worktrees with unmerged changes.
     ///
-    /// This is the ONLY path that may remove an `active` / `dirty` /
-    /// `merging` / `needs_conflict_resolution` worktree. The cleanup is
-    /// always authoritative (force-remove) because the user has explicitly
-    /// confirmed the discard through the UI.
+    /// The worktree rows are intentionally left untouched: the immediately
+    /// following session deletion removes them through the foreign-key
+    /// cascade. Keeping filesystem cleanup ahead of that cascade preserves the
+    /// metadata needed to remove both the Git worktree registration and the
+    /// session branch.
+    pub async fn force_cleanup_for_session_deletion(
+        &self,
+        session_id: Uuid,
+    ) -> Result<(), SessionWorktreeError> {
+        let rows = SessionWorktree::find_all_by_session(&self.pool, session_id).await?;
+        let mut cleaned_worktrees = HashSet::new();
+
+        for row in rows.iter().rev() {
+            let cleanup_key = (row.repo_path.clone(), row.worktree_path.clone());
+            if cleaned_worktrees.insert(cleanup_key) {
+                let cleanup = WorktreeCleanup::new(
+                    PathBuf::from(&row.worktree_path),
+                    Some(PathBuf::from(&row.repo_path)),
+                );
+                WorktreeManager::force_remove_worktree(&cleanup).await?;
+            }
+
+            self.delete_session_branch_if_present(row).await?;
+        }
+
+        Ok(())
+    }
+
+    ///
+    /// Along with `force_cleanup_for_session_deletion`, this is the only path
+    /// that may remove an `active` / `dirty` / `merging` /
+    /// `needs_conflict_resolution` worktree. The cleanup is always
+    /// authoritative because the user has explicitly confirmed the discard
+    /// through the UI.
     ///
     /// Flow: row -> `cleanup_pending` -> `WorktreeManager::cleanup_worktree`
     /// (force) -> `archived`. On cleanup failure the row lands in
