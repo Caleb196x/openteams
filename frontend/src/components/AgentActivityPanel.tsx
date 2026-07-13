@@ -7,7 +7,6 @@ import React, {
 } from "react";
 import {
   Activity,
-  AlertTriangle,
   Bot,
   ChevronRight,
   ClipboardList,
@@ -270,26 +269,22 @@ const ErrorLineItem: React.FC<{
   line: AgentActivityDisplayRow;
 }> = ({ line }) => {
   const content = line.content.trim();
-  const [summary = content] = content.split(/\r\n|\r|\n/u, 1);
-  const isMultiline = content !== summary;
-  const errorSummary = (
-    <div className="wf-log-error-summary">
-      <AlertTriangle className="wf-log-error-icon" aria-hidden="true" />
-      <span className="wf-log-error-title" title={summary}>
-        {summary}
-      </span>
-      {isMultiline && <ChevronRight className="wf-log-error-chevron" />}
-    </div>
-  );
+  const [preview = content, ...detailLines] = content.split(/\r\n|\r|\n/u);
+  const detail = detailLines.join("\n").trim();
 
-  if (!isMultiline) {
-    return <div className="wf-log-error-card">{errorSummary}</div>;
+  if (!detail) {
+    return <pre className="wf-log-error-block wf-log-error-block--single">{preview}</pre>;
   }
 
   return (
-    <details className="wf-log-error-card">
-      <summary>{errorSummary}</summary>
-      <pre className="wf-log-error-detail">{content}</pre>
+    <details className="wf-log-error-block">
+      <summary className="wf-log-error-block-summary">
+        <ChevronRight className="wf-log-error-chevron" aria-hidden="true" />
+        <code className="wf-log-error-preview" title={preview}>
+          {preview}
+        </code>
+      </summary>
+      <pre className="wf-log-error-detail">{detail}</pre>
     </details>
   );
 };

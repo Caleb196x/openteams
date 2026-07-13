@@ -345,53 +345,54 @@ body[data-mode="light"] .workflow-window-root .wf-log-markdown pre {
   word-break: break-word;
 }
 
-/* Error entries are compact by default and disclose the raw log on demand. */
-.wf-log-error-card {
+/* Error entries render as a single collapsible code block. */
+.wf-log-error-block {
   margin: 3px 0;
-  border: 1px solid color-mix(in srgb, var(--danger, #e5484d) 28%, transparent);
+  border: 1px solid var(--hairline, rgba(255, 255, 255, 0.12));
   border-radius: 6px;
-  background: color-mix(in srgb, var(--danger, #e5484d) 7%, transparent);
-  color: var(--ink, #f7f8f8);
+  background: var(--surface-3, #18191a);
+  color: var(--ink-muted, #a1a5ad);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  line-height: 1.55;
   overflow: hidden;
 }
 
 /* Match the content column used by regular activity rows in both variants. */
-:is(.wf-log-panel, .wf-log-panel-inline) .wf-log-error-card {
+:is(.wf-log-panel, .wf-log-panel-inline) .wf-log-error-block {
   margin-left: 24px;
 }
 
-.wf-log-error-card > summary {
+.wf-log-error-block--single {
+  padding: 7px 9px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.wf-log-error-block > summary {
   cursor: pointer;
   list-style: none;
 }
 
-.wf-log-error-card > summary::-webkit-details-marker {
+.wf-log-error-block > summary::-webkit-details-marker {
   display: none;
 }
 
-.wf-log-error-summary {
+.wf-log-error-block-summary {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: flex-start;
+  gap: 6px;
   min-height: 30px;
-  padding: 5px 9px;
+  padding: 7px 9px;
 }
 
-.wf-log-error-icon {
-  width: 13px;
-  height: 13px;
-  flex: none;
-  color: var(--danger, #e5484d);
-}
-
-.wf-log-error-title {
+.wf-log-error-preview {
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  color: color-mix(in srgb, var(--danger, #e5484d) 72%, var(--ink, #f7f8f8));
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  line-height: 1.5;
+  color: inherit;
+  font: inherit;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -400,23 +401,21 @@ body[data-mode="light"] .workflow-window-root .wf-log-markdown pre {
   width: 12px;
   height: 12px;
   flex: none;
+  margin-top: 2px;
   color: var(--ink-tertiary, #62666d);
   transition: transform 120ms ease;
 }
 
-.wf-log-error-card[open] .wf-log-error-chevron {
+.wf-log-error-block[open] .wf-log-error-chevron {
   transform: rotate(90deg);
 }
 
 .wf-log-error-detail {
   max-height: 240px;
   margin: 0;
-  padding: 8px 10px 10px 30px;
-  border-top: 1px solid color-mix(in srgb, var(--danger, #e5484d) 18%, transparent);
-  color: var(--ink-muted, #a1a5ad);
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  line-height: 1.55;
+  padding: 0 9px 8px 27px;
+  color: inherit;
+  font: inherit;
   overflow: auto;
   overflow-wrap: anywhere;
   white-space: pre-wrap;

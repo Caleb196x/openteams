@@ -1003,6 +1003,7 @@ function InspectorCard({
       transcriptEntries.filter(
         (entry) =>
           !isWorkflowRuntimeThinkingEntry(entry) &&
+          !isWorkflowRuntimeErrorEntry(entry) &&
           !isWorkflowStepLifecycleStartEntry(entry)
       ),
     [transcriptEntries]
