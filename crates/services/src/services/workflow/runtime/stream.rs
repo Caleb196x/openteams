@@ -172,17 +172,21 @@ async fn persist_and_emit_workflow_runtime_line(
     content: String,
     persist_error_message: &'static str,
 ) {
+    let transcript_id = Uuid::new_v4();
     let created_at = Utc::now().to_rfc3339();
     match persist_workflow_runtime_transcript_line(
         pool,
+        transcript_id,
         execution_id,
         workflow_agent_session_id,
         step_id,
+        &stream_type,
         &content,
     )
     .await
     {
         Ok(_) => chat_runner.emit_workflow_runtime_line(
+            transcript_id,
             session_id,
             execution_id,
             workflow_agent_session_id,

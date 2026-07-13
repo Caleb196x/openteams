@@ -548,16 +548,6 @@ function isWorkflowRuntimeErrorEntry(entry: WorkflowTranscriptEntry): boolean {
   );
 }
 
-function shouldShowWorkflowStepTranscriptEntry(
-  entry: WorkflowTranscriptEntry,
-  step: WorkflowCardStep
-): boolean {
-  if (!isWorkflowRuntimeErrorEntry(entry)) {
-    return true;
-  }
-  return step.status === 'failed';
-}
-
 function isWorkflowStepLifecycleStartEntry(
   entry: WorkflowTranscriptEntry
 ): boolean {
@@ -987,24 +977,19 @@ function InspectorCard({
               localizeWorkflowGeneratedText(entry.content, t)
             ).trim();
             if (!content) return groups;
-            const lines = content
-              .split(/\r?\n/)
-              .map((line) => line.trim())
-              .filter(Boolean)
-              .map((line, index) => ({
-                key: `${entry.id}-${index}`,
-                timestamp: formatWorkflowLogTimestamp(entry.created_at),
-                content: line,
-                entryType: entry.entry_type,
-              }));
-            if (lines.length === 0) return groups;
+            const line = {
+              key: entry.id,
+              timestamp: formatWorkflowLogTimestamp(entry.created_at),
+              content,
+              entryType: entry.entry_type,
+            };
             if (existing) {
-              existing.lines.push(...lines);
+              existing.lines.push(line);
             } else {
               groups.set(groupKey, {
                 key: groupKey,
                 agentName: groupAgentName,
-                lines,
+                lines: [line],
               });
             }
             return groups;
@@ -2241,11 +2226,7 @@ export function WorkflowWindow({
           activeRuntimeTranscript
         )
       : activeStepFallbackTranscript;
-  const visibleActiveTranscript = activeStep
-    ? rawVisibleActiveTranscript.filter((entry) =>
-        shouldShowWorkflowStepTranscriptEntry(entry, activeStep)
-      )
-    : rawVisibleActiveTranscript;
+  const visibleActiveTranscript = rawVisibleActiveTranscript;
 
   // Final review & iteration
   const allStepViewsCompleted =

@@ -7,6 +7,7 @@ import React, {
 } from "react";
 import {
   Activity,
+  AlertTriangle,
   Bot,
   ChevronRight,
   ClipboardList,
@@ -265,6 +266,34 @@ const ContentLineItem: React.FC<{
   );
 };
 
+const ErrorLineItem: React.FC<{
+  line: AgentActivityDisplayRow;
+}> = ({ line }) => {
+  const content = line.content.trim();
+  const [summary = content] = content.split(/\r\n|\r|\n/u, 1);
+  const isMultiline = content !== summary;
+  const errorSummary = (
+    <div className="wf-log-error-summary">
+      <AlertTriangle className="wf-log-error-icon" aria-hidden="true" />
+      <span className="wf-log-error-title" title={summary}>
+        {summary}
+      </span>
+      {isMultiline && <ChevronRight className="wf-log-error-chevron" />}
+    </div>
+  );
+
+  if (!isMultiline) {
+    return <div className="wf-log-error-card">{errorSummary}</div>;
+  }
+
+  return (
+    <details className="wf-log-error-card">
+      <summary>{errorSummary}</summary>
+      <pre className="wf-log-error-detail">{content}</pre>
+    </details>
+  );
+};
+
 // ---------------------------------------------------------------------------
 // Panel
 // ---------------------------------------------------------------------------
@@ -335,6 +364,11 @@ export const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
     const renderLine = (line: AgentActivityDisplayRow) =>
       isToolCallLine(line) ? (
         <ToolLineItem
+          key={line.row_id}
+          line={line}
+        />
+      ) : line.line_type === "error" ? (
+        <ErrorLineItem
           key={line.row_id}
           line={line}
         />
@@ -433,6 +467,11 @@ export const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
             {visibleRows.map((line) =>
               isToolCallLine(line) ? (
                 <ToolLineItem
+                  key={line.row_id}
+                  line={line}
+                />
+              ) : line.line_type === "error" ? (
+                <ErrorLineItem
                   key={line.row_id}
                   line={line}
                 />

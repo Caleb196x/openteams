@@ -344,3 +344,81 @@ body[data-mode="light"] .workflow-window-root .wf-log-markdown pre {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* Error entries are compact by default and disclose the raw log on demand. */
+.wf-log-error-card {
+  margin: 3px 0;
+  border: 1px solid color-mix(in srgb, var(--danger, #e5484d) 28%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--danger, #e5484d) 7%, transparent);
+  color: var(--ink, #f7f8f8);
+  overflow: hidden;
+}
+
+/* Match the content column used by regular activity rows in both variants. */
+:is(.wf-log-panel, .wf-log-panel-inline) .wf-log-error-card {
+  margin-left: 24px;
+}
+
+.wf-log-error-card > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.wf-log-error-card > summary::-webkit-details-marker {
+  display: none;
+}
+
+.wf-log-error-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 5px 9px;
+}
+
+.wf-log-error-icon {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  color: var(--danger, #e5484d);
+}
+
+.wf-log-error-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--danger, #e5484d) 72%, var(--ink, #f7f8f8));
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wf-log-error-chevron {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  color: var(--ink-tertiary, #62666d);
+  transition: transform 120ms ease;
+}
+
+.wf-log-error-card[open] .wf-log-error-chevron {
+  transform: rotate(90deg);
+}
+
+.wf-log-error-detail {
+  max-height: 240px;
+  margin: 0;
+  padding: 8px 10px 10px 30px;
+  border-top: 1px solid color-mix(in srgb, var(--danger, #e5484d) 18%, transparent);
+  color: var(--ink-muted, #a1a5ad);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
