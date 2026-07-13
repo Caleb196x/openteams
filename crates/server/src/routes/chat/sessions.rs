@@ -128,6 +128,11 @@ pub async fn delete_session(
         .map(|stats| stats.message_count > 0)
         .unwrap_or(false);
 
+    SessionWorktreeService::new(deployment.db().pool.clone())
+        .force_cleanup_for_session_deletion(session.id)
+        .await
+        .map_err(super::worktree::session_worktree_api_error)?;
+
     let rows_affected = ChatSession::delete(&deployment.db().pool, session.id).await?;
     if rows_affected == 0 {
         return Err(ApiError::Database(sqlx::Error::RowNotFound));

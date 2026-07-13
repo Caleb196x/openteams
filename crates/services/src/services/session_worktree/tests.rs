@@ -101,6 +101,54 @@ async fn ensure_test_worktree(
     (worktree, cleanup)
 }
 
+#[tokio::test]
+async fn session_deletion_force_cleanup_removes_active_worktree_and_branch() {
+    let pool = setup_pool().await;
+    let service = SessionWorktreeService::new(pool);
+    let session_id = Uuid::new_v4();
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let base = temp.path().join("repo");
+    init_git_repo(&base);
+
+    let (worktree, _cleanup) = ensure_test_worktree(&service, session_id, base.clone()).await;
+    let worktree_path = PathBuf::from(&worktree.worktree_path);
+    assert!(worktree_path.exists());
+    assert!(!git_fails(
+        &base,
+        &[
+            "show-ref",
+            "--verify",
+            &format!("refs/heads/{}", worktree.branch_name)
+        ]
+    ));
+
+    service
+        .force_cleanup_for_session_deletion(session_id)
+        .await
+        .expect("force cleanup before session deletion");
+
+    assert!(!worktree_path.exists());
+    assert!(git_fails(
+        &base,
+        &[
+            "show-ref",
+            "--verify",
+            &format!("refs/heads/{}", worktree.branch_name)
+        ]
+    ));
+}
+
+#[tokio::test]
+async fn session_deletion_force_cleanup_is_a_noop_without_worktree() {
+    let pool = setup_pool().await;
+    let service = SessionWorktreeService::new(pool);
+
+    service
+        .force_cleanup_for_session_deletion(Uuid::new_v4())
+        .await
+        .expect("sessions without isolated worktrees need no cleanup");
+}
+
 /// In-memory schema matching `20260622120000_create_chat_session_worktrees.sql`.
 /// Kept in sync by hand; tests fail loudly if the model and schema diverge.
 async fn setup_pool() -> SqlitePool {
