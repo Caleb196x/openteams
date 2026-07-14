@@ -13,9 +13,6 @@ import {
   Rocket,
   Save,
   Settings,
-  PenTool,
-  Telescope,
-  Terminal,
   TrendingUp,
   Trash2,
   Workflow,
@@ -63,11 +60,11 @@ import { ProjectMemberType } from "../../../shared/types";
 import type {
   BaseCodingAgent as ProjectBaseCodingAgent,
   ChatMemberPreset,
+  ChatTeamTemplateTier,
   ChatTeamPreset,
   CreateTeamPresetRequest,
   JsonValue,
   ProjectMemberWithRuntime,
-  TeamPresetMemberSummary,
   TeamPresetSummary,
   UpdateTeamPresetRequest,
 } from "../../../shared/types";
@@ -111,6 +108,7 @@ type TeamPresetForm = {
   name: string;
   description: string;
   leadMemberId: string;
+  tier: ChatTeamTemplateTier;
   workflowSteps: WorkflowStepForm[];
   teamProtocol: string;
   enabled: boolean;
@@ -171,6 +169,7 @@ const blankForm = (t?: TranslateFn): TeamPresetForm => ({
   name: "",
   description: "",
   leadMemberId: "lead",
+  tier: "standard",
   workflowSteps: [],
   teamProtocol: "",
   enabled: true,
@@ -182,6 +181,7 @@ const detailToForm = (detail: ChatTeamPreset): TeamPresetForm => ({
   name: detail.name,
   description: detail.description || "",
   leadMemberId: detail.lead_member_id ?? "",
+  tier: detail.tier,
   workflowSteps: detail.workflow_steps.map((step) => ({
     title: step.title,
     description: step.description,
@@ -229,6 +229,7 @@ const formToPayload = (
   name: form.name.trim(),
   description: form.description.trim() || null,
   lead_member_id: form.leadMemberId.trim() || null,
+  tier: form.tier,
   workflow_steps: normalizeWorkflowSteps(form.workflowSteps),
   team_protocol: form.teamProtocol.trim() || null,
   enabled: form.enabled,
@@ -422,20 +423,20 @@ const resolveProjectActiveTemplate = (
   );
 };
 
-type ScenarioCategory = "development" | "design" | "research" | "discovery";
+export const groupTeamTemplatesByTier = (
+  templates: TeamPresetSummary[],
+): { standard: TeamPresetSummary[]; advanced: TeamPresetSummary[] } => ({
+  standard: templates.filter((template) => template.tier === "standard"),
+  advanced: templates.filter((template) => template.tier === "advanced"),
+});
 
-type WorkflowStepPreview = {
-  title: string;
-  description: string;
+export const createLatestRequestGate = () => {
+  let latestRequestId = 0;
+  return {
+    start: () => ++latestRequestId,
+    isLatest: (requestId: number) => requestId === latestRequestId,
+  };
 };
-
-type TeamTemplatePresentation = {
-  categories: ScenarioCategory[];
-  workflow: WorkflowStepPreview[];
-};
-
-const scenarioBadgeClassName =
-  "inline-flex items-center gap-1.5 font-mono text-[9px] font-semibold uppercase text-[var(--team-template-muted)]";
 
 const hairlineSurfaceClassName =
   "relative overflow-hidden border border-[var(--team-template-border)] bg-[linear-gradient(180deg,var(--team-template-surface-top),var(--team-template-surface))] shadow-[inset_0_1px_0_var(--team-template-top-highlight)] before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-[var(--team-template-top-glow)]";
@@ -458,120 +459,9 @@ const dangerGhostButtonClassName =
 const recommendedBadgeClassName =
   "inline-flex text-[var(--team-template-muted)] transition-colors duration-150 group-hover:text-[var(--team-template-accent)]";
 
-const categoryDotClassName: Record<ScenarioCategory, string> = {
-  development: "bg-[#4DAAFB]",
-  design: "bg-[#FF8A65]",
-  research: "bg-[#5DE4A7]",
-  discovery: "bg-[#C4A7FF]",
-};
-
-const defaultTemplatePresentation: TeamTemplatePresentation = {
-  categories: ["development"],
-  workflow: [
-    {
-      title: "Clarify goals",
-      description: "Confirm inputs, constraints, and delivery criteria.",
-    },
-    {
-      title: "Execute by role",
-      description: "Team members advance the work by role and share status.",
-    },
-    {
-      title: "Review delivery",
-      description: "Consolidate results, check risks, and prepare deliverables.",
-    },
-  ],
-};
-
-const templatePresentationById: Record<string, TeamTemplatePresentation> = {
-  "advanced-release-command": {
-    categories: ["development"],
-    workflow: [
-      {
-        title: "Release scope",
-        description: "Confirm changes, risks, and the release window.",
-      },
-      {
-        title: "Quality checks",
-        description: "Run QA, regression checks, and blocker triage.",
-      },
-      {
-        title: "Release narrative",
-        description: "Prepare release notes and user communications.",
-      },
-      {
-        title: "Launch review",
-        description: "Track signals, defects, and follow-up actions.",
-      },
-    ],
-  },
-  "advanced-growth-ops": {
-    categories: ["discovery"],
-    workflow: [
-      {
-        title: "Collect hypotheses",
-        description: "Frame experiment goals, user insights, and core metrics.",
-      },
-      {
-        title: "Design experiment",
-        description: "Define variables, samples, and success criteria.",
-      },
-      {
-        title: "Interpret data",
-        description: "Analyze funnel changes and significance risks.",
-      },
-      {
-        title: "Recommend decisions",
-        description: "Capture conclusions and plan the next actions.",
-      },
-    ],
-  },
-};
-
-const getTemplatePresentation = (teamId: string): TeamTemplatePresentation =>
-  templatePresentationById[teamId] ?? defaultTemplatePresentation;
-
-const localizeTemplatePresentation = (
-  teamId: string,
-  t: TranslateFn,
-): TeamTemplatePresentation => {
-  const presentation = getTemplatePresentation(teamId);
-  const workflowKey = templatePresentationById[teamId] ? teamId : "default";
-  return {
-    ...presentation,
-    workflow: presentation.workflow.map((step, index) => ({
-      title: translateWithFallback(
-        t,
-        `teamTemplates.workflow.${workflowKey}.${index + 1}.title`,
-        step.title,
-      ),
-      description: translateWithFallback(
-        t,
-        `teamTemplates.workflow.${workflowKey}.${index + 1}.description`,
-        step.description,
-      ),
-    })),
-  };
-};
-
-const getCategoryIcon = (category?: ScenarioCategory): typeof Box => {
-  switch (category) {
-    case "development":
-      return Terminal;
-    case "design":
-      return PenTool;
-    case "research":
-    case "discovery":
-      return Telescope;
-    default:
-      return Box;
-  }
-};
-
 const getTemplateIcon = (
   teamId: string,
   teamName = "",
-  category?: ScenarioCategory,
 ): typeof Box => {
   const signature = `${teamId} ${teamName}`.toLowerCase();
 
@@ -585,209 +475,7 @@ const getTemplateIcon = (
   if (/(full.?stack|delivery|code|dev|engineer|frontend|backend)/.test(signature)) {
     return Code2;
   }
-
-  return getCategoryIcon(category);
-};
-
-const createMockMemberSummary = (
-  id: string,
-  name: string,
-  description: string,
-): TeamPresetMemberSummary => ({
-  id,
-  name,
-  description,
-  runner_type: null,
-  recommended_model: null,
-  is_builtin: true,
-  enabled: true,
-});
-
-const advancedReleaseMemberSummaries = [
-  createMockMemberSummary(
-    "release_lead",
-    "Release lead",
-    "Owns release scope, risk triage, and final go/no-go framing.",
-  ),
-  createMockMemberSummary(
-    "qa_reviewer",
-    "QA reviewer",
-    "Checks regression risk, verifies acceptance criteria, and records blockers.",
-  ),
-  createMockMemberSummary(
-    "growth_writer",
-    "Growth writer",
-    "Turns release details into clear user-facing updates and follow-up notes.",
-  ),
-];
-
-const advancedGrowthMemberSummaries = [
-  createMockMemberSummary(
-    "growth_lead",
-    "Growth lead",
-    "Defines experiment goals, prioritizes opportunities, and keeps the weekly decision loop tight.",
-  ),
-  createMockMemberSummary(
-    "analytics",
-    "Analytics",
-    "Reads funnel movement, checks data quality, and summarizes decision confidence.",
-  ),
-  createMockMemberSummary(
-    "copywriter",
-    "Copywriter",
-    "Drafts experiment variants, messaging angles, and post-test recommendations.",
-  ),
-];
-
-const advancedTeamTemplates: TeamPresetSummary[] = [
-  {
-    id: "advanced-release-command",
-    name: "Release command center",
-    description:
-      "Coordinate release notes, QA checks, rollout signals, and post-launch follow-up.",
-    lead_member_id: "release_lead",
-    team_protocol: "Mock professional release workflow placeholder.",
-    is_builtin: true,
-    enabled: true,
-    member_count: advancedReleaseMemberSummaries.length,
-    members: advancedReleaseMemberSummaries,
-  },
-  {
-    id: "advanced-growth-ops",
-    name: "Growth operations",
-    description:
-      "Plan experiments, analyze funnel deltas, and prepare weekly growth decisions.",
-    lead_member_id: "growth_lead",
-    team_protocol: "Mock professional growth workflow placeholder.",
-    is_builtin: true,
-    enabled: true,
-    member_count: advancedGrowthMemberSummaries.length,
-    members: advancedGrowthMemberSummaries,
-  },
-];
-
-const createMockMemberPreset = (
-  id: string,
-  name: string,
-  description: string,
-  selectedSkillIds: string[],
-): ChatMemberPreset => ({
-  id,
-  name,
-  description,
-  runner_type: null,
-  recommended_model: null,
-  system_prompt: description,
-  default_workspace_path: null,
-  selected_skill_ids: selectedSkillIds,
-  tools_enabled: null as JsonValue,
-  is_builtin: true,
-  enabled: true,
-});
-
-const mockTeamTemplateDetails: Record<string, ChatTeamPreset> = {
-  "advanced-release-command": {
-    id: "advanced-release-command",
-    name: "Release command center",
-    description:
-      "Coordinate release notes, QA checks, rollout signals, and post-launch follow-up.",
-    lead_member_id: "release_lead",
-    workflow_steps: [],
-    team_protocol:
-      "Release lead coordinates scope, QA signs off blockers, and growth writer prepares launch communication.",
-    is_builtin: true,
-    enabled: true,
-    members: [
-      createMockMemberPreset("release_lead", "Release lead", "Owns release scope, risk triage, and final go/no-go framing.", ["planning", "source-control"]),
-      createMockMemberPreset("qa_reviewer", "QA reviewer", "Checks regression risk, verifies acceptance criteria, and records blockers.", ["review", "testing"]),
-      createMockMemberPreset("growth_writer", "Growth writer", "Turns release details into clear user-facing updates and follow-up notes.", ["writing", "launch"]),
-    ],
-  },
-  "advanced-growth-ops": {
-    id: "advanced-growth-ops",
-    name: "Growth operations",
-    description:
-      "Plan experiments, analyze funnel deltas, and prepare weekly growth decisions.",
-    lead_member_id: "growth_lead",
-    workflow_steps: [],
-    team_protocol:
-      "Growth lead frames the hypothesis, analytics validates results, and copywriter prepares experiment messaging.",
-    is_builtin: true,
-    enabled: true,
-    members: [
-      createMockMemberPreset("growth_lead", "Growth lead", "Defines experiment goals, prioritizes opportunities, and keeps the weekly decision loop tight.", ["planning", "metrics"]),
-      createMockMemberPreset("analytics", "Analytics", "Reads funnel movement, checks data quality, and summarizes decision confidence.", ["analysis", "research"]),
-      createMockMemberPreset("copywriter", "Copywriter", "Drafts experiment variants, messaging angles, and post-test recommendations.", ["writing", "experiments"]),
-    ],
-  },
-};
-
-const localizeAdvancedTemplateSummary = (
-  template: TeamPresetSummary,
-  t: TranslateFn,
-): TeamPresetSummary => {
-  const prefix = `teamTemplates.recommended.${template.id}`;
-  return {
-    ...template,
-    name: translateWithFallback(t, `${prefix}.name`, template.name),
-    description: translateWithFallback(
-      t,
-      `${prefix}.description`,
-      template.description ?? "",
-    ),
-    members: template.members.map((member) => ({
-      ...member,
-      name: translateWithFallback(
-        t,
-        `${prefix}.member.${member.id}.name`,
-        member.name,
-      ),
-      description: translateWithFallback(
-        t,
-        `${prefix}.member.${member.id}.description`,
-        member.description ?? "",
-      ),
-    })),
-  };
-};
-
-const localizeAdvancedTemplateDetail = (
-  detail: ChatTeamPreset,
-  t: TranslateFn,
-): ChatTeamPreset => {
-  const prefix = `teamTemplates.recommended.${detail.id}`;
-  return {
-    ...detail,
-    name: translateWithFallback(t, `${prefix}.name`, detail.name),
-    description: translateWithFallback(
-      t,
-      `${prefix}.description`,
-      detail.description,
-    ),
-    team_protocol: translateWithFallback(
-      t,
-      `${prefix}.protocol`,
-      detail.team_protocol,
-    ),
-    members: detail.members.map((member) => ({
-      ...member,
-      name: translateWithFallback(
-        t,
-        `${prefix}.member.${member.id}.name`,
-        member.name,
-      ),
-      description: translateWithFallback(
-        t,
-        `${prefix}.member.${member.id}.description`,
-        member.description ?? "",
-      ),
-      system_prompt: translateWithFallback(
-        t,
-        `${prefix}.member.${member.id}.description`,
-        member.system_prompt ?? "",
-      ),
-    })),
-  };
+  return Box;
 };
 
 function TeamTemplatesHeader({
@@ -1117,37 +805,6 @@ function MarkdownEditableField({
   );
 }
 
-function ScenarioBadges({
-  categories,
-  t,
-}: {
-  categories: ScenarioCategory[];
-  t: TranslateFn;
-}) {
-  const visibleCategories = categories.slice(0, 1);
-
-  return (
-    <div className="flex flex-wrap gap-2">
-      {visibleCategories.map((category) => (
-        <span
-          key={category}
-          className={scenarioBadgeClassName}
-          data-category={category}
-        >
-          <span
-            className={`h-1 w-1 rounded-full ${categoryDotClassName[category]}`}
-          />
-          {translateWithFallback(
-            t,
-            `teamTemplates.category.${category}`,
-            category,
-          )}
-        </span>
-      ))}
-    </div>
-  );
-}
-
 function RecommendedBadge({ t }: { t: TranslateFn }) {
   const label = translateWithFallback(t, "teamTemplates.recommendedBadge", "Recommended");
   return (
@@ -1303,7 +960,11 @@ const formToPreviewDetail = (form: TeamPresetForm): ChatTeamPreset => ({
   team_protocol: form.teamProtocol,
   is_builtin: false,
   enabled: form.enabled,
+  tier: form.tier,
 });
+
+export const teamPresetDetailToDraft = detailToForm;
+export const teamPresetDraftToPreviewDetail = formToPreviewDetail;
 
 const formDirtySnapshot = (form: TeamPresetForm): string =>
   JSON.stringify({
@@ -1925,7 +1586,7 @@ function WorkflowPreview({
   disabled?: boolean;
   editable?: boolean;
   onStepsChange?: (steps: WorkflowStepForm[]) => void;
-  steps: WorkflowStepPreview[];
+  steps: WorkflowStepForm[];
   t: TranslateFn;
 }) {
   const stepCountLabel = String(steps.length).padStart(2, "0");
@@ -2259,20 +1920,8 @@ function TemplateDetailView({
 
   if (!viewDetail) return null;
 
-  const presentation = localizeTemplatePresentation(viewDetail.id, t);
-  const DetailCategoryIcon = getTemplateIcon(
-    viewDetail.id,
-    viewDetail.name,
-    presentation.categories[0],
-  );
-  const workflowSteps =
-    isEditing && form
-      ? form.workflowSteps
-      : viewDetail.workflow_steps.length > 0
-        ? viewDetail.workflow_steps
-        : viewDetail.is_builtin
-          ? presentation.workflow
-          : [];
+  const DetailCategoryIcon = getTemplateIcon(viewDetail.id, viewDetail.name);
+  const workflowSteps = isEditing && form ? form.workflowSteps : viewDetail.workflow_steps;
   const selectedFormMemberIndex =
     form?.members.findIndex((member) => member.id === selectedMemberId) ?? -1;
   const selectedFormMember =
@@ -2422,9 +2071,6 @@ function TemplateDetailView({
                       {viewDetail.name}
                     </h1>
                     {viewDetail.is_builtin && <RecommendedBadge t={t} />}
-                  </div>
-                  <div className="mt-2">
-                    <ScenarioBadges categories={presentation.categories} t={t} />
                   </div>
                   <p className="mt-3 max-w-2xl text-[13px] leading-relaxed text-[var(--team-template-muted)]">
                     {viewDetail.description || translateWithFallback(t, "teamTemplates.noDescription", "No description provided for this template.")}
@@ -2637,7 +2283,7 @@ function TemplateDetailView({
                         {roleKey}
                       </span>
                       {isLead && (
-                        <span className="inline-flex items-center gap-1 font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--team-template-muted)]">
+                        <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap font-mono text-[9px] font-semibold uppercase tracking-[0.04em] text-[var(--team-template-muted)]">
                           <span className="h-1 w-1 rounded-full bg-current opacity-70" />
                           {translateWithFallback(t, "teamTemplates.members.lead", "Lead")}
                         </span>
@@ -2930,12 +2576,7 @@ function TemplateCard({
   onClick: () => void;
   t: TranslateFn;
 }) {
-  const presentation = localizeTemplatePresentation(template.id, t);
-  const CategoryIcon = getTemplateIcon(
-    template.id,
-    template.name,
-    presentation.categories[0],
-  );
+  const CategoryIcon = getTemplateIcon(template.id, template.name);
   
   return (
     <div
@@ -2969,7 +2610,6 @@ function TemplateCard({
 
       <div className="mt-auto flex items-center justify-between gap-3 pt-0.5">
         <div className="flex min-w-0 items-center gap-2">
-          <ScenarioBadges categories={presentation.categories} t={t} />
           <AgentAvatarGroup template={template} />
           <span className="min-w-0 font-mono text-[11px] font-medium text-[var(--team-template-aux)] tabular-nums">
             {translateWithFallback(t, "teamTemplates.memberCount", "{count} members", { count: template.member_count })}
@@ -2992,6 +2632,7 @@ export function TeamTemplatesPage() {
     refreshSessions,
     showToast,
     skills,
+    locale,
   } = useWorkspace();
   const [templates, setTemplates] = useState<TeamPresetSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -3021,37 +2662,49 @@ export function TeamTemplatesPage() {
   const [projectTemplateMembersLoaded, setProjectTemplateMembersLoaded] =
     useState(false);
   const [runtimes, setRuntimes] = useState<AgentRuntimeStatus[]>([]);
+  const templateRequestGate = useRef(createLatestRequestGate());
+  const detailRequestGate = useRef(createLatestRequestGate());
 
   const loadTemplates = useCallback(async () => {
+    const requestId = templateRequestGate.current.start();
     setLoading(true);
     setLoadError(null);
     try {
-      const response = await teamPresetsApi.list();
-      setTemplates(response.teams);
+      const response = await teamPresetsApi.list(locale);
+      if (templateRequestGate.current.isLatest(requestId)) {
+        setTemplates(response.teams);
+      }
     } catch (error) {
-      setLoadError(errorText(error, translateWithFallback(t, "teamTemplates.loadError", "Failed to load templates.")));
+      if (templateRequestGate.current.isLatest(requestId)) {
+        setLoadError(errorText(error, "Failed to load templates."));
+      }
     } finally {
-      setLoading(false);
+      if (templateRequestGate.current.isLatest(requestId)) {
+        setLoading(false);
+      }
     }
-  }, [t]);
+  }, [locale]);
 
   const loadDetail = useCallback(async (teamId: string) => {
+    const requestId = detailRequestGate.current.start();
     setDetailLoading(true);
     setDetailError(null);
+    setSelectedDetail(null);
     try {
-      const mockDetail = mockTeamTemplateDetails[teamId];
-      if (mockDetail) {
-        setSelectedDetail(localizeAdvancedTemplateDetail(mockDetail, t));
-        return;
+      const detail = await teamPresetsApi.get(teamId, locale);
+      if (detailRequestGate.current.isLatest(requestId)) {
+        setSelectedDetail(detail);
       }
-      const detail = await teamPresetsApi.get(teamId);
-      setSelectedDetail(detail);
     } catch (error) {
-      setDetailError(errorText(error, translateWithFallback(t, "teamTemplates.detail.loadError", "Failed to load template details.")));
+      if (detailRequestGate.current.isLatest(requestId)) {
+        setDetailError(errorText(error, "Failed to load template details."));
+      }
     } finally {
-      setDetailLoading(false);
+      if (detailRequestGate.current.isLatest(requestId)) {
+        setDetailLoading(false);
+      }
     }
-  }, [t]);
+  }, [locale]);
 
   useEffect(() => {
     void loadTemplates();
@@ -3074,12 +2727,13 @@ export function TeamTemplatesPage() {
   }, []);
 
   useEffect(() => {
+    setApplyTargetDetail(null);
     if (!selectedId) {
       setSelectedDetail(null);
       return;
     }
     void loadDetail(selectedId);
-  }, [loadDetail, selectedId]);
+  }, [loadDetail, locale, selectedId]);
 
   useEffect(() => {
     if (!selectedProjectId) {
@@ -3110,11 +2764,6 @@ export function TeamTemplatesPage() {
     };
   }, [selectedProjectId]);
 
-  const myTeamTemplates = useMemo(() => templates, [templates]);
-  const localizedAdvancedTeamTemplates = useMemo(
-    () => advancedTeamTemplates.map((template) => localizeAdvancedTemplateSummary(template, t)),
-    [t],
-  );
   const selectedDetailForView =
     selectedDetail?.id === selectedId ? selectedDetail : null;
   const detailViewLoading = Boolean(
@@ -3408,8 +3057,8 @@ export function TeamTemplatesPage() {
   };
 
   const applyTemplateToProject = async () => {
-    const detail = applyTargetDetail;
-    if (!detail || applyingTemplate) return;
+    const target = applyTargetDetail;
+    if (!target || applyingTemplate) return;
 
     if (!selectedProjectId) {
       showToast(translateWithFallback(t, "teamTemplates.selectProject", "Select a project before using a template."), "warning");
@@ -3423,6 +3072,7 @@ export function TeamTemplatesPage() {
 
     setApplyingTemplate(true);
     try {
+      const detail = await teamPresetsApi.get(target.id, locale);
       const [runtimeResponse, existingMembers, projectAgents] =
         await Promise.all([
           agentRuntimeApi.list(),
@@ -3485,8 +3135,7 @@ export function TeamTemplatesPage() {
         createdMembers[0]?.agent_id ??
         null;
       const teamProtocol = detail.team_protocol.trim();
-      const sessionPatch: Partial<UpdateChatSession> = {
-      };
+      const sessionPatch: Partial<UpdateChatSession> = {};
       if (leadAgentId) {
         sessionPatch.lead_agent_id = leadAgentId;
       }
@@ -3516,21 +3165,16 @@ export function TeamTemplatesPage() {
     }
   };
 
-  const templateCandidates = useMemo(
-    () => [...templates, ...localizedAdvancedTeamTemplates],
-    [localizedAdvancedTeamTemplates, templates],
-  );
+  const { standard: standardTemplates, advanced: advancedTemplates } =
+    useMemo(() => groupTeamTemplatesByTier(templates), [templates]);
+  const templateCandidates = templates;
   const currentActiveTemplate = useMemo(
     () => resolveProjectActiveTemplate(projectTemplateMembers, templateCandidates),
     [projectTemplateMembers, templateCandidates],
   );
-  const currentActivePresentation = currentActiveTemplate
-    ? localizeTemplatePresentation(currentActiveTemplate.id, t)
-    : null;
   const CurrentActiveIcon = getTemplateIcon(
     currentActiveTemplate?.id ?? "",
     currentActiveTemplate?.name ?? "",
-    currentActivePresentation?.categories[0],
   );
 
   return (
@@ -3680,9 +3324,9 @@ export function TeamTemplatesPage() {
 
             <section className="mb-12">
               <h2 className="mb-5 text-xs font-medium text-[var(--team-template-muted)]">
-                {translateWithFallback(t, "teamTemplates.section.mineLabel", "My team templates")} (<span className="font-mono text-[13px] tabular-nums text-[var(--team-template-title)]">{myTeamTemplates.length}</span>)
+                标准模板 (<span className="font-mono text-[13px] tabular-nums text-[var(--team-template-title)]">{standardTemplates.length}</span>)
               </h2>
-              {myTeamTemplates.length === 0 ? (
+              {standardTemplates.length === 0 ? (
                 <button
                   type="button"
                   onClick={startCreate}
@@ -3700,7 +3344,7 @@ export function TeamTemplatesPage() {
                 </button>
               ) : (
                 <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-                  {myTeamTemplates.map((template) => (
+                  {standardTemplates.map((template) => (
                     <TemplateCard
                       key={template.id}
                       template={template}
@@ -3714,20 +3358,26 @@ export function TeamTemplatesPage() {
 
             <section>
               <h2 className="mb-5 text-xs font-medium text-[var(--team-template-muted)]">
-                {translateWithFallback(t, "teamTemplates.section.recommended", "More recommended templates")}
+                高级模板 (<span className="font-mono text-[13px] tabular-nums text-[var(--team-template-title)]">{advancedTemplates.length}</span>)
               </h2>
-              <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-                {localizedAdvancedTeamTemplates.map((template) => (
-                  <TemplateCard
-                    key={template.id}
-                    template={template}
-                    t={t}
-                    onClick={() => {
-                      openTemplateDetail(template.id);
-                    }}
-                  />
-                ))}
-              </div>
+              {advancedTemplates.length === 0 ? (
+                <p className="text-[12px] text-[var(--team-template-muted)]">
+                  No advanced templates available.
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+                  {advancedTemplates.map((template) => (
+                    <TemplateCard
+                      key={template.id}
+                      template={template}
+                      t={t}
+                      onClick={() => {
+                        openTemplateDetail(template.id);
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
             </section>
           </div>
         )}

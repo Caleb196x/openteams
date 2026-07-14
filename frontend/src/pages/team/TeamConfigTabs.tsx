@@ -211,7 +211,7 @@ function MarkdownEditableField({
           : "cursor-text hover:border-[var(--hairline-strong)] focus-visible:border-[var(--hairline-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-focus)]/35",
       )}
     >
-      {value ? (
+      {value.trim() ? (
         <AgentMarkdown content={value} fontSize={14} />
       ) : (
         <span className="text-[var(--ink-muted)]">{placeholder}</span>

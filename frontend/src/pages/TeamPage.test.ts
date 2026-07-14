@@ -124,6 +124,7 @@ check(
 check(
   "team protocol and role definition render markdown and switch to editing on interaction",
   configTabsSource.includes("function MarkdownEditableField") &&
+    configTabsSource.includes("value.trim() ?") &&
     configTabsSource.includes("<AgentMarkdown content={value} fontSize={14} />") &&
     configTabsSource.includes('value={roleDefinition}') &&
     configTabsSource.includes('value={\n            teamProtocolLoading') &&
