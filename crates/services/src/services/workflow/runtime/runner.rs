@@ -32,6 +32,56 @@ struct WorkflowRuntimeRunRecord {
     step_key: String,
 }
 
+struct WorkflowNodeIoLogContext {
+    session_id: Uuid,
+    execution_id: Option<Uuid>,
+    step_id: Uuid,
+    step_key: Option<String>,
+    agent_id: Uuid,
+    agent_name: String,
+    session_agent_id: Uuid,
+    workflow_agent_session_id: Option<Uuid>,
+    run_id: Option<Uuid>,
+    mode: &'static str,
+}
+
+impl WorkflowNodeIoLogContext {
+    fn log_input(&self, input: &str) {
+        tracing::debug!(
+            session_id = %self.session_id,
+            execution_id = ?self.execution_id,
+            step_id = %self.step_id,
+            step_key = ?self.step_key,
+            agent_id = %self.agent_id,
+            agent_name = %self.agent_name,
+            session_agent_id = %self.session_agent_id,
+            workflow_agent_session_id = ?self.workflow_agent_session_id,
+            run_id = ?self.run_id,
+            mode = self.mode,
+            "Workflow node input:\n{}",
+            input
+        );
+    }
+
+    fn log_output(&self, output: &str, error: Option<&str>) {
+        tracing::debug!(
+            session_id = %self.session_id,
+            execution_id = ?self.execution_id,
+            step_id = %self.step_id,
+            step_key = ?self.step_key,
+            agent_id = %self.agent_id,
+            agent_name = %self.agent_name,
+            session_agent_id = %self.session_agent_id,
+            workflow_agent_session_id = ?self.workflow_agent_session_id,
+            run_id = ?self.run_id,
+            mode = self.mode,
+            error = ?error,
+            "Workflow node output:\n{}",
+            output
+        );
+    }
+}
+
 async fn start_workflow_runtime_run_record(
     db: &DBService,
     session: &ChatSession,
@@ -96,10 +146,12 @@ async fn finish_workflow_runtime_run_record(
     session_agent: &ChatSessionAgent,
     workspace_path: &PathBuf,
     record: Option<&WorkflowRuntimeRunRecord>,
+    io_log: &WorkflowNodeIoLogContext,
     assistant_output: &str,
     token_usage: Option<&TokenUsageInfo>,
     error_summary: Option<&str>,
 ) -> Result<(), WorkflowRuntimeError> {
+    io_log.log_output(assistant_output, error_summary);
     let Some(record) = record else {
         return Ok(());
     };
@@ -418,6 +470,29 @@ async fn run_workflow_agent_prompt_inner(
         stream_context.as_ref(),
     )
     .await?;
+    let io_log = WorkflowNodeIoLogContext {
+        session_id: session.id,
+        execution_id: runtime_run_record
+            .as_ref()
+            .map(|record| record.execution_id)
+            .or_else(|| workflow_session.map(|item| item.workflow_execution_id)),
+        step_id,
+        step_key: runtime_run_record
+            .as_ref()
+            .map(|record| record.step_key.clone())
+            .or_else(|| extract_workflow_prompt_step_key(&prompt)),
+        agent_id: agent.id,
+        agent_name: agent.name.clone(),
+        session_agent_id: effective_session_agent.id,
+        workflow_agent_session_id: workflow_session.map(|item| item.id),
+        run_id: runtime_run_record.as_ref().map(|record| record.run_id),
+        mode: if resume_session_id.is_some() {
+            "follow_up"
+        } else {
+            "fresh"
+        },
+    };
+    io_log.log_input(&prompt);
 
     let repo_context = RepoContext::new(workspace_path.clone(), Vec::new());
     let mut env = ExecutionEnv::new(repo_context, false, String::new());
@@ -429,11 +504,18 @@ async fn run_workflow_agent_prompt_inner(
         env.insert("VK_WORKFLOW_RUN_ID", record.run_id.to_string());
     }
     let (_effective_execution, mut executor) =
-        build_effective_member_executor(agent, &effective_session_agent, &mut env)
-            .map_err(|err| WorkflowRuntimeError::Io(std::io::Error::other(err.to_string())))?;
+        match build_effective_member_executor(agent, &effective_session_agent, &mut env) {
+            Ok(value) => value,
+            Err(error) => {
+                let error = WorkflowRuntimeError::Io(std::io::Error::other(error.to_string()));
+                let message = error.to_string();
+                io_log.log_output("", Some(&message));
+                return Err(error);
+            }
+        };
     executor.use_approvals(Arc::new(NoopExecutorApprovalService));
 
-    let mut spawned = match resume_session_id {
+    let spawn_result = match resume_session_id {
         Some(session_id) => {
             executor
                 .spawn_follow_up(
@@ -443,12 +525,16 @@ async fn run_workflow_agent_prompt_inner(
                     reset_to_message_id,
                     &env,
                 )
-                .await?
+                .await
         }
-        None => {
-            executor
-                .spawn(workspace_path.as_path(), &prompt, &env)
-                .await?
+        None => executor.spawn(workspace_path.as_path(), &prompt, &env).await,
+    };
+    let mut spawned = match spawn_result {
+        Ok(spawned) => spawned,
+        Err(error) => {
+            let message = error.to_string();
+            io_log.log_output("", Some(&message));
+            return Err(error.into());
         }
     };
 
@@ -458,7 +544,11 @@ async fn run_workflow_agent_prompt_inner(
     }
 
     let msg_store = Arc::new(MsgStore::new());
-    spawn_log_forwarders(&mut spawned.child, msg_store.clone())?;
+    if let Err(error) = spawn_log_forwarders(&mut spawned.child, msg_store.clone()) {
+        let message = error.to_string();
+        io_log.log_output("", Some(&message));
+        return Err(error);
+    }
     executor.normalize_logs(msg_store.clone(), workspace_path.as_path());
     let mut session_id_task = Some(spawn_workflow_runtime_session_id_persistor(
         db.pool.clone(),
@@ -503,7 +593,17 @@ async fn run_workflow_agent_prompt_inner(
                 failed_by_signal = true
             }
             Ok(ExecutorWaitEvent::Exit(Err(_))) => {
-                status = Some(wait_for_process_exit(&mut spawned, &agent.name).await?);
+                match wait_for_process_exit(&mut spawned, &agent.name).await {
+                    Ok(exit_status) => status = Some(exit_status),
+                    Err(error) => {
+                        let history = msg_store.get_history();
+                        let latest_assistant =
+                            extract_latest_assistant_from_history(&history).unwrap_or_default();
+                        let message = error.to_string();
+                        io_log.log_output(&latest_assistant, Some(&message));
+                        return Err(error);
+                    }
+                }
             }
             Ok(ExecutorWaitEvent::CancelRequested) => {
                 interrupted = true;
@@ -526,6 +626,7 @@ async fn run_workflow_agent_prompt_inner(
                     session_agent,
                     &workspace_path,
                     runtime_run_record.as_ref(),
+                    &io_log,
                     &latest_assistant,
                     None,
                     Some(&message),
@@ -553,6 +654,7 @@ async fn run_workflow_agent_prompt_inner(
                         session_agent,
                         &workspace_path,
                         runtime_run_record.as_ref(),
+                        &io_log,
                         &latest_assistant,
                         None,
                         Some(&message),
@@ -564,7 +666,17 @@ async fn run_workflow_agent_prompt_inner(
             }
         }
     } else {
-        status = Some(wait_for_process_exit(&mut spawned, &agent.name).await?);
+        match wait_for_process_exit(&mut spawned, &agent.name).await {
+            Ok(exit_status) => status = Some(exit_status),
+            Err(error) => {
+                let history = msg_store.get_history();
+                let latest_assistant =
+                    extract_latest_assistant_from_history(&history).unwrap_or_default();
+                let message = error.to_string();
+                io_log.log_output(&latest_assistant, Some(&message));
+                return Err(error);
+            }
+        }
     }
 
     // Unregister from the running steps map.
@@ -588,6 +700,7 @@ async fn run_workflow_agent_prompt_inner(
             session_agent,
             &workspace_path,
             runtime_run_record.as_ref(),
+            &io_log,
             &latest_assistant,
             None,
             Some(&message),
@@ -608,6 +721,7 @@ async fn run_workflow_agent_prompt_inner(
             session_agent,
             &workspace_path,
             runtime_run_record.as_ref(),
+            &io_log,
             &latest_assistant,
             None,
             Some(&message),
@@ -635,6 +749,7 @@ async fn run_workflow_agent_prompt_inner(
                 session_agent,
                 &workspace_path,
                 runtime_run_record.as_ref(),
+                &io_log,
                 &latest_assistant,
                 None,
                 Some(&message),
@@ -653,6 +768,7 @@ async fn run_workflow_agent_prompt_inner(
             session_agent,
             &workspace_path,
             runtime_run_record.as_ref(),
+            &io_log,
             &latest_assistant,
             None,
             Some(&message),
@@ -687,6 +803,7 @@ async fn run_workflow_agent_prompt_inner(
             session_agent,
             &workspace_path,
             runtime_run_record.as_ref(),
+            &io_log,
             "",
             None,
             Some(&message),
@@ -702,6 +819,7 @@ async fn run_workflow_agent_prompt_inner(
         session_agent,
         &workspace_path,
         runtime_run_record.as_ref(),
+        &io_log,
         &latest_assistant,
         token_usage.as_ref(),
         None,

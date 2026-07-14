@@ -1842,12 +1842,6 @@ Before modifying files, you MUST use the `using-git-workspace` skill to create a
             inject_step_prompt_section_before_schema(&mut prompt, section);
         }
 
-        tracing::debug!(
-            "Running step {} with prompt:\n{}",
-            running_step.title,
-            prompt
-        );
-
         let running_step = if pending_revision_feedback.is_some() {
             WorkflowStep::update_revision_context(
                 pool,
@@ -1873,14 +1867,7 @@ Before modifying files, you MUST use the `using-git-workspace` skill to create a
         )
         .await
         {
-            Ok((message, agent_output)) => {
-                tracing::debug!(
-                    "Raw output from step {}: {}",
-                    running_step.title,
-                    agent_output.output
-                );
-                (message, agent_output)
-            }
+            Ok((message, agent_output)) => (message, agent_output),
             Err(OrchestratorError::Runtime(WorkflowRuntimeError::Interrupted(reason))) => {
                 Self::cleanup_result_dependency_context_file(
                     result_dependency_context_file
