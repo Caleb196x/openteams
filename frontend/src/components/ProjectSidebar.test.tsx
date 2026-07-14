@@ -861,8 +861,8 @@ check(
   componentSource,
 );
 check(
-  "opens the new session composer after normal project creation",
-  componentSource.includes("openSessionComposer: true"),
+  "creates a default session after normal project creation",
+  componentSource.includes("createDefaultSession: true"),
   componentSource,
 );
 check(
@@ -879,7 +879,7 @@ check(
     componentSource.includes('label: "Blank team"') &&
     componentSource.includes('description: "One starter AI member"') &&
     componentSource.includes("teamId: selectedTeamId || blankTeamId") &&
-    componentSource.includes("openSessionComposer: true") &&
+    componentSource.includes("createDefaultSession: true") &&
     !componentSource.includes("fullstack_delivery"),
   componentSource,
 );

@@ -169,10 +169,12 @@ check(
   source,
 );
 check(
-  "does not create an untitled session after project creation",
-  !source.includes("projectApi.createSession(project.id") &&
-    source.includes("openSessionComposer?: boolean") &&
-    source.includes("if (options?.openSessionComposer)"),
+  "creates and opens a default session after sidebar project creation",
+  source.includes("createDefaultSession?: boolean") &&
+    source.includes("if (options?.createDefaultSession)") &&
+    source.includes("projectId: project.id") &&
+    source.includes("workspacePath: data.default_workspace_path") &&
+    source.includes("await handleCreateDefaultSession({"),
   source,
 );
 check(
