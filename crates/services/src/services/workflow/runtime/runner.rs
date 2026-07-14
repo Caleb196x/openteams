@@ -193,8 +193,7 @@ pub async fn run_workflow_agent_prompt(
         workflow_session,
         prompt,
         step_id,
-        None,
-        None,
+        false,
         None,
     )
     .await
@@ -219,8 +218,7 @@ pub async fn run_workflow_step_agent_prompt(
         workflow_session,
         prompt,
         step.id,
-        None,
-        None,
+        false,
         Some(WorkflowRuntimeStreamContext {
             pool: db.pool.clone(),
             chat_runner: chat_runner.clone(),
@@ -245,17 +243,6 @@ pub async fn run_workflow_agent_follow_up(
     prompt: &str,
     step_id: Uuid,
 ) -> Result<String, WorkflowRuntimeError> {
-    let resume_session_id = workflow_session
-        .agent_session_id
-        .as_deref()
-        .or(session_agent.agent_session_id.as_deref())
-        .ok_or_else(|| {
-            WorkflowRuntimeError::Validation(format!(
-                "workflow session {} missing persisted agent session id",
-                workflow_session.id
-            ))
-        })?;
-
     run_workflow_agent_prompt_inner(
         db,
         session,
@@ -264,8 +251,7 @@ pub async fn run_workflow_agent_follow_up(
         Some(workflow_session),
         prompt,
         step_id,
-        Some(resume_session_id),
-        workflow_session.agent_message_id.as_deref(),
+        true,
         None,
     )
     .await
@@ -282,17 +268,6 @@ pub async fn run_workflow_step_agent_follow_up(
     prompt: &str,
     step: &WorkflowStep,
 ) -> Result<WorkflowAgentRunOutput, WorkflowRuntimeError> {
-    let resume_session_id = workflow_session
-        .agent_session_id
-        .as_deref()
-        .or(session_agent.agent_session_id.as_deref())
-        .ok_or_else(|| {
-            WorkflowRuntimeError::Validation(format!(
-                "workflow session {} missing persisted agent session id",
-                workflow_session.id
-            ))
-        })?;
-
     run_workflow_agent_prompt_inner(
         db,
         session,
@@ -301,8 +276,7 @@ pub async fn run_workflow_step_agent_follow_up(
         Some(workflow_session),
         prompt,
         step.id,
-        Some(resume_session_id),
-        workflow_session.agent_message_id.as_deref(),
+        true,
         Some(WorkflowRuntimeStreamContext {
             pool: db.pool.clone(),
             chat_runner: chat_runner.clone(),
@@ -329,6 +303,38 @@ fn build_workspace_scoped_workflow_prompt(
     )
 }
 
+fn resolve_workflow_resume<'a>(
+    follow_up_requested: bool,
+    config_changed: bool,
+    workflow_session: Option<&'a WorkflowAgentSession>,
+    session_agent: &'a ChatSessionAgent,
+) -> Result<(Option<&'a str>, Option<&'a str>), WorkflowRuntimeError> {
+    if !follow_up_requested || config_changed {
+        return Ok((None, None));
+    }
+
+    let workflow_session = workflow_session.ok_or_else(|| {
+        WorkflowRuntimeError::Validation(
+            "workflow follow-up missing workflow agent session".to_string(),
+        )
+    })?;
+    let resume_session_id = workflow_session
+        .agent_session_id
+        .as_deref()
+        .or(session_agent.agent_session_id.as_deref())
+        .ok_or_else(|| {
+            WorkflowRuntimeError::Validation(format!(
+                "workflow session {} missing persisted agent session id",
+                workflow_session.id
+            ))
+        })?;
+
+    Ok((
+        Some(resume_session_id),
+        workflow_session.agent_message_id.as_deref(),
+    ))
+}
+
 async fn run_workflow_agent_prompt_inner(
     db: &DBService,
     session: &ChatSession,
@@ -337,15 +343,59 @@ async fn run_workflow_agent_prompt_inner(
     workflow_session: Option<&WorkflowAgentSession>,
     prompt: &str,
     step_id: Uuid,
-    resume_session_id: Option<&str>,
-    reset_to_message_id: Option<&str>,
+    follow_up_requested: bool,
     stream_context: Option<WorkflowRuntimeStreamContext>,
 ) -> Result<WorkflowAgentRunOutput, WorkflowRuntimeError> {
-    let workspace_path = resolve_workspace_path(db, session, agent, session_agent).await?;
+    let refresh = refresh_session_agent_execution_config_before_run(
+        &db.pool,
+        session,
+        session_agent.clone(),
+        agent.id,
+        workflow_session.map(|item| item.id),
+    )
+    .await?;
+    let config_changed = refresh.changed;
+    let mut effective_session_agent = refresh.session_agent;
+    let refreshed_workflow_session = if config_changed {
+        if let Some(workflow_session) = workflow_session {
+            Some(
+                WorkflowAgentSession::find_by_id(&db.pool, workflow_session.id)
+                    .await?
+                    .ok_or_else(|| {
+                        WorkflowRuntimeError::Validation(format!(
+                            "workflow session {} missing after execution config refresh",
+                            workflow_session.id
+                        ))
+                    })?,
+            )
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let workflow_session = refreshed_workflow_session.as_ref().or(workflow_session);
+    if config_changed {
+        tracing::info!(
+            session_id = %session.id,
+            session_agent_id = %effective_session_agent.id,
+            workflow_agent_session_id = ?workflow_session.map(|item| item.id),
+            agent_id = %agent.id,
+            "Refreshed workflow member execution config before spawning executor"
+        );
+    }
+
+    let workspace_path =
+        resolve_workspace_path(db, session, agent, &effective_session_agent).await?;
     fs::create_dir_all(&workspace_path).await?;
     let prompt = build_workspace_scoped_workflow_prompt(prompt, &workspace_path);
-    let mut effective_session_agent = session_agent.clone();
     effective_session_agent.workspace_path = Some(workspace_path.to_string_lossy().to_string());
+    let (resume_session_id, reset_to_message_id) = resolve_workflow_resume(
+        follow_up_requested,
+        config_changed,
+        workflow_session,
+        &effective_session_agent,
+    )?;
     save_debug_workflow_prompt(
         &workspace_path,
         session,

@@ -140,6 +140,24 @@ impl WorkflowAgentSession {
         .await
     }
 
+    pub async fn clear_runtime_ids(pool: &SqlitePool, id: Uuid) -> Result<Self, sqlx::Error> {
+        sqlx::query_as::<_, Self>(
+            r#"
+            UPDATE chat_workflow_agent_sessions
+            SET agent_session_id = NULL,
+                agent_message_id = NULL,
+                updated_at = datetime('now', 'subsec')
+            WHERE id = ?1
+            RETURNING id, workflow_execution_id, session_agent_id, role,
+                      agent_session_id, agent_message_id, state,
+                      created_at, updated_at
+            "#,
+        )
+        .bind(id)
+        .fetch_one(pool)
+        .await
+    }
+
     pub async fn clear_runtime_ids_for_project_member(
         pool: &SqlitePool,
         project_member_id: Uuid,

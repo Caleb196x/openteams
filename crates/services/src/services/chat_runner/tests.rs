@@ -14,6 +14,8 @@ use db::{
         chat_session_agent::{ChatSessionAgent, ChatSessionAgentState},
         member_execution_config::MemberExecutionConfig,
         project_member::{ProjectMember, ProjectMemberType},
+        workflow_agent_session::{CreateWorkflowAgentSession, WorkflowAgentSession},
+        workflow_types::WorkflowAgentSessionRole,
     },
 };
 use executors::executors::CancellationToken;
@@ -214,6 +216,19 @@ async fn setup_chat_runner_db() -> DBService {
             )
             "#,
         r#"
+            CREATE TABLE chat_workflow_agent_sessions (
+                id BLOB PRIMARY KEY,
+                workflow_execution_id BLOB NOT NULL,
+                session_agent_id BLOB NOT NULL,
+                role TEXT NOT NULL,
+                agent_session_id TEXT,
+                agent_message_id TEXT,
+                state TEXT NOT NULL DEFAULT 'idle',
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'subsec')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now', 'subsec'))
+            )
+            "#,
+        r#"
             CREATE TABLE chat_messages (
                 id BLOB PRIMARY KEY,
                 session_id BLOB NOT NULL,
@@ -324,9 +339,8 @@ async fn insert_test_project(pool: &SqlitePool, project_id: Uuid) {
 }
 
 #[tokio::test]
-async fn syncs_project_member_execution_config_immediately_before_run() {
+async fn refreshes_workflow_member_execution_config_before_run() {
     let db = setup_chat_runner_db().await;
-    let runner = ChatRunner::new(db.clone());
     let project_id = Uuid::new_v4();
     let session_id = Uuid::new_v4();
     insert_test_project(&db.pool, project_id).await;
@@ -346,7 +360,7 @@ async fn syncs_project_member_execution_config_immediately_before_run() {
     .expect("insert project chat session");
 
     let member_config = MemberExecutionConfig {
-        runner_type: Some(executors::executors::BaseCodingAgent::Codex),
+        runner_type: Some(executors::executors::BaseCodingAgent::Gemini),
         model_name: Some("new-model".to_string()),
         thinking_effort: Some("high".to_string()),
         model_variant: None,
@@ -375,7 +389,7 @@ async fn syncs_project_member_execution_config_immediately_before_run() {
             agent_id: agent.id,
             workspace_path: None,
             allowed_skill_ids: Vec::new(),
-            project_member_id: Some(member.id),
+            project_member_id: None,
             execution_config: MemberExecutionConfig {
                 runner_type: Some(executors::executors::BaseCodingAgent::Codex),
                 model_name: Some("old-model".to_string()),
@@ -399,20 +413,169 @@ async fn syncs_project_member_execution_config_immediately_before_run() {
     .execute(&db.pool)
     .await
     .expect("seed stale upstream ids");
+    let workflow_session = WorkflowAgentSession::create(
+        &db.pool,
+        &CreateWorkflowAgentSession {
+            workflow_execution_id: Uuid::new_v4(),
+            session_agent_id: stale_agent.id,
+            role: WorkflowAgentSessionRole::Worker,
+        },
+        Uuid::new_v4(),
+    )
+    .await
+    .expect("create workflow agent session");
+    sqlx::query(
+        r#"
+        UPDATE chat_workflow_agent_sessions
+        SET agent_session_id = 'old-workflow-session',
+            agent_message_id = 'old-workflow-message'
+        WHERE id = ?1
+        "#,
+    )
+    .bind(workflow_session.id)
+    .execute(&db.pool)
+    .await
+    .expect("seed stale workflow runtime ids");
     let stale_agent = ChatSessionAgent::find_by_id(&db.pool, stale_agent.id)
         .await
         .expect("read stale session agent")
         .expect("stale session agent exists");
-
-    let synced = runner
-        .sync_session_agent_execution_config_before_run(session_id, stale_agent, agent.id)
+    let session = ChatSession::find_by_id(&db.pool, session_id)
         .await
-        .expect("sync before run");
+        .expect("read project session")
+        .expect("project session exists");
 
+    let refresh = crate::services::member_execution::refresh_session_agent_execution_config_before_run(
+        &db.pool,
+        &session,
+        stale_agent,
+        agent.id,
+        Some(workflow_session.id),
+    )
+    .await
+    .expect("refresh before workflow run");
+    let synced = refresh.session_agent;
+
+    assert!(refresh.changed);
     assert_eq!(synced.execution_config.0, member_config);
     assert_eq!(synced.project_member_id, Some(member.id));
     assert_eq!(synced.agent_session_id, None);
     assert_eq!(synced.agent_message_id, None);
+    let effective = crate::services::member_execution::resolve_effective_member_execution_config(
+        &agent, &synced,
+    )
+    .expect("resolve refreshed execution config");
+    assert_eq!(
+        effective.runner_type,
+        executors::executors::BaseCodingAgent::Gemini
+    );
+    assert_eq!(effective.model_name.as_deref(), Some("new-model"));
+    let refreshed_workflow_session = WorkflowAgentSession::find_by_id(&db.pool, workflow_session.id)
+        .await
+        .expect("read refreshed workflow session")
+        .expect("workflow session exists");
+    assert_eq!(refreshed_workflow_session.agent_session_id, None);
+    assert_eq!(refreshed_workflow_session.agent_message_id, None);
+
+    sqlx::query(
+        r#"
+        UPDATE chat_session_agents
+        SET agent_session_id = 'current-session',
+            agent_message_id = 'current-message'
+        WHERE id = ?1
+        "#,
+    )
+    .bind(synced.id)
+    .execute(&db.pool)
+    .await
+    .expect("seed current session agent runtime ids");
+    sqlx::query(
+        r#"
+        UPDATE chat_workflow_agent_sessions
+        SET agent_session_id = 'current-workflow-session',
+            agent_message_id = 'current-workflow-message'
+        WHERE id = ?1
+        "#,
+    )
+    .bind(workflow_session.id)
+    .execute(&db.pool)
+    .await
+    .expect("seed current workflow runtime ids");
+    let current_agent = ChatSessionAgent::find_by_id(&db.pool, synced.id)
+        .await
+        .expect("read current session agent")
+        .expect("current session agent exists");
+
+    let unchanged =
+        crate::services::member_execution::refresh_session_agent_execution_config_before_run(
+            &db.pool,
+            &session,
+            current_agent,
+            agent.id,
+            Some(workflow_session.id),
+        )
+        .await
+        .expect("refresh unchanged workflow config");
+
+    assert!(!unchanged.changed);
+    assert_eq!(
+        unchanged.session_agent.agent_session_id.as_deref(),
+        Some("current-session")
+    );
+    let unchanged_workflow_session =
+        WorkflowAgentSession::find_by_id(&db.pool, workflow_session.id)
+            .await
+            .expect("read unchanged workflow session")
+            .expect("unchanged workflow session exists");
+    assert_eq!(
+        unchanged_workflow_session.agent_session_id.as_deref(),
+        Some("current-workflow-session")
+    );
+}
+
+#[tokio::test]
+async fn leaves_non_project_session_execution_config_unchanged_before_run() {
+    let db = setup_chat_runner_db().await;
+    let session_id = Uuid::new_v4();
+    let session = insert_test_chat_session(&db, session_id).await;
+    let agent = insert_test_chat_agent(&db, "standalone").await;
+    let session_agent = ChatSessionAgent::create(
+        &db.pool,
+        &db::models::chat_session_agent::CreateChatSessionAgent {
+            session_id,
+            agent_id: agent.id,
+            workspace_path: None,
+            allowed_skill_ids: Vec::new(),
+            project_member_id: None,
+            execution_config: MemberExecutionConfig {
+                runner_type: Some(executors::executors::BaseCodingAgent::Codex),
+                model_name: Some("standalone-model".to_string()),
+                thinking_effort: None,
+                model_variant: None,
+            },
+        },
+        Uuid::new_v4(),
+    )
+    .await
+    .expect("create standalone session agent");
+
+    let refresh =
+        crate::services::member_execution::refresh_session_agent_execution_config_before_run(
+            &db.pool,
+            &session,
+            session_agent.clone(),
+            agent.id,
+            None,
+        )
+        .await
+        .expect("refresh standalone session");
+
+    assert!(!refresh.changed);
+    assert_eq!(
+        refresh.session_agent.execution_config,
+        session_agent.execution_config
+    );
+    assert_eq!(refresh.session_agent.project_member_id, None);
 }
 
 fn finished_count(msg_store: &MsgStore) -> usize {
