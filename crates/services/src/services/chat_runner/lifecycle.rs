@@ -1170,67 +1170,33 @@ impl ChatRunner {
             .await
     }
 
-    async fn project_member_for_session_agent(
-        &self,
-        session_id: Uuid,
-        session_agent: &ChatSessionAgent,
-        agent_id: Uuid,
-    ) -> Result<Option<ProjectMember>, ChatRunnerError> {
-        if let Some(project_member_id) = session_agent.project_member_id {
-            return Ok(ProjectMember::find_by_id(&self.db.pool, project_member_id).await?);
-        }
-
-        let Some(session) = ChatSession::find_by_id(&self.db.pool, session_id).await? else {
-            return Ok(None);
-        };
-        let Some(project_id) = session.project_id else {
-            return Ok(None);
-        };
-
-        Ok(ProjectMember::find_by_project(&self.db.pool, project_id)
-            .await?
-            .into_iter()
-            .find(|member| {
-                member.member_type == ProjectMemberType::Agent && member.agent_id == Some(agent_id)
-            }))
-    }
-
     async fn sync_session_agent_execution_config_before_run(
         &self,
         session_id: Uuid,
         session_agent: ChatSessionAgent,
         agent_id: Uuid,
     ) -> Result<ChatSessionAgent, ChatRunnerError> {
-        let Some(project_member) = self
-            .project_member_for_session_agent(session_id, &session_agent, agent_id)
-            .await?
-        else {
+        let Some(session) = ChatSession::find_by_id(&self.db.pool, session_id).await? else {
             return Ok(session_agent);
         };
-
-        let current_config = session_agent.execution_config.0.clone().normalized();
-        let next_config = project_member.execution_config.0.clone().normalized();
-        if current_config == next_config
-            && session_agent.project_member_id == Some(project_member.id)
-        {
-            return Ok(session_agent);
-        }
-
-        let updated = ChatSessionAgent::update_execution_config_for_next_run(
+        let refresh = refresh_session_agent_execution_config_before_run(
             &self.db.pool,
-            session_agent.id,
-            Some(project_member.id),
-            next_config,
+            &session,
+            session_agent,
+            agent_id,
+            None,
         )
         .await?;
-        tracing::info!(
-            session_id = %session_id,
-            session_agent_id = %session_agent.id,
-            agent_id = %agent_id,
-            project_member_id = %project_member.id,
-            "Synced project member execution config immediately before agent run"
-        );
-        Ok(updated)
+        if refresh.changed {
+            tracing::info!(
+                session_id = %session_id,
+                session_agent_id = %refresh.session_agent.id,
+                agent_id = %agent_id,
+                project_member_id = ?refresh.session_agent.project_member_id,
+                "Synced project member execution config immediately before agent run"
+            );
+        }
+        Ok(refresh.session_agent)
     }
 
     async fn run_agent_for_mention_internal(

@@ -62,7 +62,8 @@ use uuid::Uuid;
 use crate::services::{
     inbox::InboxService,
     member_execution::{
-        build_effective_member_executor, resolve_effective_member_execution_config,
+        build_effective_member_executor, refresh_session_agent_execution_config_before_run,
+        resolve_effective_member_execution_config,
     },
     queued_message::{
         CreateQueuedMessage, MemberQueueSnapshot, QueuedMessage, QueuedMessageService,

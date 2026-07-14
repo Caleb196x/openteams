@@ -2,8 +2,12 @@ use std::str::FromStr;
 
 use anyhow::{Result, anyhow};
 use db::models::{
-    chat_agent::ChatAgent, chat_session_agent::ChatSessionAgent,
+    chat_agent::ChatAgent,
+    chat_session::ChatSession,
+    chat_session_agent::ChatSessionAgent,
     member_execution_config::MemberExecutionConfig,
+    project_member::{ProjectMember, ProjectMemberType},
+    workflow_agent_session::WorkflowAgentSession,
 };
 use executors::{
     env::ExecutionEnv,
@@ -11,6 +15,8 @@ use executors::{
     model_sync::with_member_execution_overrides,
     profile::{ExecutorConfigs, ExecutorProfileId, canonical_variant_key},
 };
+use sqlx::SqlitePool;
+use uuid::Uuid;
 
 use crate::services::agent_runtime::apply_agent_runtime_config;
 
@@ -24,6 +30,77 @@ pub struct EffectiveMemberExecutionConfig {
     pub thinking_effort: Option<String>,
     pub model_variant: Option<String>,
     pub has_member_config: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct SessionAgentExecutionConfigRefresh {
+    pub session_agent: ChatSessionAgent,
+    pub changed: bool,
+}
+
+pub async fn refresh_session_agent_execution_config_before_run(
+    pool: &SqlitePool,
+    session: &ChatSession,
+    session_agent: ChatSessionAgent,
+    agent_id: Uuid,
+    workflow_agent_session_id: Option<Uuid>,
+) -> Result<SessionAgentExecutionConfigRefresh, sqlx::Error> {
+    let mut project_member = if let Some(project_member_id) = session_agent.project_member_id {
+        ProjectMember::find_by_id(pool, project_member_id).await?
+    } else {
+        None
+    };
+
+    if project_member.as_ref().is_some_and(|member| {
+        member.member_type != ProjectMemberType::Agent || member.agent_id != Some(agent_id)
+    }) {
+        project_member = None;
+    }
+
+    if project_member.is_none()
+        && let Some(project_id) = session.project_id
+    {
+        project_member = ProjectMember::find_by_project(pool, project_id)
+            .await?
+            .into_iter()
+            .find(|member| {
+                member.member_type == ProjectMemberType::Agent && member.agent_id == Some(agent_id)
+            });
+    }
+
+    let Some(project_member) = project_member else {
+        return Ok(SessionAgentExecutionConfigRefresh {
+            session_agent,
+            changed: false,
+        });
+    };
+
+    let current_config = session_agent.execution_config.0.clone().normalized();
+    let next_config = project_member.execution_config.0.clone().normalized();
+    let changed =
+        current_config != next_config || session_agent.project_member_id != Some(project_member.id);
+    if !changed {
+        return Ok(SessionAgentExecutionConfigRefresh {
+            session_agent,
+            changed: false,
+        });
+    }
+
+    if let Some(workflow_agent_session_id) = workflow_agent_session_id {
+        WorkflowAgentSession::clear_runtime_ids(pool, workflow_agent_session_id).await?;
+    }
+    let session_agent = ChatSessionAgent::update_execution_config_for_next_run(
+        pool,
+        session_agent.id,
+        Some(project_member.id),
+        next_config,
+    )
+    .await?;
+
+    Ok(SessionAgentExecutionConfigRefresh {
+        session_agent,
+        changed: true,
+    })
 }
 
 impl EffectiveMemberExecutionConfig {

@@ -62,7 +62,9 @@ use super::{
     config::UiLanguage,
 };
 use crate::services::{
-    member_execution::build_effective_member_executor,
+    member_execution::{
+        build_effective_member_executor, refresh_session_agent_execution_config_before_run,
+    },
     session_worktree::{EnsureOutcome, EnsureWorktreeInput, SessionWorktreeService},
     workspace_change_capture::{
         WorkspaceChangeBaseline, build_git_observed_path_records,

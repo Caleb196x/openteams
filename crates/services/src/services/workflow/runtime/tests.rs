@@ -13,7 +13,8 @@ mod tests {
         workflow_plan_revision::WorkflowPlanRevision,
         workflow_step_edge::WorkflowStepEdge,
         workflow_types::{
-            WorkflowEdgeKind, WorkflowPlanStatus, WorkflowRevisionEditor, WorkflowValidationStatus,
+            WorkflowAgentSessionRole, WorkflowAgentSessionState, WorkflowEdgeKind,
+            WorkflowPlanStatus, WorkflowRevisionEditor, WorkflowValidationStatus,
             to_workflow_wire_value,
         },
     };
@@ -359,6 +360,55 @@ mod tests {
         };
 
         (vec![session_agent], vec![agent])
+    }
+
+    #[test]
+    fn changed_execution_config_forces_workflow_follow_up_to_spawn_fresh() {
+        let (session_agents, _) = sample_agent_views();
+        let session_agent = &session_agents[0];
+        let workflow_session = WorkflowAgentSession {
+            id: Uuid::new_v4(),
+            workflow_execution_id: Uuid::new_v4(),
+            session_agent_id: session_agent.id,
+            role: WorkflowAgentSessionRole::Worker,
+            agent_session_id: None,
+            agent_message_id: None,
+            state: WorkflowAgentSessionState::Running,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        let (resume_session_id, reset_to_message_id) =
+            resolve_workflow_resume(true, true, Some(&workflow_session), session_agent)
+                .expect("changed config should not require an old runtime session");
+
+        assert_eq!(resume_session_id, None);
+        assert_eq!(reset_to_message_id, None);
+    }
+
+    #[test]
+    fn unchanged_execution_config_preserves_workflow_follow_up_session() {
+        let (mut session_agents, _) = sample_agent_views();
+        let session_agent = &mut session_agents[0];
+        session_agent.agent_session_id = Some("session-agent-fallback".to_string());
+        let workflow_session = WorkflowAgentSession {
+            id: Uuid::new_v4(),
+            workflow_execution_id: Uuid::new_v4(),
+            session_agent_id: session_agent.id,
+            role: WorkflowAgentSessionRole::Worker,
+            agent_session_id: Some("workflow-session".to_string()),
+            agent_message_id: Some("workflow-message".to_string()),
+            state: WorkflowAgentSessionState::Running,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        let (resume_session_id, reset_to_message_id) =
+            resolve_workflow_resume(true, false, Some(&workflow_session), session_agent)
+                .expect("unchanged config should preserve follow-up session");
+
+        assert_eq!(resume_session_id, Some("workflow-session"));
+        assert_eq!(reset_to_message_id, Some("workflow-message"));
     }
 
     #[tokio::test]
