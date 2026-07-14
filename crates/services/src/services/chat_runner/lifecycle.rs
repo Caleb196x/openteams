@@ -323,6 +323,7 @@ impl ChatRunner {
     #[allow(clippy::too_many_arguments)]
     pub fn emit_workflow_runtime_line(
         &self,
+        line_id: Uuid,
         session_id: Uuid,
         execution_id: Uuid,
         workflow_agent_session_id: Option<Uuid>,
@@ -337,7 +338,7 @@ impl ChatRunner {
         self.emit(
             session_id,
             ChatStreamEvent::WorkflowRuntimeLine {
-                line_id: Uuid::new_v4(),
+                line_id,
                 session_id,
                 execution_id,
                 workflow_agent_session_id,
