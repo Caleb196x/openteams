@@ -40,25 +40,28 @@ pub enum ConfigError {
     ValidationError(String),
 }
 
-pub type Config = versions::v9::Config;
-pub type NotificationConfig = versions::v9::NotificationConfig;
-pub type NotificationInboxSourcesConfig = versions::v9::NotificationInboxSourcesConfig;
-pub type NotificationInboxSource = versions::v9::NotificationInboxSource;
-pub type EditorConfig = versions::v9::EditorConfig;
-pub type ThemeMode = versions::v9::ThemeMode;
-pub type SoundFile = versions::v9::SoundFile;
-pub type EditorType = versions::v9::EditorType;
-pub type GitHubConfig = versions::v9::GitHubConfig;
-pub type UiLanguage = versions::v9::UiLanguage;
-pub type ShowcaseState = versions::v9::ShowcaseState;
-pub type SendMessageShortcut = versions::v9::SendMessageShortcut;
-pub type ChatMemberPreset = versions::v9::ChatMemberPreset;
-pub type ChatTeamPreset = versions::v9::ChatTeamPreset;
+pub type Config = versions::v10::Config;
+pub type NotificationConfig = versions::v10::NotificationConfig;
+pub type NotificationInboxSourcesConfig = versions::v10::NotificationInboxSourcesConfig;
+pub type NotificationInboxSource = versions::v10::NotificationInboxSource;
+pub type EditorConfig = versions::v10::EditorConfig;
+pub type ThemeMode = versions::v10::ThemeMode;
+pub type SoundFile = versions::v10::SoundFile;
+pub type EditorType = versions::v10::EditorType;
+pub type GitHubConfig = versions::v10::GitHubConfig;
+pub type UiLanguage = versions::v10::UiLanguage;
+pub type ShowcaseState = versions::v10::ShowcaseState;
+pub type SendMessageShortcut = versions::v10::SendMessageShortcut;
+pub type ChatMemberPreset = versions::v10::ChatMemberPreset;
+pub type ChatTeamPreset = versions::v10::ChatTeamPreset;
 pub type ChatTeamTemplateTier = versions::v9::ChatTeamTemplateTier;
-pub type ChatPresetsConfig = versions::v9::ChatPresetsConfig;
-pub type ChatWorkflowStep = versions::v9::ChatWorkflowStep;
-pub type ChatBubbleFontSize = versions::v9::ChatBubbleFontSize;
-pub type ChatCompressionConfig = versions::v9::ChatCompressionConfig;
+pub type ChatPresetsConfig = versions::v10::ChatPresetsConfig;
+pub type ChatWorkflowStep = versions::v10::ChatWorkflowStep;
+pub type ChatBubbleFontSize = versions::v10::ChatBubbleFontSize;
+pub type ChatCompressionConfig = versions::v10::ChatCompressionConfig;
+pub type KeyboardShortcutsConfig = versions::v10::KeyboardShortcutsConfig;
+pub type KeyboardShortcutBinding = versions::v10::KeyboardShortcutBinding;
+pub type KeyboardShortcutOverride = versions::v10::KeyboardShortcutOverride;
 
 /// Will always return config, trying old schemas or eventually returning default
 pub async fn load_config_from_file(config_path: &PathBuf) -> Config {

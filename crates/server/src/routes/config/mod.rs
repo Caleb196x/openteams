@@ -37,7 +37,7 @@ use services::services::{
     config::{
         Config, ConfigError, SoundFile,
         editor::{EditorConfig, EditorType},
-        save_config_to_file,
+        save_config_to_file_atomic,
     },
     container::ContainerService,
     worktree_manager::WorktreeManager,

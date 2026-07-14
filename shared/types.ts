@@ -873,19 +873,13 @@ export type UserIterationFeedbackDetail = { what_wrong: string, expected: string
 
 export type UserIterationFeedback = { execution_id: string, round_id: string, action: string, feedback: UserIterationFeedbackDetail | null, };
 
-export type Config = { config_version: string, theme: ThemeMode, executor_profile: ExecutorProfileId, disclaimer_acknowledged: boolean, onboarding_acknowledged: boolean, notifications: NotificationConfig, editor: EditorConfig, github: GitHubConfig, analytics_enabled: boolean, workspace_dir: string | null, worktree_sessions_dir: string | null, last_app_version: string | null, show_release_notes: boolean, language: UiLanguage, git_branch_prefix: string, showcases: ShowcaseState, pr_auto_description_enabled: boolean, pr_auto_description_prompt: string | null, beta_workspaces: boolean, beta_workspaces_invitation_sent: boolean, commit_reminder_enabled: boolean, commit_reminder_prompt: string | null, send_message_shortcut: SendMessageShortcut,
-/**
- * Chat presets configuration (member and team templates)
- */
-chat_presets: ChatPresetsConfig,
-/**
- * Global chat bubble font size preference
- */
-chat_bubble_font_size: ChatBubbleFontSize,
-/**
- * Chat compression configuration
- */
-chat_compression: ChatCompressionConfig, max_agent_chain_depth: number, };
+export type Config = { config_version: string, theme: ThemeMode, executor_profile: ExecutorProfileId, disclaimer_acknowledged: boolean, onboarding_acknowledged: boolean, notifications: NotificationConfig, editor: EditorConfig, github: GitHubConfig, analytics_enabled: boolean, workspace_dir: string | null, worktree_sessions_dir: string | null, last_app_version: string | null, show_release_notes: boolean, language: UiLanguage, git_branch_prefix: string, showcases: ShowcaseState, pr_auto_description_enabled: boolean, pr_auto_description_prompt: string | null, beta_workspaces: boolean, beta_workspaces_invitation_sent: boolean, commit_reminder_enabled: boolean, commit_reminder_prompt: string | null, send_message_shortcut: SendMessageShortcut, chat_presets: ChatPresetsConfig, chat_bubble_font_size: ChatBubbleFontSize, chat_compression: ChatCompressionConfig, max_agent_chain_depth: number, keyboard_shortcuts: KeyboardShortcutsConfig, };
+
+export type KeyboardShortcutsConfig = { schema_version: number, platform_overrides: { [key in string]?: { [key in string]?: KeyboardShortcutOverride } }, };
+
+export type KeyboardShortcutBinding = { sequence: Array<string>, };
+
+export type KeyboardShortcutOverride = KeyboardShortcutBinding | JsonValue;
 
 export type NotificationConfig = { sound_enabled: boolean, push_enabled: boolean, sound_file: SoundFile, inbox_sources: NotificationInboxSourcesConfig, };
 
