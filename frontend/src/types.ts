@@ -1712,6 +1712,13 @@ export interface Config {
   config_version: string;
   theme: ThemeMode;
   language: UiLanguage;
+  chat_bubble_font_size:
+    | 'px12'
+    | 'px13'
+    | 'px14'
+    | 'px15'
+    | 'px16'
+    | 'px18';
   analytics_enabled: boolean;
   workspace_dir: string | null;
   worktree_sessions_dir: string | null;

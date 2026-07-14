@@ -491,13 +491,14 @@ check(
   source,
 );
 check(
-  'persists chat message font size preference',
+  'persists chat message font size preference in config.json',
   source.includes('CHAT_MESSAGE_FONT_SIZE_OPTIONS = [13, 14, 15, 16]') &&
-    source.includes('openteams-chat-message-font-size') &&
-    source.includes('openteams-agent-markdown-font-size') &&
-    source.includes('chatMessageFontSize') &&
-    source.includes('setChatMessageFontSize') &&
-    source.includes('normalizeChatMessageFontSize'),
+    source.includes('chat_bubble_font_size') &&
+    source.includes('chatMessageFontSizeFromConfig') &&
+    source.includes('chatMessageFontSizeToConfig') &&
+    source.includes('systemApi.saveConfig(configToSave)') &&
+    !source.includes('openteams-chat-message-font-size') &&
+    !source.includes('openteams-agent-markdown-font-size'),
   source,
 );
 
@@ -508,7 +509,10 @@ check(
     source.includes("'(prefers-color-scheme: light)'") &&
     source.includes('themePreference ===') &&
     source.includes('setThemePreferenceState(t)') &&
-    source.includes("localStorage.setItem('openteams-design-mode', t)") &&
+    source.includes('themePreferenceFromConfig') &&
+    source.includes('themePreferenceToConfig') &&
+    !source.includes('openteams-design-mode') &&
+    !source.includes('openteams-locale') &&
     source.includes("document.body.setAttribute('data-mode', theme)") &&
     source.includes('themePreference,'),
   source,

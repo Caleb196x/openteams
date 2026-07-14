@@ -245,9 +245,6 @@ const chatStreamWebSocketUrl = (path: string): string => {
 
 const PENDING_AGENT_MESSAGE_PREFIX = 'pending-agent-';
 const OPTIMISTIC_USER_MESSAGE_PREFIX = 'msg-user-';
-const CHAT_MESSAGE_FONT_SIZE_STORAGE_KEY = 'openteams-chat-message-font-size';
-const LEGACY_AGENT_MARKDOWN_FONT_SIZE_STORAGE_KEY =
-  'openteams-agent-markdown-font-size';
 // Persist the user's last-viewed project/session so a page refresh restores the
 // same context (and therefore reconnects the WS stream to the same session)
 // instead of always falling back to the first session in the list.
@@ -566,6 +563,74 @@ const normalizeChatMessageFontSize = (value: number | string | null): number => 
     CHAT_MESSAGE_FONT_SIZE_DEFAULT
   );
 };
+
+const themePreferenceFromConfig = (theme: Config['theme']): ThemePreference => {
+  const normalized = theme.toLowerCase();
+  return isThemePreference(normalized) ? normalized : 'dark';
+};
+
+const themePreferenceToConfig = (
+  theme: ThemePreference,
+): Config['theme'] => theme.toUpperCase() as Config['theme'];
+
+const resolveBrowserLocale = (): Locale => {
+  if (typeof navigator === 'undefined') return 'zh';
+  const language = navigator.language.toLowerCase();
+  if (language.startsWith('en')) return 'en';
+  if (language.startsWith('ja')) return 'ja';
+  if (language.startsWith('ko')) return 'ko';
+  if (language.startsWith('fr')) return 'fr';
+  if (language.startsWith('es')) return 'es';
+  return 'zh';
+};
+
+const localeFromConfig = (language: Config['language']): Locale => {
+  switch (language) {
+    case 'EN':
+      return 'en';
+    case 'JA':
+      return 'ja';
+    case 'KO':
+      return 'ko';
+    case 'FR':
+      return 'fr';
+    case 'ES':
+      return 'es';
+    case 'ZH_HANS':
+    case 'ZH_HANT':
+      return 'zh';
+    case 'BROWSER':
+    default:
+      return resolveBrowserLocale();
+  }
+};
+
+const localeToConfig = (locale: Locale): Config['language'] => {
+  switch (locale) {
+    case 'en':
+      return 'EN';
+    case 'ja':
+      return 'JA';
+    case 'ko':
+      return 'KO';
+    case 'fr':
+      return 'FR';
+    case 'es':
+      return 'ES';
+    case 'zh':
+    default:
+      return 'ZH_HANS';
+  }
+};
+
+const chatMessageFontSizeFromConfig = (
+  value: Config['chat_bubble_font_size'],
+): number => normalizeChatMessageFontSize(value.replace(/^px/, ''));
+
+const chatMessageFontSizeToConfig = (
+  value: number,
+): Config['chat_bubble_font_size'] =>
+  `px${normalizeChatMessageFontSize(value)}` as Config['chat_bubble_font_size'];
 
 const isPendingAgentPlaceholder = (message: Message): boolean =>
   Boolean(
@@ -1520,39 +1585,14 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
   const [themePreference, setThemePreferenceState] =
-    useState<ThemePreference>(() => {
-      try {
-        const saved = localStorage.getItem('openteams-design-mode');
-        return isThemePreference(saved) ? saved : 'dark';
-      } catch {
-        return 'dark';
-      }
-    });
+    useState<ThemePreference>('dark');
   const [systemTheme, setSystemTheme] = useState<Theme>(resolveSystemTheme);
   const theme: Theme =
     themePreference === 'system' ? systemTheme : themePreference;
 
-  const [locale, setLocaleState] = useState<Locale>(() => {
-    try {
-      const saved = localStorage.getItem('openteams-locale');
-      return ['en', 'zh', 'ja', 'ko', 'fr', 'es'].includes(saved ?? '')
-        ? (saved as Locale)
-        : 'zh';
-    } catch {
-      return 'zh';
-    }
-  });
+  const [locale, setLocaleState] = useState<Locale>('zh');
   const [chatMessageFontSize, setChatMessageFontSizeState] =
-    useState<number>(() => {
-      try {
-        return normalizeChatMessageFontSize(
-          localStorage.getItem(CHAT_MESSAGE_FONT_SIZE_STORAGE_KEY) ??
-            localStorage.getItem(LEGACY_AGENT_MARKDOWN_FONT_SIZE_STORAGE_KEY),
-        );
-      } catch {
-        return CHAT_MESSAGE_FONT_SIZE_DEFAULT;
-      }
-    });
+    useState<number>(CHAT_MESSAGE_FONT_SIZE_DEFAULT);
   const [activeSessionId, setActiveSessionId] = useState<string>(() => {
     try {
       return localStorage.getItem(ACTIVE_SESSION_ID_STORAGE_KEY) ?? '';
@@ -1607,6 +1647,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
   const [configAsync, setConfigAsync] = useState<
     AsyncResourceState<Config | null>
   >(() => initialAsync(null));
+  const latestConfigRef = useRef<Config | null>(null);
+  const configSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [inboxSummaryAsync, setInboxSummaryAsync] = useState<
     AsyncResourceState<InboxSummary>
   >(() => initialAsync(EMPTY_INBOX_SUMMARY));
@@ -1984,29 +2026,56 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
     }, toastDurationMsRef.current);
   };
 
+  const persistUiPreference = (patch: Partial<Config>) => {
+    const currentConfig = latestConfigRef.current;
+    if (!currentConfig) {
+      showToast('Settings are still loading. Please try again.', 'error');
+      return;
+    }
+
+    const nextConfig: Config = { ...currentConfig, ...patch };
+    latestConfigRef.current = nextConfig;
+    setConfigAsync((prev) => ({
+      ...prev,
+      data: nextConfig,
+      empty: false,
+      error: null,
+      source: 'api',
+    }));
+
+    configSaveQueueRef.current = configSaveQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        const configToSave = latestConfigRef.current;
+        if (!configToSave) return;
+        const savedConfig = await systemApi.saveConfig(configToSave);
+        if (latestConfigRef.current === configToSave) {
+          latestConfigRef.current = savedConfig;
+          setConfigAsync(succeed(savedConfig));
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to save UI preferences', error);
+        showToast('Failed to save settings to config.json.', 'error');
+      });
+  };
+
   const setTheme = (t: ThemePreference) => {
     setThemePreferenceState(t);
-    try {
-      localStorage.setItem('openteams-design-mode', t);
-    } catch {}
+    persistUiPreference({ theme: themePreferenceToConfig(t) });
   };
 
   const setLocale = (l: Locale) => {
     setLocaleState(l);
-    try {
-      localStorage.setItem('openteams-locale', l);
-    } catch {}
+    persistUiPreference({ language: localeToConfig(l) });
   };
 
   const setChatMessageFontSize = (size: number) => {
     const normalized = normalizeChatMessageFontSize(size);
     setChatMessageFontSizeState(normalized);
-    try {
-      localStorage.setItem(
-        CHAT_MESSAGE_FONT_SIZE_STORAGE_KEY,
-        String(normalized),
-      );
-    } catch {}
+    persistUiPreference({
+      chat_bubble_font_size: chatMessageFontSizeToConfig(normalized),
+    });
   };
 
   useEffect(() => {
@@ -3236,11 +3305,23 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
     setConfigAsync(beginLoad);
     try {
       const info = await systemApi.getInfo();
+      latestConfigRef.current = info.config;
       setConfigAsync(succeed(info.config));
     } catch (err) {
       setConfigAsync((prev) => fail(prev, err, null));
     }
   }, []);
+
+  useEffect(() => {
+    const config = configAsync.data;
+    if (!config) return;
+    latestConfigRef.current = config;
+    setThemePreferenceState(themePreferenceFromConfig(config.theme));
+    setLocaleState(localeFromConfig(config.language));
+    setChatMessageFontSizeState(
+      chatMessageFontSizeFromConfig(config.chat_bubble_font_size),
+    );
+  }, [configAsync.data]);
 
   const refreshWorkflowCard = useCallback(
     async (messageId: string): Promise<void> => {
