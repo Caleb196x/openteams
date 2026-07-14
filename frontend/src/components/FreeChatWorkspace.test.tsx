@@ -477,6 +477,14 @@ check(
   source,
 );
 check(
+  "composer member picker trigger does not duplicate mentioned members",
+  !source.includes("const mentionedMemberNames = new Set(") &&
+    !source.includes("mentionedMembers.length") &&
+    source.includes('<AtSign className="h-3.5 w-3.5') &&
+    source.includes("insertMemberMention(member)"),
+  source,
+);
+check(
   "user message rendering shows routed mention without mutating text",
   source.includes("sendMessage(messageText, {") &&
     source.includes("displayMentionForUserMessage(msg)") &&

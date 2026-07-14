@@ -2090,14 +2090,6 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
     window.addEventListener("mouseup", handleMouseUp);
   };
 
-  const mentionedMemberNames = new Set(
-    (inputText.match(/@[a-zA-Z0-9_-]+/g) || []).map((mention) =>
-      mention.toLowerCase(),
-    ),
-  );
-  const mentionedMembers = members.filter((member) =>
-    mentionedMemberNames.has(normalizeMentionHandle(member.name)),
-  );
   const isPlanMode = chatInputMode === "workflow";
   const planModeMainAgentName = mainAgentHandle;
   const freeModePlaceholder = t("discussPlaceholder", {
@@ -2784,13 +2776,6 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
                       title={t("inThisSession")}
                     >
                       <AtSign className="h-3.5 w-3.5 text-[var(--ink-tertiary)]" />
-                      {mentionedMembers.length > 0 && (
-                        <span>
-                          {mentionedMembers
-                            .map((member) => member.name)
-                            .join(", ")}
-                        </span>
-                      )}
                       <ChevronDown
                         aria-hidden="true"
                         className="h-3 w-3 text-[var(--ink-tertiary)]"
