@@ -317,6 +317,12 @@ globalThis.fetch = (async (input: RequestInfo | URL, options?: RequestInit) => {
   if (parsed.pathname === '/api/projects/project-1/sessions') {
     return apiResponse([{ id: 'session-1' }]);
   }
+  if (
+    parsed.pathname === '/api/projects/project-1/team-protocol' &&
+    method === 'PUT'
+  ) {
+    return apiResponse(JSON.parse(String(options?.body)));
+  }
   if (parsed.pathname === '/api/chat/agents' && method === 'GET') {
     return apiResponse([]);
   }
@@ -404,7 +410,7 @@ check(
   uiRequests,
 );
 const useTemplateButton = Array.from(rootElement.querySelectorAll('button')).find(
-  (button) => button.textContent?.includes('使用模板'),
+  (button) => button.textContent?.includes('Use template'),
 );
 if (!useTemplateButton) throw new Error('Use template button did not render.');
 await act(async () => {
@@ -412,7 +418,7 @@ await act(async () => {
   await flushUi();
 });
 const confirmButton = Array.from(rootElement.querySelectorAll('button')).find(
-  (button) => button.textContent?.includes('确认替换'),
+  (button) => button.textContent?.includes('Confirm replacement'),
 );
 if (!confirmButton) throw new Error('Confirm template application button did not render.');
 const detailRequestCountBeforeApply = uiRequests.filter(
@@ -426,13 +432,29 @@ const sessionUpdate = uiRequests.find(
   (request) =>
     request.url === '/api/chat/sessions/session-1' && request.method === 'PUT',
 );
+const projectProtocolUpdate = uiRequests.find(
+  (request) =>
+    request.url === '/api/projects/project-1/team-protocol' &&
+    request.method === 'PUT',
+);
+const sessionUpdatePayload = JSON.parse(sessionUpdate?.body ?? '{}');
+const projectProtocolPayload = JSON.parse(projectProtocolUpdate?.body ?? '{}');
 check(
-  'rendered page applies the freshly fetched localized protocol to project sessions',
-  JSON.parse(sessionUpdate?.body ?? '{}').team_protocol === '中文协议' &&
+  'rendered page applies the freshly fetched localized protocol to the project only',
+  projectProtocolPayload.content === '中文协议' &&
+    projectProtocolPayload.enabled === true &&
+    sessionUpdatePayload.lead_agent_id === 'agent-1' &&
+    !('team_protocol' in sessionUpdatePayload) &&
+    !('team_protocol_enabled' in sessionUpdatePayload) &&
     uiRequests.filter(
       (request) => request.url === '/api/team-presets/localized-team?locale=zh',
     ).length > detailRequestCountBeforeApply,
-  { detailRequestCountBeforeApply, sessionUpdate, uiRequests },
+  {
+    detailRequestCountBeforeApply,
+    projectProtocolUpdate,
+    sessionUpdate,
+    uiRequests,
+  },
 );
 await act(async () => {
   root.unmount();
@@ -456,6 +478,15 @@ check('uses content-as-ui document header in edit mode', source.includes('team-t
 check('uses edit-mode auto-save with a subtle saved status', source.includes('editorSaveStatus') && source.includes('autoSaveTemplate(form)') && source.includes('Saved') && source.includes('window.setTimeout'));
 check('folds edit-mode delete into the more menu', source.includes('MoreHorizontal') && source.includes('Delete template') && source.includes('setMoreMenuOpen') && !source.includes('mt-8 flex flex-wrap items-center justify-end gap-3 border-t'));
 check('shows member skills and role prompt details', source.includes('selected_skill_ids') && source.includes('system_prompt'));
+check(
+  'keeps the localized lead label compact and on one line without inferring a fallback lead',
+  source.includes(
+    'inline-flex shrink-0 items-center gap-1 whitespace-nowrap font-mono text-[9px] font-semibold uppercase tracking-[0.04em]',
+  ) &&
+    source.includes('const isLead = member.id === viewDetail.lead_member_id') &&
+    !source.includes('viewDetail.lead_member_id ?? viewDetail.members[0]?.id'),
+  source,
+);
 check('uses shared DropdownSelect for member runtime and model picking', source.includes('DropdownSelect') && source.includes('runtimeOptions') && source.includes('modelOptions') && source.includes('setRuntimes(response.runners)'));
 check('uses shared DropdownSelect for runtime-specific skill picking', source.includes('selectionMode="multiple"') && source.includes('listNative(effectiveRunnerType)') && source.includes('runtimeSkills') && source.includes('skillPlaceholder') && !source.includes('技能 ID（逗号分隔）'));
 check('keeps Linear visual refinement hooks', source.includes('team-template-card') && source.includes('team-template-member-row') && source.includes('team-template-field'));

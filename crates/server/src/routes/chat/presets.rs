@@ -60,20 +60,6 @@ pub struct CreatePresetSnapshotResponse {
     pub overwritten: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export)]
-pub struct ApplyTeamPresetRequest {
-    pub session_id: Uuid,
-    pub locale: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, TS)]
-#[ts(export)]
-pub struct ApplyTeamPresetResponse {
-    pub team: ChatTeamPreset,
-    pub team_protocol: TeamProtocolConfig,
-}
-
 #[derive(Debug, Clone, Serialize, TS)]
 #[ts(export)]
 pub struct TeamPresetMemberSummary {
@@ -183,7 +169,6 @@ pub fn team_presets_router() -> Router<DeploymentImpl> {
                 .put(update_team_preset)
                 .delete(delete_team_preset),
         )
-        .route("/{id}/apply", axum::routing::post(apply_team_preset))
 }
 
 pub async fn list_team_presets(
@@ -260,52 +245,6 @@ pub async fn delete_team_preset(
     *config_guard = next_config;
 
     Ok(ResponseJson(ApiResponse::success(())))
-}
-
-pub async fn apply_team_preset(
-    State(deployment): State<DeploymentImpl>,
-    Path(id): Path<String>,
-    Json(payload): Json<ApplyTeamPresetRequest>,
-) -> Result<ResponseJson<ApiResponse<ApplyTeamPresetResponse>>, ApiError> {
-    let id = validate_preset_id(&id, "Team preset ID")?;
-    let config = deployment.config().read().await;
-    let catalog = TeamTemplateCatalogService::new(deployment.db().pool.clone(), config_path());
-    let team = catalog
-        .get_template(&config, &id, payload.locale.as_deref())
-        .await?
-        .ok_or_else(|| ApiError::BadRequest(format!("Team preset not found: {id}")))?;
-    drop(config);
-
-    let content = team.team_protocol.trim().to_string();
-    let effective = TeamProtocolConfig {
-        enabled: !content.is_empty(),
-        content: content.clone(),
-    };
-    ChatSession::update(
-        &deployment.db().pool,
-        payload.session_id,
-        &UpdateChatSession {
-            title: None,
-            status: None,
-            lead_agent_id: None,
-            summary_text: None,
-            archive_ref: None,
-            last_seen_diff_key: None,
-            team_protocol: Some(content),
-            team_protocol_enabled: Some(effective.enabled),
-            default_workspace_path: None,
-            chat_input_mode: None,
-            worktree_mode: None,
-        },
-    )
-    .await?;
-
-    Ok(ResponseJson(ApiResponse::success(
-        ApplyTeamPresetResponse {
-            team,
-            team_protocol: effective,
-        },
-    )))
 }
 
 pub async fn create_preset_snapshot(
@@ -949,7 +888,7 @@ mod tests {
     use db::{
         DBService,
         models::{
-            chat_session::{ChatSessionStatus, CreateChatSession},
+            chat_session::ChatSessionStatus,
             chat_team_template_catalog::{ChatTeamTemplateCatalog, TeamTemplateCatalogSource},
         },
     };
@@ -1014,84 +953,12 @@ mod tests {
         response_data(&body).clone()
     }
 
-    async fn api_post(app: &Router, uri: impl Into<String>, body: Value) -> Value {
-        let (status, body) = request_json(app, Method::POST, uri.into(), Some(body)).await;
-        assert_eq!(status, StatusCode::OK, "response body: {body}");
-        response_data(&body).clone()
-    }
-
     fn response_data(body: &Value) -> &Value {
         assert_eq!(body["success"], true, "response body: {body}");
         body.get("data").expect("response data")
     }
 
-    async fn setup_pool() -> SqlitePool {
-        let pool = SqlitePool::connect("sqlite::memory:")
-            .await
-            .expect("create sqlite memory pool");
-        sqlx::migrate!("../db/migrations")
-            .run(&pool)
-            .await
-            .expect("run migrations");
-        pool
-    }
-
-    async fn setup_app() -> (Router, SqlitePool) {
-        let pool = setup_pool().await;
-        let deployment =
-            local_deployment::LocalDeployment::new_for_test_pool(DBService { pool: pool.clone() })
-                .await
-                .expect("create test deployment");
-        let app = Router::new()
-            .nest("/api/team-presets", team_presets_router())
-            .with_state(deployment);
-        (app, pool)
-    }
-
-    async fn request_json(
-        app: &Router,
-        method: Method,
-        uri: String,
-        body: Option<Value>,
-    ) -> (StatusCode, Value) {
-        let mut builder = Request::builder().method(method).uri(uri);
-        let request_body = if let Some(body) = body {
-            builder = builder.header("content-type", "application/json");
-            Body::from(serde_json::to_vec(&body).expect("serialize request body"))
-        } else {
-            Body::empty()
-        };
-        let response = app
-            .clone()
-            .oneshot(builder.body(request_body).expect("build request"))
-            .await
-            .expect("execute request");
-        let status = response.status();
-        let bytes = to_bytes(response.into_body(), usize::MAX)
-            .await
-            .expect("read response body");
-        let body = serde_json::from_slice(&bytes).expect("parse response JSON");
-        (status, body)
-    }
-
-    async fn api_get(app: &Router, uri: impl Into<String>) -> Value {
-        let (status, body) = request_json(app, Method::GET, uri.into(), None).await;
-        assert_eq!(status, StatusCode::OK, "response body: {body}");
-        response_data(&body).clone()
-    }
-
-    async fn api_post(app: &Router, uri: impl Into<String>, body: Value) -> Value {
-        let (status, body) = request_json(app, Method::POST, uri.into(), Some(body)).await;
-        assert_eq!(status, StatusCode::OK, "response body: {body}");
-        response_data(&body).clone()
-    }
-
-    fn response_data(body: &Value) -> &Value {
-        assert_eq!(body["success"], true, "response body: {body}");
-        body.get("data").expect("response data")
-    }
-
-    fn test_session(team_protocol_enabled: bool) -> ChatSession {
+    fn test_session() -> ChatSession {
         ChatSession {
             id: Uuid::new_v4(),
             title: Some("Delivery Team".to_string()),
@@ -1485,8 +1352,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn team_preset_routes_accept_locale_and_apply_localized_protocol_to_session() {
-        let (app, pool) = setup_app().await;
+    async fn team_preset_routes_accept_locale_and_return_localized_protocol() {
+        let (app, _pool) = setup_app().await;
         let english = api_get(&app, "/api/team-presets/fullstack_delivery_team?locale=en").await;
         let localized = api_get(
             &app,
@@ -1505,43 +1372,6 @@ mod tests {
                 .iter()
                 .any(|team| team["id"] == "advanced-growth-ops" && team["tier"] == "advanced")
         );
-
-        let session = ChatSession::create(
-            &pool,
-            &CreateChatSession {
-                title: Some("Apply template".to_string()),
-                workspace_path: None,
-                project_id: None,
-                worktree_mode: None,
-            },
-            Uuid::new_v4(),
-        )
-        .await
-        .expect("create session");
-        let applied = api_post(
-            &app,
-            "/api/team-presets/fullstack_delivery_team/apply",
-            json!({
-                "session_id": session.id,
-                "locale": "fr-FR"
-            }),
-        )
-        .await;
-
-        let updated = ChatSession::find_by_id(&pool, session.id)
-            .await
-            .expect("find session")
-            .expect("session exists");
-        assert_eq!(applied["team"]["id"], "fullstack_delivery_team");
-        assert_eq!(
-            applied["team_protocol"]["content"],
-            localized["team_protocol"]
-        );
-        assert_eq!(
-            updated.team_protocol.as_deref(),
-            localized["team_protocol"].as_str()
-        );
-        assert!(updated.team_protocol_enabled);
     }
 
     #[test]

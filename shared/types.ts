@@ -1199,10 +1199,6 @@ export type CustomProviderProbeResponse = { status: CustomProviderProbeStatus, v
 
 export type TeamProtocolConfig = { content: string, enabled: boolean, };
 
-export type ApplyTeamPresetRequest = { session_id: string, locale: string | null, };
-
-export type ApplyTeamPresetResponse = { team: ChatTeamPreset, team_protocol: TeamProtocolConfig, };
-
 export type TeamPresetMemberSummary = { id: string, name: string, description: string, runner_type: string | null, recommended_model: string | null, is_builtin: boolean, enabled: boolean, };
 
 export type TeamPresetSummary = { id: string, name: string, description: string, lead_member_id: string | null, team_protocol: string, is_builtin: boolean, enabled: boolean, tier: ChatTeamTemplateTier, member_count: number, members: Array<TeamPresetMemberSummary>, };

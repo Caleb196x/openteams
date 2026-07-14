@@ -5,7 +5,6 @@ use deployment::{Deployment, DeploymentError};
 use server::{DeploymentImpl, npx_browser_lifecycle, routes};
 use services::services::{
     agent_runtime::refresh_runtime_discovery,
-    build_stats::model_pricing_sync::ModelPricingSyncService, container::ContainerService,
     build_stats::model_pricing_sync::ModelPricingSyncService,
     config::{TeamTemplateCatalogService, TeamTemplateCatalogSyncResult},
     container::ContainerService,

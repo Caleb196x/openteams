@@ -375,16 +375,6 @@ export const teamTemplateSessionUpdatePayload = (
   ...patch,
 });
 
-export const teamPresetSessionProtocolPatch = (
-  detail: ChatTeamPreset,
-): Partial<UpdateChatSession> => {
-  const teamProtocol = detail.team_protocol.trim();
-  return {
-    team_protocol: teamProtocol,
-    team_protocol_enabled: teamProtocol.length > 0,
-  };
-};
-
 const isAgentProjectMember = (member: ProjectMemberWithRuntime): boolean =>
   member.member_type === ProjectMemberType.agent;
 
@@ -1597,6 +1587,7 @@ function WorkflowPreview({
   editable?: boolean;
   onStepsChange?: (steps: WorkflowStepForm[]) => void;
   steps: WorkflowStepForm[];
+  t: TranslateFn;
 }) {
   const stepCountLabel = String(steps.length).padStart(2, "0");
   const [litDotCount, setLitDotCount] = useState(0);
@@ -2292,7 +2283,7 @@ function TemplateDetailView({
                         {roleKey}
                       </span>
                       {isLead && (
-                        <span className="inline-flex items-center gap-1 font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--team-template-muted)]">
+                        <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap font-mono text-[9px] font-semibold uppercase tracking-[0.04em] text-[var(--team-template-muted)]">
                           <span className="h-1 w-1 rounded-full bg-current opacity-70" />
                           {translateWithFallback(t, "teamTemplates.members.lead", "Lead")}
                         </span>
@@ -3143,7 +3134,8 @@ export function TeamTemplatesPage() {
         createdMembers.find((member) => member.role === "lead")?.agent_id ??
         createdMembers[0]?.agent_id ??
         null;
-      const sessionPatch = teamPresetSessionProtocolPatch(detail);
+      const teamProtocol = detail.team_protocol.trim();
+      const sessionPatch: Partial<UpdateChatSession> = {};
       if (leadAgentId) {
         sessionPatch.lead_agent_id = leadAgentId;
       }
@@ -3378,6 +3370,7 @@ export function TeamTemplatesPage() {
                     <TemplateCard
                       key={template.id}
                       template={template}
+                      t={t}
                       onClick={() => {
                         openTemplateDetail(template.id);
                       }}

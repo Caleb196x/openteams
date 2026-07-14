@@ -393,7 +393,7 @@ fn workflow_user_action_item(
         project_id,
         session_id: Some(execution.session_id),
         kind: action.kind.to_string(),
-        severity: InboxItemSeverity::Warning,
+        severity: action.severity,
         title: title_hint
             .and_then(|value| optional_compact_text(value, 120))
             .unwrap_or_else(|| action.title.to_string()),
@@ -510,6 +510,7 @@ fn worktree_cleanup_failed_item(worktree: &SessionWorktree, error: &str) -> Upse
 
 struct WorkflowActionNotificationKind {
     kind: &'static str,
+    severity: InboxItemSeverity,
     source_type: &'static str,
     dedupe_prefix: &'static str,
     title: &'static str,
@@ -519,36 +520,42 @@ fn workflow_action_notification_kind(entry_type: &str) -> Option<WorkflowActionN
     match entry_type {
         "input_request" => Some(WorkflowActionNotificationKind {
             kind: "workflow_input",
+            severity: InboxItemSeverity::Warning,
             source_type: "workflow_input",
             dedupe_prefix: "workflow_input",
             title: "Workflow needs input",
         }),
         "continue_confirmation" => Some(WorkflowActionNotificationKind {
             kind: "workflow_input",
+            severity: InboxItemSeverity::Warning,
             source_type: "workflow_continue",
             dedupe_prefix: "workflow_continue",
             title: "Workflow needs confirmation",
         }),
         "step_review" | "loop_review" => Some(WorkflowActionNotificationKind {
             kind: "workflow_review",
+            severity: InboxItemSeverity::Warning,
             source_type: "workflow_review",
             dedupe_prefix: "workflow_review",
             title: "Workflow needs review",
         }),
         "final_review" => Some(WorkflowActionNotificationKind {
             kind: "workflow_final_review",
+            severity: InboxItemSeverity::Warning,
             source_type: "workflow_final_review",
             dedupe_prefix: "workflow_final_review",
             title: "Workflow needs final review",
         }),
         "approval_request" => Some(WorkflowActionNotificationKind {
             kind: "workflow_approval",
+            severity: InboxItemSeverity::Info,
             source_type: "workflow_approval",
             dedupe_prefix: "workflow_approval",
             title: "Workflow needs approval",
         }),
         "permission_request" => Some(WorkflowActionNotificationKind {
             kind: "workflow_approval",
+            severity: InboxItemSeverity::Info,
             source_type: "workflow_approval",
             dedupe_prefix: "workflow_permission",
             title: "Workflow needs permission",
@@ -1121,15 +1128,32 @@ mod tests {
             format!("workflow_input:{}", transcript.id)
         );
 
-        let approval = sample_transcript(execution.id, "permission_request");
+        let approval = sample_transcript(execution.id, "approval_request");
         let approval_item =
-            super::workflow_user_action_item(None, &execution, &approval, Some("Need permission"))
-                .expect("permission notification");
+            super::workflow_user_action_item(None, &execution, &approval, Some("Need approval"))
+                .expect("approval notification");
         assert_eq!(approval_item.kind, "workflow_approval");
+        assert_eq!(approval_item.severity, InboxItemSeverity::Info);
         assert_eq!(approval_item.source_type, "workflow_approval");
         assert_eq!(
             approval_item.dedupe_key,
-            format!("workflow_permission:{}", approval.id)
+            format!("workflow_approval:{}", approval.id)
+        );
+
+        let permission = sample_transcript(execution.id, "permission_request");
+        let permission_item = super::workflow_user_action_item(
+            None,
+            &execution,
+            &permission,
+            Some("Need permission"),
+        )
+        .expect("permission notification");
+        assert_eq!(permission_item.kind, "workflow_approval");
+        assert_eq!(permission_item.severity, InboxItemSeverity::Info);
+        assert_eq!(permission_item.source_type, "workflow_approval");
+        assert_eq!(
+            permission_item.dedupe_key,
+            format!("workflow_permission:{}", permission.id)
         );
 
         let review = sample_transcript(execution.id, "step_review");
