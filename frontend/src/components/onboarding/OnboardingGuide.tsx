@@ -8,10 +8,14 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import {
+  ArrowRight,
   Bot,
+  CalendarDays,
   Check,
   ChevronUp,
+  CircleArrowUp,
   Ellipsis,
+  ExternalLink,
   FileText,
   Folder,
   Home,
@@ -22,14 +26,17 @@ import {
   Moon,
   Plus,
   Rocket,
+  RefreshCw,
   Search,
   Sparkles,
+  ShieldCheck,
   Sun,
   Users,
   X,
   Zap,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import { DropdownSelect, type DropdownSelectOption } from '@/components/DropdownSelect';
 import { cn } from '@/lib/utils';
 import {
@@ -47,6 +54,8 @@ import {
 import { recommendOnboardingTeamTemplate } from '@/lib/onboardingTemplateRecommendations';
 import { sanitizeProjectName } from '@/lib/projectName';
 import { buildTemplateMemberSpecs } from '@/lib/teamTemplateRuntime';
+import { getUpdatePageViewModel } from '@/lib/updatePresentation';
+import type { VersionUpdateCheckStatus } from '@/hooks/useVersionUpdate';
 import {
   getRunnerLabel,
   getRuntimeDisplayState,
@@ -67,6 +76,8 @@ import {
   type ChatTeamPreset,
   type OnboardingState,
   type OnboardingTeamMemberConfig,
+  type UpdateErrorInfo,
+  type UpdateOperationState,
   type UpdateOnboardingStateRequest,
 } from '../../../../shared/types';
 
@@ -82,6 +93,17 @@ type TranslateFn = (
   key: string,
   replacements?: Record<string, string | number>,
 ) => string;
+
+const updateDetailIconByLabel: Record<string, LucideIcon> = {
+  'onboarding.upgrade.checkStatus': RefreshCw,
+  'onboarding.upgrade.platform': Monitor,
+  'onboarding.upgrade.method': Layers3,
+  'onboarding.upgrade.publishedAt': CalendarDays,
+  'onboarding.upgrade.signatureVerification': ShieldCheck,
+  'onboarding.upgrade.downloadStatus': ArrowRight,
+  'onboarding.upgrade.installStatus': Check,
+  'onboarding.upgrade.downloadProgress': ArrowRight,
+};
 
 type OnboardingCompleteOptions = {
   createDefaultSession?: boolean;
@@ -112,7 +134,14 @@ interface OnboardingGuideProps {
   ) => void | Promise<void>;
   onStateChange?: (state: OnboardingState) => void;
   versionUpdateInfo: VersionCheckResponse | null;
+  versionUpdateCheckStatus: VersionUpdateCheckStatus;
+  versionUpdateCheckError: UpdateErrorInfo | null;
+  versionUpdateState: UpdateOperationState | null;
+  versionUpdateBusy: boolean;
   onInstallUpdate: () => Promise<void>;
+  onCheckUpdate: () => Promise<VersionCheckResponse | null>;
+  manualFallbackAvailable: boolean;
+  onOpenManualFallback: () => Promise<void>;
 }
 
 const onboardingDarkThemeVars = {
@@ -163,6 +192,82 @@ const onboardingLightThemeVars = {
   '--onboarding-card-shadow': '0 18px 60px rgba(32, 36, 48, 0.12)',
   '--onboarding-card-inset-shadow':
     'inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 18px 60px rgba(32, 36, 48, 0.12)',
+} as CSSProperties;
+
+const upgradeDarkThemeVars = {
+  '--upgrade-shell': '#0e0e10',
+  '--upgrade-toolbar': 'rgba(17, 17, 19, 0.9)',
+  '--upgrade-sidebar': '#111113',
+  '--upgrade-card': '#141415',
+  '--upgrade-accent-card': '#151518',
+  '--upgrade-text': '#ededed',
+  '--upgrade-text-strong': 'rgba(255, 255, 255, 0.9)',
+  '--upgrade-text-muted': 'rgba(255, 255, 255, 0.45)',
+  '--upgrade-text-subtle': 'rgba(255, 255, 255, 0.35)',
+  '--upgrade-text-faint': 'rgba(255, 255, 255, 0.28)',
+  '--upgrade-line': 'rgba(255, 255, 255, 0.055)',
+  '--upgrade-line-soft': 'rgba(255, 255, 255, 0.045)',
+  '--upgrade-fill': 'rgba(255, 255, 255, 0.035)',
+  '--upgrade-fill-soft': 'rgba(255, 255, 255, 0.018)',
+  '--upgrade-fill-hover': 'rgba(255, 255, 255, 0.035)',
+  '--upgrade-shell-shadow':
+    '0 20px 60px rgba(0, 0, 0, 0.52), inset 0 0 0 1px rgba(255, 255, 255, 0.06)',
+  '--upgrade-card-shadow':
+    '0 8px 24px rgba(0, 0, 0, 0.12), inset 0 0 0 1px rgba(255, 255, 255, 0.055)',
+  '--upgrade-accent-card-shadow':
+    '0 8px 24px rgba(0, 0, 0, 0.14), inset 0 0 0 1px rgba(122, 162, 247, 0.11)',
+  '--upgrade-accent': '#7aa2f7',
+  '--upgrade-accent-text': '#8dafef',
+  '--upgrade-accent-hover': '#a8c3ff',
+  '--upgrade-accent-soft': 'rgba(122, 162, 247, 0.065)',
+  '--upgrade-accent-line': 'rgba(122, 162, 247, 0.09)',
+  '--upgrade-warning-bg': 'rgba(252, 211, 77, 0.04)',
+  '--upgrade-warning-text': 'rgba(254, 243, 199, 0.55)',
+  '--upgrade-warning-icon': 'rgba(253, 230, 138, 0.55)',
+  '--upgrade-warning-line': 'rgba(252, 211, 77, 0.08)',
+  '--upgrade-danger-bg': 'rgba(248, 113, 113, 0.045)',
+  '--upgrade-danger-text': 'rgba(254, 202, 202, 0.8)',
+  '--upgrade-danger-line': 'rgba(248, 113, 113, 0.1)',
+  '--upgrade-disabled-border': '#333333',
+  '--upgrade-disabled-text': '#666666',
+} as CSSProperties;
+
+const upgradeLightThemeVars = {
+  '--upgrade-shell': '#f6f7f9',
+  '--upgrade-toolbar': 'rgba(255, 255, 255, 0.94)',
+  '--upgrade-sidebar': '#fbfbfc',
+  '--upgrade-card': '#ffffff',
+  '--upgrade-accent-card': '#f8f9ff',
+  '--upgrade-text': '#202124',
+  '--upgrade-text-strong': 'rgba(17, 17, 19, 0.92)',
+  '--upgrade-text-muted': 'rgba(43, 45, 52, 0.62)',
+  '--upgrade-text-subtle': 'rgba(62, 66, 75, 0.68)',
+  '--upgrade-text-faint': 'rgba(82, 86, 96, 0.62)',
+  '--upgrade-line': 'rgba(15, 23, 42, 0.1)',
+  '--upgrade-line-soft': 'rgba(15, 23, 42, 0.075)',
+  '--upgrade-fill': 'rgba(15, 23, 42, 0.045)',
+  '--upgrade-fill-soft': 'rgba(15, 23, 42, 0.025)',
+  '--upgrade-fill-hover': 'rgba(15, 23, 42, 0.055)',
+  '--upgrade-shell-shadow':
+    '0 20px 60px rgba(15, 23, 42, 0.18), inset 0 0 0 1px rgba(15, 23, 42, 0.1)',
+  '--upgrade-card-shadow':
+    '0 8px 24px rgba(15, 23, 42, 0.07), inset 0 0 0 1px rgba(15, 23, 42, 0.09)',
+  '--upgrade-accent-card-shadow':
+    '0 8px 24px rgba(55, 65, 120, 0.08), inset 0 0 0 1px rgba(94, 106, 210, 0.18)',
+  '--upgrade-accent': '#5e6ad2',
+  '--upgrade-accent-text': '#4f5bc5',
+  '--upgrade-accent-hover': '#3846b5',
+  '--upgrade-accent-soft': 'rgba(94, 106, 210, 0.09)',
+  '--upgrade-accent-line': 'rgba(94, 106, 210, 0.14)',
+  '--upgrade-warning-bg': 'rgba(245, 158, 11, 0.08)',
+  '--upgrade-warning-text': 'rgba(146, 64, 14, 0.82)',
+  '--upgrade-warning-icon': 'rgba(180, 83, 9, 0.76)',
+  '--upgrade-warning-line': 'rgba(217, 119, 6, 0.18)',
+  '--upgrade-danger-bg': 'rgba(239, 68, 68, 0.07)',
+  '--upgrade-danger-text': 'rgba(185, 28, 28, 0.84)',
+  '--upgrade-danger-line': 'rgba(220, 38, 38, 0.16)',
+  '--upgrade-disabled-border': '#d7d9df',
+  '--upgrade-disabled-text': '#9a9da5',
 } as CSSProperties;
 
 const onboardingMonoFont = {
@@ -458,7 +563,14 @@ export function OnboardingGuide({
   onComplete,
   onStateChange,
   versionUpdateInfo,
+  versionUpdateCheckStatus,
+  versionUpdateCheckError,
+  versionUpdateState,
+  versionUpdateBusy,
   onInstallUpdate,
+  onCheckUpdate,
+  manualFallbackAvailable,
+  onOpenManualFallback,
 }: OnboardingGuideProps) {
   const initialStep = initialState?.welcome_seen_at
     ? stepFromBackend(initialState.current_step)
@@ -550,6 +662,10 @@ export function OnboardingGuide({
         colorScheme: 'light',
       } as CSSProperties)
     : undefined;
+  const upgradeThemeStyle = {
+    ...(theme === 'light' ? upgradeLightThemeVars : upgradeDarkThemeVars),
+    colorScheme: theme,
+  } as CSSProperties;
   const { scenarios, currentScenario } = useTranslatedScenario(
     t,
     selectedScenario,
@@ -1377,45 +1493,61 @@ export function OnboardingGuide({
     }
   };
 
+  const handleOpenManualFallback = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await onOpenManualFallback();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : t('onboarding.upgrade.installFailed'),
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCheckUpdate = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await onCheckUpdate();
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const renderUpgradeGuide = () => {
     const currentDisplay = versionUpdateInfo?.current_version ?? currentVersion;
     const latestDisplay = versionUpdateInfo?.latest_version ?? currentVersion;
     const releaseNotes = versionUpdateInfo?.release_notes?.trim();
     const hasUpdate = Boolean(versionUpdateInfo?.has_update);
+    const updateView = getUpdatePageViewModel({
+      info: versionUpdateInfo,
+      checkStatus: versionUpdateCheckStatus,
+      checkError: versionUpdateCheckError,
+      operation: versionUpdateState,
+      isBusy: versionUpdateBusy || saving,
+      manualFallbackAvailable,
+    });
     const updateButtonLabel = saving
       ? t('onboarding.upgrade.installing')
-      : hasUpdate
-        ? t('onboarding.upgrade.updateNow')
-        : versionUpdateInfo
-          ? t('onboarding.upgrade.updateUnavailable')
-          : t('onboarding.upgrade.updateChecking');
-    const releaseMetaRows = [
-      {
-        key: 'deploy_mode',
-        label: t('onboarding.upgrade.deployMode'),
-        value: versionUpdateInfo?.deploy_mode ?? 'unknown',
-      },
-      {
-        key: 'published_at',
-        label: t('onboarding.upgrade.publishedAt'),
-        value: versionUpdateInfo?.published_at ?? 'null',
-      },
-    ];
+      : t(updateView.primaryAction.labelKey);
 
     return (
-      <section className="relative isolate flex max-h-[min(720px,calc(100vh-48px))] min-h-[520px] w-full flex-col overflow-hidden rounded-[8px] border border-white/[0.12] bg-[var(--onboarding-card)] text-[#f4f4f5] shadow-[0_24px_80px_rgba(0,0,0,0.44),inset_0_0_0_1px_rgba(255,255,255,0.035)]">
-        <div className="pointer-events-none absolute inset-0 bg-[var(--onboarding-stage)]" />
+      <section className="relative isolate flex h-[min(720px,calc(100vh-32px))] min-h-[560px] w-full flex-col overflow-hidden rounded-[12px] bg-[var(--upgrade-shell)] text-[var(--upgrade-text-strong)] shadow-[var(--upgrade-shell-shadow)]">
+        <div className="pointer-events-none absolute inset-0 bg-[var(--upgrade-shell)]" />
         <div
-          className="pointer-events-none absolute inset-0 opacity-[0.032] mix-blend-screen"
+          className="pointer-events-none absolute inset-0 opacity-[0.025] mix-blend-soft-light"
           style={onboardingNoiseTextureStyle}
         />
-        <div className="relative z-10 flex min-h-11 items-center gap-2 border-b border-white/[0.08] bg-[var(--onboarding-card)] px-3 py-2.5">
-          <span className="h-2 w-2 rounded-full border border-white/[0.18] bg-white/[0.065]" />
-          <span className="h-2 w-2 rounded-full border border-white/[0.18] bg-white/[0.065]" />
-          <span className="h-2 w-2 rounded-full border border-white/[0.18] bg-white/[0.065]" />
-          <div className="ml-2 flex min-w-0 flex-1 items-center gap-2 rounded-[5px] border border-white/[0.08] bg-white/[0.045] px-2.5 py-1.5">
-            <Sparkles className="h-3.5 w-3.5 shrink-0 text-[#cfd5ff]" />
-            <span className="truncate font-mono text-[11px] font-medium tracking-[0] text-[#a8b3c2]">
+        <div className="relative z-10 flex min-h-11 items-center gap-2 bg-[var(--upgrade-toolbar)] px-3 py-2.5 shadow-[inset_0_-1px_0_var(--upgrade-line)] backdrop-blur-xl">
+          <span className="h-2 w-2 rounded-full border border-[var(--upgrade-line)] bg-[var(--upgrade-fill)]" />
+          <span className="h-2 w-2 rounded-full border border-[var(--upgrade-line)] bg-[var(--upgrade-fill)]" />
+          <span className="h-2 w-2 rounded-full border border-[var(--upgrade-line)] bg-[var(--upgrade-fill)]" />
+          <div className="ml-2 flex min-w-0 flex-1 items-center gap-2 rounded-[5px] border border-[var(--upgrade-line)] bg-[var(--upgrade-fill)] px-2.5 py-1.5">
+            <CircleArrowUp className="h-3.5 w-3.5 shrink-0 text-[var(--upgrade-text-subtle)]" strokeWidth={1.25} />
+            <span className="truncate font-sans text-[11px] font-medium tracking-[0] text-[var(--upgrade-text-muted)]">
               {t('onboarding.upgrade.eyebrow', { version: latestDisplay })}
             </span>
           </div>
@@ -1423,127 +1555,161 @@ export function OnboardingGuide({
             type="button"
             onClick={onClose}
             aria-label={t('onboarding.upgrade.later')}
-            className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-[#8a8f98] transition hover:border-white/[0.08] hover:bg-white/[0.05] hover:text-[#f4f4f5] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/[0.35]"
+            className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-[var(--upgrade-text-subtle)] transition hover:border-[var(--upgrade-line)] hover:bg-[var(--upgrade-fill-hover)] hover:text-[var(--upgrade-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--upgrade-accent)]"
           >
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
 
-        <div className="relative z-10 grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_300px]">
-          <main className="min-w-0 px-5 py-6 sm:px-7 sm:py-7 lg:px-8">
+        <div className="relative z-10 grid min-h-0 flex-1 grid-cols-1 overflow-y-auto [scrollbar-width:none] lg:grid-cols-[minmax(0,1fr)_328px] lg:overflow-hidden [&::-webkit-scrollbar]:hidden">
+          <main className="min-w-0 overflow-y-auto px-6 py-6 [scrollbar-width:none] sm:px-8 lg:overflow-hidden lg:px-9 [&::-webkit-scrollbar]:hidden">
             <p
-              className="font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-[#8A8F98]"
+              className="font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--upgrade-text-subtle)]"
               style={onboardingMonoFont}
             >
               {t('onboarding.upgrade.eyebrow', { version: latestDisplay })}
             </p>
-            <h1 className="mt-3 max-w-2xl font-sans text-[25px] font-[600] leading-tight tracking-[0] text-[#f4f4f5] sm:text-[31px]">
+            <h1 className="mt-3 max-w-2xl font-sans text-[28px] font-[600] leading-tight tracking-[-0.02em] text-[var(--upgrade-text)] sm:text-[32px]">
               {t('onboarding.upgrade.title')}
             </h1>
-            <p className="mt-3 max-w-2xl text-[13px] leading-5 text-[#a8b3c2] sm:text-[14px] sm:leading-6">
+            <p className="mt-3 max-w-2xl text-[14px] leading-6 text-[var(--upgrade-text-muted)] sm:text-[15px]">
               {t('onboarding.upgrade.desc')}
             </p>
 
-            <div className="mt-7 grid gap-3 sm:grid-cols-2">
-              <article className="rounded-[8px] border border-white/[0.09] bg-white/[0.035] p-4">
+            {updateView.primaryAction.labelKey === 'onboarding.upgrade.updateUnsupported' && (
+              <div className="mt-6 flex items-center gap-2 rounded-[10px] bg-[var(--upgrade-warning-bg)] px-4 py-3 text-[13px] text-[var(--upgrade-warning-text)] shadow-[inset_0_0_0_1px_var(--upgrade-warning-line)]">
+                <Info className="h-4 w-4 shrink-0 text-[var(--upgrade-warning-icon)]" strokeWidth={1.25} />
+                {t('onboarding.upgrade.updateUnsupported')}
+              </div>
+            )}
+
+            <div className="mt-6 grid items-stretch gap-4 sm:grid-cols-[minmax(0,1fr)_24px_minmax(0,1fr)]">
+              <article className="rounded-[12px] bg-[var(--upgrade-card)] px-4 py-3 shadow-[var(--upgrade-card-shadow)]">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="inline-flex h-8 w-8 items-center justify-center rounded-[7px] border border-white/[0.12] bg-white/[0.055] text-[#dbe0ff]">
-                    <Monitor className="h-4 w-4" strokeWidth={1.6} />
+                  <span className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] bg-[var(--upgrade-fill-soft)] text-[var(--upgrade-text-subtle)] shadow-[inset_0_0_0_1px_var(--upgrade-line)]">
+                    <Monitor className="h-4 w-4" strokeWidth={1.25} />
                   </span>
                   <span
-                    className="font-mono text-[10px] font-medium tracking-[0] text-white/35"
-                    style={onboardingMonoFont}
+                    className="rounded-[5px] bg-[var(--upgrade-fill)] px-2 py-1 font-sans text-[11px] font-medium tracking-[0] text-[var(--upgrade-text-muted)] shadow-[inset_0_0_0_1px_var(--upgrade-line)] backdrop-blur-xl"
                   >
-                    installed
+                    {t('onboarding.upgrade.installedTag')}
                   </span>
                 </div>
-                <h2 className="mt-4 text-[12px] font-medium tracking-[0] text-[#8a8f98]">
+                <h2 className="mt-2.5 text-[12px] font-medium tracking-[0] text-[var(--upgrade-text-muted)]">
                   {t('onboarding.upgrade.currentVersion')}
                 </h2>
-                <p className="mt-1 truncate font-mono text-[20px] font-semibold tracking-[0] text-[#f4f4f5]">
+                <p className="mt-0.5 truncate font-sans text-[20px] font-semibold tracking-[-0.025em] text-[var(--upgrade-text-strong)]">
                   {currentDisplay}
                 </p>
               </article>
-              <article className="rounded-[8px] border border-[var(--primary)]/70 bg-[var(--primary-tint)] p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.035)]">
+              <div className="hidden items-center justify-center sm:flex">
+                <ArrowRight className="h-4 w-4 text-[var(--upgrade-text-faint)]" strokeWidth={1.25} />
+              </div>
+              <article className="rounded-[12px] bg-[var(--upgrade-accent-card)] px-4 py-3 shadow-[var(--upgrade-accent-card-shadow)]">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="inline-flex h-8 w-8 items-center justify-center rounded-[7px] border border-[var(--primary)]/45 bg-[var(--primary)]/15 text-[var(--primary-hover)]">
-                    <Sparkles className="h-4 w-4" strokeWidth={1.6} />
+                  <span className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] bg-[var(--upgrade-accent-soft)] text-[var(--upgrade-accent)] shadow-[inset_0_0_0_1px_var(--upgrade-accent-line)]">
+                    <CircleArrowUp className="h-4 w-4" strokeWidth={1.25} />
                   </span>
                   <span
-                    className="font-mono text-[10px] font-medium tracking-[0] text-white/45"
-                    style={onboardingMonoFont}
+                    className="rounded-[5px] bg-[var(--upgrade-accent-soft)] px-2 py-1 font-sans text-[11px] font-medium tracking-[0] text-[var(--upgrade-accent-text)] shadow-[inset_0_0_0_1px_var(--upgrade-accent-line)] backdrop-blur-xl"
                   >
-                    release
+                    {t('onboarding.upgrade.releaseTag')}
                   </span>
                 </div>
-                <h2 className="mt-4 text-[12px] font-medium tracking-[0] text-[#a8b3c2]">
+                <h2 className="mt-2.5 text-[12px] font-medium tracking-[0] text-[var(--upgrade-text-muted)]">
                   {t('onboarding.upgrade.latestVersion')}
                 </h2>
-                <p className="mt-1 truncate font-mono text-[20px] font-semibold tracking-[0] text-[#f4f4f5]">
+                <p className="mt-0.5 truncate font-sans text-[20px] font-semibold tracking-[-0.025em] text-[var(--upgrade-text-strong)]">
                   {latestDisplay}
                 </p>
               </article>
             </div>
 
-            <section className="mt-5 overflow-hidden rounded-[8px] border border-white/[0.09] bg-white/[0.035]">
-              <div className="flex items-center gap-2 border-b border-white/[0.08] px-4 py-3">
-                <FileText className="h-4 w-4 text-[#cfd5ff]" strokeWidth={1.6} />
-                <h2 className="text-[13px] font-semibold tracking-[0] text-[#f4f4f5]">
+            <section className="mt-5 overflow-hidden rounded-[12px] bg-[var(--upgrade-card)] shadow-[var(--upgrade-card-shadow)]">
+              <div className="flex items-center justify-between gap-3 px-5 py-3.5 shadow-[inset_0_-1px_0_var(--upgrade-line)]">
+                <div className="flex items-center gap-3">
+                  <span className="h-5 w-[2px] rounded-full bg-[#5E6AD2]" />
+                  <FileText className="h-4 w-4 text-[var(--upgrade-text-subtle)]" strokeWidth={1.25} />
+                  <h2 className="text-[16px] font-medium tracking-[-0.01em] text-[var(--upgrade-text)]">
                   {t('onboarding.upgrade.releaseNotes')}
-                </h2>
-              </div>
-              <pre className="max-h-[260px] overflow-y-auto whitespace-pre-wrap break-words px-4 py-3 font-sans text-[12px] leading-relaxed tracking-[0] text-[#a8b3c2]">
-                {releaseNotes || t('onboarding.upgrade.releaseNotesEmpty')}
-              </pre>
-            </section>
-          </main>
-
-          <aside className="flex min-h-0 flex-col border-t border-white/[0.08] bg-black/[0.08] p-5 lg:border-l lg:border-t-0">
-            <h2 className="font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-[#8A8F98]">
-              {t('onboarding.upgrade.stateTitle')}
-            </h2>
-            <div className="mt-3 divide-y divide-white/[0.08] rounded-[7px] border border-white/[0.09] bg-white/[0.035] text-[12px]">
-              {releaseMetaRows.map(({ key, label, value }) => (
-                <div key={key} className="grid gap-1 px-3 py-2.5">
-                  <span className="font-mono text-[10px] tracking-[0] text-[#6f6f76]">
-                    {label}
-                  </span>
-                  <span className="truncate font-mono text-[#d4d4d8]">
-                    {value}
-                  </span>
+                  </h2>
                 </div>
-              ))}
-              {versionUpdateInfo?.release_url && (
-                <div className="grid gap-1 px-3 py-2.5">
-                  <span className="font-mono text-[10px] tracking-[0] text-[#6f6f76]">
-                    release_url
-                  </span>
+                {versionUpdateInfo?.release_url && (
                   <a
                     href={versionUpdateInfo.release_url}
                     target="_blank"
                     rel="noreferrer"
-                    className="truncate font-mono text-[var(--primary-hover)] transition hover:text-[#f4f4f5]"
+                    className="inline-flex shrink-0 items-center gap-1 text-[12px] font-medium text-[var(--upgrade-accent)] transition hover:-translate-y-px hover:text-[var(--upgrade-accent-hover)] hover:underline"
                   >
-                    {t('onboarding.upgrade.releaseLink')}
+                    {t('onboarding.upgrade.viewFullChangelog')}
+                    <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.25} />
                   </a>
+                )}
+              </div>
+              <div className="max-h-[240px] overflow-y-auto break-words px-5 py-3.5 font-sans text-[13px] leading-[1.75] tracking-[0] text-[var(--upgrade-text-muted)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&_a]:text-[var(--upgrade-accent)] [&_a]:underline-offset-2 hover:[&_a]:underline [&_code]:rounded [&_code]:bg-[var(--upgrade-fill)] [&_code]:px-1 [&_h1]:mb-3 [&_h1]:font-semibold [&_h1]:text-[var(--upgrade-text-strong)] [&_h2]:mb-3 [&_h2]:font-semibold [&_h2]:text-[var(--upgrade-text-strong)] [&_h3]:mb-2 [&_h3]:font-medium [&_h3]:text-[var(--upgrade-text-strong)] [&_li]:pl-1 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:space-y-2 [&_ol]:pl-5 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-5 [&_ul]:marker:text-[var(--upgrade-text-faint)]">
+                <ReactMarkdown>
+                  {releaseNotes || t('onboarding.upgrade.releaseNotesEmpty')}
+                </ReactMarkdown>
+              </div>
+            </section>
+          </main>
+
+          <aside className="flex min-h-0 flex-col overflow-hidden bg-[var(--upgrade-sidebar)] px-5 py-6 shadow-[inset_0_1px_0_var(--upgrade-line)] backdrop-blur-xl lg:shadow-[inset_1px_0_0_var(--upgrade-line)]">
+            <h2 className="font-sans text-[14px] font-medium tracking-[-0.01em] text-[var(--upgrade-text)]">
+              {t('onboarding.upgrade.stateTitle')}
+            </h2>
+            <div className="mt-4 min-h-0 flex-1 divide-y divide-[var(--upgrade-line-soft)] overflow-y-auto rounded-[10px] bg-[var(--upgrade-fill-soft)] text-[12px] shadow-[inset_0_0_0_1px_var(--upgrade-line)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {updateView.rows.map(({ labelKey, valueKey, value }) => (
+                <div key={labelKey} className="grid min-h-9 grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] items-center gap-3 px-4 py-1.5">
+                  <span className="flex min-w-0 items-center gap-2 text-[var(--upgrade-text-subtle)]">
+                    {(() => {
+                      const DetailIcon = updateDetailIconByLabel[labelKey] ?? Info;
+                      return <DetailIcon className="h-3.5 w-3.5 shrink-0 text-[var(--upgrade-text-faint)]" strokeWidth={1.25} />;
+                    })()}
+                    <span className="truncate text-[11px] font-medium">{t(labelKey)}</span>
+                  </span>
+                  <span className="truncate text-right font-sans text-[11px] font-medium text-[var(--upgrade-text-strong)]">
+                    {valueKey ? t(valueKey) : value}
+                  </span>
                 </div>
+              ))}
+              {versionUpdateInfo?.release_url && (
+                <a
+                  href={versionUpdateInfo.release_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex min-h-9 items-center justify-between gap-3 px-4 py-1.5 text-[var(--upgrade-accent)] transition hover:bg-[var(--upgrade-fill-hover)] hover:text-[var(--upgrade-accent-hover)]"
+                >
+                  <span className="flex items-center gap-2 text-[11px] font-medium"><ExternalLink className="h-3.5 w-3.5" strokeWidth={1.25} />{t('onboarding.upgrade.releaseLink')}</span>
+                  <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.25} />
+                </a>
               )}
             </div>
-            {error && <p className="mt-3 text-[12px] text-red-300">{error}</p>}
-            <div className="mt-auto grid gap-2 pt-5">
+            {(error ?? updateView.error?.message) && <p className="mt-4 rounded-[8px] bg-[var(--upgrade-danger-bg)] px-3 py-2.5 text-[12px] leading-5 text-[var(--upgrade-danger-text)] shadow-[inset_0_0_0_1px_var(--upgrade-danger-line)]">{error ?? updateView.error?.message}</p>}
+            <div className="relative z-10 mt-auto grid shrink-0 gap-2 bg-[var(--upgrade-sidebar)] pt-5">
               <button
                 type="button"
-                onClick={() => void handleInstallUpdate()}
-                disabled={saving || !hasUpdate}
-                className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-2.5 rounded-[4px] border border-white bg-[linear-gradient(180deg,#FFFFFF_0%,#F2F2F2_100%)] px-5 py-2 text-[13px] font-semibold text-black shadow-[inset_0_1px_0_rgba(255,255,255,1),inset_0_-1px_0_rgba(0,0,0,0.10),0_1px_2px_rgba(0,0,0,0.28)] transition-[background-color,box-shadow,transform] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-[linear-gradient(180deg,#FFFFFF_0%,#EDEDED_100%)] active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={() => void (updateView.primaryAction.kind === 'check' ? handleCheckUpdate() : handleInstallUpdate())}
+                disabled={updateView.primaryAction.disabled || (!hasUpdate && updateView.primaryAction.kind !== 'check')}
+                className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2.5 rounded-[8px] border border-[#727ee0] bg-[#5E6AD2] px-5 py-2 text-[13px] font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_8px_20px_rgba(32,37,105,0.28)] transition-[background-color,box-shadow,transform] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-px hover:bg-[#6874d9] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.2),0_12px_24px_rgba(32,37,105,0.34)] active:translate-y-0 disabled:cursor-not-allowed disabled:border-[var(--upgrade-disabled-border)] disabled:bg-transparent disabled:text-[var(--upgrade-disabled-text)] disabled:shadow-none disabled:opacity-100"
               >
                 {saving && <LoaderCircle className="h-4 w-4 animate-spin" />}
                 {updateButtonLabel}
               </button>
+              {updateView.manualFallbackAvailable && (
+                <button
+                  type="button"
+                  onClick={() => void handleOpenManualFallback()}
+                  disabled={saving}
+                  className="inline-flex min-h-10 cursor-pointer items-center justify-center rounded-[8px] border border-[var(--upgrade-line)] bg-transparent px-4 py-2 text-[12px] font-medium text-[var(--upgrade-text-muted)] transition hover:-translate-y-px hover:border-[var(--upgrade-text-faint)] hover:bg-[var(--upgrade-fill-hover)] hover:text-[var(--upgrade-text)] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {t('onboarding.upgrade.openManualFallback')}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={onClose}
-                className="inline-flex min-h-9 cursor-pointer items-center justify-center rounded-[4px] border border-white/[0.09] bg-white/[0.035] px-4 py-2 text-[12px] font-medium text-[#a8b3c2] transition hover:border-white/[0.14] hover:bg-white/[0.055] hover:text-[#f4f4f5]"
+                className="inline-flex min-h-10 cursor-pointer items-center justify-center rounded-[8px] border border-transparent px-4 py-2 text-[12px] font-medium text-[var(--upgrade-text-muted)] transition hover:-translate-y-px hover:bg-[var(--upgrade-fill-hover)] hover:text-[var(--upgrade-text)]"
               >
                 {t('onboarding.upgrade.later')}
               </button>
@@ -2493,10 +2659,13 @@ export function OnboardingGuide({
   if (mode === 'upgrade') {
     return (
       <div
-        className="fixed inset-0 z-[90] flex items-center justify-center overflow-y-auto bg-black/45 p-3 text-[var(--ink)] backdrop-blur-[2px] sm:p-6"
+        className={cn(
+          'fixed inset-0 z-[90] flex items-center justify-center overflow-y-auto p-2 text-[var(--ink)] backdrop-blur-[2px] [scrollbar-width:none] sm:p-3 [&::-webkit-scrollbar]:hidden',
+          theme === 'light' ? 'bg-slate-950/20' : 'bg-black/45',
+        )}
         style={onboardingRootStyle}
       >
-        <div className="w-full max-w-5xl" style={onboardingInvertedContentStyle}>
+        <div className="w-full max-w-[1080px]" style={upgradeThemeStyle}>
           {renderUpgradeGuide()}
         </div>
       </div>

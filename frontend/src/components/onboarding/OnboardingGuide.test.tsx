@@ -23,6 +23,8 @@ console.log('OnboardingGuide wiring');
 
 const guideSource = read('./OnboardingGuide.tsx');
 const appSource = read('../../App.tsx');
+const updateHookSource = read('../../hooks/useVersionUpdate.ts');
+const updatePresentationSource = read('../../lib/updatePresentation.ts');
 const settingsSource = read('../SettingsWorkspace.tsx');
 
 const requiredLocaleKeys = [
@@ -449,9 +451,8 @@ check(
   guideSource.includes("import { sanitizeProjectName }") &&
     guideSource.includes("sanitizeProjectName('MyProject')") &&
     guideSource.includes('const name = sanitizeProjectName(projectName)') &&
-    guideSource.includes('setProjectName(event.target.value)') &&
-    guideSource.includes('onBlur={() => setProjectName((current) => sanitizeProjectName(current))}') &&
-    !guideSource.includes('setProjectName(sanitizeProjectName(event.target.value))'),
+    guideSource.includes('setProjectName(sanitizeProjectName(event.target.value))') &&
+    !guideSource.includes('onBlur={() => setProjectName((current) => sanitizeProjectName(current))}'),
   guideSource,
 );
 
@@ -481,14 +482,15 @@ check(
 );
 
 check(
-  'App loads onboarding state and polls latest release version on an interval',
+  'App delegates hourly release checks and transient reminders to the update hook',
   appSource.includes('onboardingApi.getState()') &&
-    appSource.includes('versionApi.check()') &&
-    appSource.includes('versionUpdateCheckIntervalMs') &&
-    appSource.includes('setVersionUpdateToast(info)') &&
+    appSource.includes('useVersionUpdate({') &&
+    updateHookSource.includes('versionUpdateCheckIntervalMs = 60 * 60 * 1000') &&
+    updateHookSource.includes('versionUpdateSnoozeMs = 6 * 60 * 60 * 1000') &&
+    updateHookSource.includes('snoozedUntil') &&
     appSource.includes('currentUpgradeVersion') &&
     appSource.includes('<OnboardingGuide'),
-  appSource,
+  { appSource, updateHookSource },
 );
 
 check(
@@ -514,36 +516,80 @@ check(
   'SettingsWorkspace provides reset and replay actions through onboarding API',
   settingsSource.includes('onboardingApi.reset()') &&
     settingsSource.includes('onboardingApi.resetUpgradeRead()') &&
+    settingsSource.includes('<CircleArrowUp className=') &&
     settingsSource.includes('ONBOARDING_GUIDE_RESET_EVENT') &&
     settingsSource.includes('ONBOARDING_UPGRADE_REPLAY_EVENT'),
   settingsSource,
 );
 
 check(
-  'upgrade guide checks versions and installs updates through version API',
-  appSource.includes('versionApi.check()') &&
-    appSource.includes('versionUpdateCheckIntervalMs') &&
-    appSource.includes('versionUpdateToast') &&
-    appSource.includes('openVersionUpdatePage') &&
-    appSource.includes('versionApi.updateNpx()') &&
-    appSource.includes('versionApi.restart()') &&
+  'upgrade guide delegates platform actions through the update adapter',
+  appSource.includes('versionUpdate.openUpdatePage') &&
+    appSource.includes('versionUpdate.executeUpdate') &&
+    appSource.includes('versionUpdate.openManualFallback') &&
+    updateHookSource.includes("case 'npx_staged_restart':") &&
+    updateHookSource.includes("case 'tauri_updater':") &&
+    updateHookSource.includes("case 'manual_download':") &&
+    guideSource.includes('manualFallbackAvailable') &&
+    guideSource.includes('versionUpdateCheckStatus') &&
+    guideSource.includes('getUpdatePageViewModel') &&
+    guideSource.includes('onCheckUpdate') &&
+    updatePresentationSource.includes('signatureVerification') &&
     guideSource.includes('onInstallUpdate()') &&
-    guideSource.includes('onboarding.upgrade.updateNow'),
-  { appSource, guideSource },
+    updatePresentationSource.includes('onboarding.upgrade.updateNow'),
+  { appSource, guideSource, updateHookSource, updatePresentationSource },
 );
 
 check(
   'upgrade guide uses a floating onboarding-style window',
   guideSource.includes('bg-black/45') &&
     guideSource.includes('backdrop-blur-[2px]') &&
-    guideSource.includes('max-h-[min(720px,calc(100vh-48px))]') &&
-    guideSource.includes('border border-white/[0.12] bg-[var(--onboarding-card)]') &&
-    guideSource.includes('pointer-events-none absolute inset-0 bg-[var(--onboarding-stage)]') &&
-    guideSource.includes('opacity-[0.032] mix-blend-screen') &&
-    guideSource.includes('bg-[linear-gradient(180deg,#FFFFFF_0%,#F2F2F2_100%)]') &&
+    guideSource.includes('h-[min(720px,calc(100vh-32px))]') &&
+    guideSource.includes('max-w-[1080px]') &&
+    guideSource.includes('lg:overflow-hidden') &&
+    guideSource.includes('max-h-[240px]') &&
+    guideSource.includes('mt-auto grid shrink-0') &&
+    guideSource.includes('bg-[var(--upgrade-shell)]') &&
+    guideSource.includes('shadow-[var(--upgrade-shell-shadow)]') &&
+    guideSource.includes('pointer-events-none absolute inset-0 bg-[var(--upgrade-shell)]') &&
+    guideSource.includes('opacity-[0.025] mix-blend-soft-light') &&
+    guideSource.includes('bg-[#5E6AD2]') &&
     guideSource.includes('onboarding.upgrade.releaseNotes') &&
-    guideSource.includes('style={onboardingInvertedContentStyle}') &&
+    guideSource.includes('style={upgradeThemeStyle}') &&
     guideSource.includes('onboarding.upgrade.later'),
+  guideSource,
+);
+
+check(
+  'upgrade guide uses a compact and layered Linear-style information hierarchy',
+  guideSource.includes('lg:grid-cols-[minmax(0,1fr)_328px]') &&
+    guideSource.includes('rounded-[12px] bg-[var(--upgrade-card)]') &&
+    guideSource.includes('font-sans text-[20px] font-semibold') &&
+    guideSource.includes('text-[var(--upgrade-text-muted)] sm:text-[15px]') &&
+    guideSource.includes('min-h-9 grid-cols-') &&
+    guideSource.includes('bg-[var(--upgrade-warning-bg)]') &&
+    guideSource.includes('backdrop-blur-xl') &&
+    guideSource.includes('strokeWidth={1.25}') &&
+    guideSource.includes('<CircleArrowUp className="h-4 w-4"') &&
+    guideSource.includes('<ReactMarkdown>') &&
+    guideSource.includes('[&_ul]:space-y-2') &&
+    guideSource.includes('onboarding.upgrade.viewFullChangelog') &&
+    guideSource.includes('updateDetailIconByLabel') &&
+    guideSource.includes('onboarding.upgrade.updateUnsupported'),
+  guideSource,
+);
+
+check(
+  'upgrade guide derives a light palette from the dark layout without filter inversion',
+  guideSource.includes('const upgradeDarkThemeVars = {') &&
+    guideSource.includes('const upgradeLightThemeVars = {') &&
+    guideSource.includes("theme === 'light' ? upgradeLightThemeVars : upgradeDarkThemeVars") &&
+    guideSource.includes("theme === 'light' ? 'bg-slate-950/20' : 'bg-black/45'") &&
+    guideSource.includes('style={upgradeThemeStyle}') &&
+    guideSource.includes('px-4 py-3 shadow-[var(--upgrade-card-shadow)]') &&
+    guideSource.includes('mt-2.5 text-[12px]') &&
+    guideSource.includes('[scrollbar-width:none]') &&
+    guideSource.includes('[&::-webkit-scrollbar]:hidden'),
   guideSource,
 );
 
