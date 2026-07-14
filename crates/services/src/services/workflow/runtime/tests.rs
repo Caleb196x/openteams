@@ -3,7 +3,6 @@ mod tests {
     use std::{path::Path, process::Command};
 
     use chrono::Utc;
-    use command_group::AsyncCommandGroup;
     use db::models::{
         chat_agent::ChatAgent,
         chat_session::{ChatSession, ChatSessionStatus, ChatSessionWorktreeMode},
