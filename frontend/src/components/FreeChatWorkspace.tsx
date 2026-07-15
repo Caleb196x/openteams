@@ -3036,11 +3036,6 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
                         ? "bg-[var(--primary)] text-white hover:opacity-95 cursor-pointer hover:scale-105"
                         : "bg-[var(--surface-3)] text-[var(--ink-tertiary)] cursor-not-allowed"
                     }`}
-                    title={
-                      isUploadingAttachments
-                        ? t("attachment.uploading")
-                        : undefined
-                    }
                   >
                     <ArrowUp className="h-3.5 w-3.5" />
                   </button>
@@ -3154,6 +3149,7 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
                   }
                   className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[var(--hairline)] bg-[var(--surface-1)] text-[var(--ink-subtle)] transition hover:border-[var(--hairline-strong)] hover:bg-[var(--surface-3)] hover:text-[var(--ink)]"
                   title={t("inviteMember")}
+                  data-tooltip-nowrap
                   aria-label={t("inviteMember")}
                 >
                   <Plus className="h-3.5 w-3.5" />

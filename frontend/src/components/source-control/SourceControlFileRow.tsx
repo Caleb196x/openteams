@@ -439,13 +439,14 @@ export const SourceControlFileRow: React.FC<SourceControlFileRowProps> = ({
           ? "border-[color-mix(in_srgb,var(--primary)_45%,var(--hairline))]"
           : "border-transparent"
       }`}
-      title={fullPath}
     >
       <div className="flex min-w-0 flex-1 items-center">
         <button
           type="button"
           onClick={() => onOpenDiff(file, area)}
           title={fullPath}
+          data-tooltip-break-all
+          data-tooltip-hover-only
           className="flex min-w-0 flex-1 items-center gap-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)]"
           aria-label={translateSourceControl(
             t,
@@ -457,7 +458,6 @@ export const SourceControlFileRow: React.FC<SourceControlFileRowProps> = ({
           <SourceControlFileTypeIcon path={file.path} />
           <span
             className="min-w-0 flex-1 truncate font-mono text-[12px] text-[var(--ink-muted)]"
-            title={fullPath}
           >
             {file.path}
           </span>

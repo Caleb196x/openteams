@@ -171,6 +171,7 @@ export function TeamAddMemberButton({
         )}
         aria-label={t("teamPage.sidebar.addMember")}
         title={t("teamPage.sidebar.addMember")}
+        data-tooltip-nowrap
       >
         <UserPlus
           aria-hidden="true"

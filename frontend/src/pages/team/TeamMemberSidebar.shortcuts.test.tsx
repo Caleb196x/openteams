@@ -8,4 +8,5 @@ assert.ok(source.includes('setShowAddMenu(true)'));
 assert.ok(source.includes('searchInputRef.current?.focus()'));
 assert.ok(source.includes("searchInputRef.current?.scrollIntoView({ block: 'nearest'"));
 assert.ok(source.includes('ref={searchInputRef}'));
+assert.ok(source.includes('title={t("teamPage.sidebar.addMember")}\n        data-tooltip-nowrap'));
 console.log('TeamMemberSidebar shortcut focus: PASS');

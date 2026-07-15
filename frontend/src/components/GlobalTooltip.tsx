@@ -25,6 +25,8 @@ type TooltipPosition = {
   above: boolean;
 };
 
+const TOOLTIP_HOVER_DELAY_MS = 1_200;
+
 function titleAnchor(target: EventTarget | null): HTMLElement | null {
   if (!(target instanceof Element)) return null;
   const anchor = target.closest('[title]');
@@ -36,10 +38,15 @@ export function GlobalTooltip() {
   const tooltipId = useId();
   const tooltipRef = useRef<HTMLDivElement>(null);
   const storedTitleRef = useRef<StoredTitle | null>(null);
+  const hoverTimeoutRef = useRef<number | null>(null);
   const [active, setActive] = useState<ActiveTooltip | null>(null);
   const [position, setPosition] = useState<TooltipPosition | null>(null);
 
   const closeTooltip = useCallback(() => {
+    if (hoverTimeoutRef.current !== null) {
+      window.clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
     const stored = storedTitleRef.current;
     if (stored) {
       if (!stored.anchor.hasAttribute('title')) {
@@ -57,8 +64,18 @@ export function GlobalTooltip() {
   }, []);
 
   const openTooltip = useCallback(
-    (anchor: HTMLElement) => {
-      if (storedTitleRef.current?.anchor === anchor) return;
+    (anchor: HTMLElement, delayMs = 0) => {
+      const current = storedTitleRef.current;
+      if (current?.anchor === anchor) {
+        if (delayMs === 0) {
+          if (hoverTimeoutRef.current !== null) {
+            window.clearTimeout(hoverTimeoutRef.current);
+            hoverTimeoutRef.current = null;
+          }
+          setActive({ anchor, text: current.text });
+        }
+        return;
+      }
       closeTooltip();
 
       const originalTitle = anchor.getAttribute('title')?.trim();
@@ -87,8 +104,18 @@ export function GlobalTooltip() {
       anchor.removeAttribute('title');
       anchor.setAttribute('aria-describedby', tooltipDescription);
       storedTitleRef.current = { anchor, text, describedBy, originalTitle };
-      setActive({ anchor, text });
       setPosition(null);
+
+      if (delayMs > 0) {
+        hoverTimeoutRef.current = window.setTimeout(() => {
+          hoverTimeoutRef.current = null;
+          if (storedTitleRef.current?.anchor === anchor) {
+            setActive({ anchor, text });
+          }
+        }, delayMs);
+      } else {
+        setActive({ anchor, text });
+      }
     },
     [closeTooltip, presentationFor, tooltipId],
   );
@@ -100,7 +127,7 @@ export function GlobalTooltip() {
         return;
       }
       const anchor = titleAnchor(event.target);
-      if (anchor) openTooltip(anchor);
+      if (anchor) openTooltip(anchor, TOOLTIP_HOVER_DELAY_MS);
     };
     const handlePointerOut = (event: PointerEvent) => {
       const current = storedTitleRef.current?.anchor;
@@ -111,11 +138,27 @@ export function GlobalTooltip() {
       ) {
         return;
       }
-      if (current.contains(document.activeElement)) return;
+      if (
+        current.contains(document.activeElement) &&
+        !current.hasAttribute('data-tooltip-hover-only')
+      ) {
+        return;
+      }
       closeTooltip();
     };
     const handleFocusIn = (event: FocusEvent) => {
+      const current = storedTitleRef.current?.anchor;
+      if (
+        current &&
+        event.target instanceof Node &&
+        current.contains(event.target)
+      ) {
+        if (current.hasAttribute('data-tooltip-hover-only')) return;
+        openTooltip(current);
+        return;
+      }
       const anchor = titleAnchor(event.target);
+      if (anchor?.hasAttribute('data-tooltip-hover-only')) return;
       if (anchor) openTooltip(anchor);
     };
     const handleFocusOut = (event: FocusEvent) => {
@@ -175,7 +218,13 @@ export function GlobalTooltip() {
       ref={tooltipRef}
       id={tooltipId}
       role="tooltip"
-      className="app-tooltip fixed z-[10000] max-w-[min(320px,calc(100vw-16px))] px-2.5 py-1.5"
+      className={`app-tooltip fixed z-[10000] max-w-[min(320px,calc(100vw-16px))] px-2.5 py-1.5 ${
+        active.anchor.hasAttribute('data-tooltip-nowrap')
+          ? 'whitespace-nowrap'
+          : active.anchor.hasAttribute('data-tooltip-break-all')
+            ? 'break-all whitespace-normal'
+            : ''
+      }`}
       style={{
         left: position?.left ?? 0,
         top: position?.top ?? 0,

@@ -32,6 +32,7 @@ const hoverWarningIndex = source.indexOf(
   "<FileWarningIndicator file={file} t={t} />",
   actionOverlayIndex,
 );
+const fullPathTitleCount = source.match(/title=\{fullPath\}/g)?.length ?? 0;
 
 check(
   "renders the file warning in both the idle metadata and hover action areas",
@@ -47,10 +48,12 @@ check(
 );
 
 check(
-  "resolves file-row hover title to the workspace absolute path",
+  "uses one complete absolute-path tooltip source for the file path",
   source.includes("resolveLocalPathToAbsolutePath(file.path, viewModel.workspacePath)") &&
-    source.includes("title={fullPath}"),
-  source,
+    fullPathTitleCount === 1 &&
+    source.includes("data-tooltip-break-all") &&
+    source.includes("data-tooltip-hover-only"),
+  { fullPathTitleCount, source },
 );
 
 check(

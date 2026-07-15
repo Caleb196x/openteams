@@ -6,7 +6,7 @@ import { GlobalTooltip } from './GlobalTooltip';
 import { ShortcutProvider } from '@/shortcuts/ShortcutProvider';
 
 const dom = new JSDOM(
-  '<!doctype html><html><body><div id="root"></div><button data-command-id="search.open" title="Search">S</button></body></html>',
+  '<!doctype html><html><body><div id="root"></div><button data-command-id="search.open" data-tooltip-nowrap title="Search">S</button><button data-tooltip-break-all data-tooltip-hover-only title="/workspace/a-very-long-file-path.ts">F</button></body></html>',
   { url: 'http://localhost' },
 );
 Object.assign(globalThis, {
@@ -49,14 +49,29 @@ await act(async () =>
 );
 
 const trigger = document.querySelector('button')!;
+const originalSetTimeout = window.setTimeout;
+let scheduledHandler: TimerHandler | undefined;
+let scheduledDelay: number | undefined;
+window.setTimeout = ((handler: TimerHandler, timeout?: number) => {
+  scheduledHandler = handler;
+  scheduledDelay = timeout;
+  return 1;
+}) as typeof window.setTimeout;
 await act(async () => {
   trigger.dispatchEvent(new window.MouseEvent('pointerover', { bubbles: true }));
 });
 
-const tooltip = document.querySelector<HTMLElement>('[role="tooltip"]');
 assert.equal(trigger.hasAttribute('title'), false);
+assert.equal(document.querySelector('[role="tooltip"]'), null);
+assert.equal(scheduledDelay, 1_200);
+await act(async () => {
+  if (typeof scheduledHandler === 'function') scheduledHandler();
+});
+
+const tooltip = document.querySelector<HTMLElement>('[role="tooltip"]');
 assert.equal(tooltip?.textContent, 'Search (Shortcut: ⌘K)');
 assert.ok(tooltip?.classList.contains('app-tooltip'));
+assert.ok(tooltip?.classList.contains('whitespace-nowrap'));
 assert.ok(trigger.getAttribute('aria-describedby')?.includes(tooltip?.id ?? ''));
 
 await act(async () => {
@@ -69,6 +84,31 @@ await act(async () => {
 });
 assert.equal(trigger.getAttribute('title'), 'Search');
 assert.equal(document.querySelector('[role="tooltip"]'), null);
+
+const filePathTrigger = document.querySelectorAll('button')[1];
+await act(async () => {
+  filePathTrigger.dispatchEvent(
+    new window.FocusEvent('focusin', { bubbles: true }),
+  );
+});
+assert.equal(document.querySelector('[role="tooltip"]'), null);
+await act(async () => {
+  filePathTrigger.dispatchEvent(
+    new window.MouseEvent('pointerover', { bubbles: true }),
+  );
+});
+await act(async () => {
+  if (typeof scheduledHandler === 'function') scheduledHandler();
+});
+window.setTimeout = originalSetTimeout;
+
+const filePathTooltip = document.querySelector<HTMLElement>('[role="tooltip"]');
+assert.equal(
+  filePathTooltip?.textContent,
+  '/workspace/a-very-long-file-path.ts',
+);
+assert.ok(filePathTooltip?.classList.contains('break-all'));
+assert.ok(filePathTooltip?.classList.contains('whitespace-normal'));
 
 await act(async () => root.unmount());
 console.log('Global tooltip: PASS');

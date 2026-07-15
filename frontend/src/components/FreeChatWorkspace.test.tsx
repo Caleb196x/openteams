@@ -74,6 +74,15 @@ const memberInviteIndex = source.indexOf(
   'title={t("inviteMember")}',
   memberRailIndex,
 );
+const memberInviteSource =
+  memberInviteIndex >= 0
+    ? source.slice(memberInviteIndex, memberInviteIndex + 160)
+    : "";
+const sendActionIndex = source.indexOf("{/* Send action on the right */}");
+const sendActionSource =
+  sendActionIndex >= 0
+    ? source.slice(sendActionIndex, sendActionIndex + 700)
+    : "";
 
 check(
   "uses a wider related-files default width",
@@ -188,6 +197,7 @@ check(
     source.includes("ChevronsRight") &&
     source.includes("requestTeamMemberInviteNavigation({") &&
     source.includes("projectId: selectedProjectId ?? undefined") &&
+    memberInviteSource.includes("data-tooltip-nowrap") &&
     !memberRailSource.includes('"..."') &&
     source.includes("selectedSidebarMemberId") &&
     source.includes("const selectedSidebarMember =") &&
@@ -447,6 +457,12 @@ check(
     source.includes("resizeChatTextarea(event.target)") &&
     source.includes("maxHeight: CHAT_INPUT_MAX_HEIGHT"),
   source,
+);
+check(
+  "composer send action does not show tooltip information",
+  sendActionSource.includes("onClick={() => void handleSend()}") &&
+    !sendActionSource.includes("title="),
+  sendActionSource,
 );
 check(
   "composer mention picker opens on @ and captures keyboard selection",

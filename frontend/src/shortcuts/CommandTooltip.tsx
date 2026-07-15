@@ -2,7 +2,10 @@ import React, {
   Children,
   cloneElement,
   type ReactElement,
+  useCallback,
+  useEffect,
   useId,
+  useRef,
   useState,
 } from 'react';
 import { useCommandPresentation } from './ShortcutProvider';
@@ -12,9 +15,12 @@ type Props = {
   children: ReactElement<Record<string, unknown>>;
 };
 
+const TOOLTIP_HOVER_DELAY_MS = 1_200;
+
 export function CommandTooltip({ commandId, children }: Props) {
   const presentation = useCommandPresentation(commandId);
   const [open, setOpen] = useState(false);
+  const hoverTimeoutRef = useRef<number | null>(null);
   const tooltipId = useId();
   const child = Children.only(children) as ReactElement<Record<string, unknown>>;
   const existingDescribedBy =
@@ -27,6 +33,39 @@ export function CommandTooltip({ commandId, children }: Props) {
     'aria-describedby': describedBy,
     'aria-keyshortcuts': presentation.ariaKeyShortcuts || undefined,
   };
+
+  const clearHoverTimeout = useCallback(() => {
+    if (hoverTimeoutRef.current !== null) {
+      window.clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => clearHoverTimeout, [clearHoverTimeout]);
+
+  const handlePointerEnter = () => {
+    clearHoverTimeout();
+    hoverTimeoutRef.current = window.setTimeout(() => {
+      hoverTimeoutRef.current = null;
+      setOpen(true);
+    }, TOOLTIP_HOVER_DELAY_MS);
+  };
+
+  const handlePointerLeave = () => {
+    clearHoverTimeout();
+    setOpen(false);
+  };
+
+  const handleFocus = () => {
+    clearHoverTimeout();
+    setOpen(true);
+  };
+
+  const handleBlur = () => {
+    clearHoverTimeout();
+    setOpen(false);
+  };
+
   return (
     <span
       className="relative inline-flex"
@@ -37,10 +76,10 @@ export function CommandTooltip({ commandId, children }: Props) {
       aria-keyshortcuts={
         disabledButton ? presentation.ariaKeyShortcuts || undefined : undefined
       }
-      onPointerEnter={() => setOpen(true)}
-      onPointerLeave={() => setOpen(false)}
-      onFocusCapture={() => setOpen(true)}
-      onBlurCapture={() => setOpen(false)}
+      onPointerEnter={handlePointerEnter}
+      onPointerLeave={handlePointerLeave}
+      onFocusCapture={handleFocus}
+      onBlurCapture={handleBlur}
     >
       {cloneElement(child, disabledButton ? {} : triggerProps)}
       {open && (
