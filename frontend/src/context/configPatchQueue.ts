@@ -28,6 +28,8 @@ export function createConfigPatchQueue<T extends object>(
     pending = pending.filter((entry) => entry.id !== id);
   };
 
+  publishVisible();
+
   return {
     enqueue(patch: Partial<T>, options: ConfigPatchOptions = {}): Promise<T> {
       const entry: PendingPatch<T> = {

@@ -35,6 +35,8 @@ const queue = createConfigPatchQueue<FixtureConfig>(
   },
   (visible) => published.push(visible),
 );
+assert.equal(published.length, 1, 'initial config is published immediately');
+assert.equal(published[0].theme, 'LIGHT');
 
 const shortcutSave = queue.enqueue(
   { keyboard_shortcuts: customShortcuts },
@@ -42,7 +44,7 @@ const shortcutSave = queue.enqueue(
 );
 await Promise.resolve();
 assert.equal(requests.length, 1);
-assert.equal(published.length, 0, 'unacknowledged shortcuts stay hidden');
+assert.equal(published.length, 1, 'unacknowledged shortcuts stay hidden');
 
 const themeSave = queue.enqueue({ theme: 'DARK' }, { optimistic: true });
 assert.equal(published.at(-1)?.theme, 'DARK');
