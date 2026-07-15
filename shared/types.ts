@@ -176,11 +176,13 @@ export type GitHubDeviceFlowPollResponse = { status: GitHubDeviceFlowPollStatus,
 
 export type GitHubDeviceFlowPollStatus = "pending" | "slow_down" | "authorized" | "denied" | "expired" | "error";
 
-export type GitHubOAuthStartResponse = { flow_id: string, authorization_url: string, expires_at: Date, };
+export type GitHubOAuthStartResponse = { flow_id: string, authorization_url: string, expires_at: Date, poll_after_ms: number, };
 
-export type GitHubOAuthStatusResponse = { status: GitHubOAuthFlowStatus, account: GitHubAccount | null, error: string | null, };
+export type GitHubOAuthStatusResponse = { status: GitHubOAuthFlowStatus, account: GitHubAccount | null, error: string | null, retry_after_ms: number | null, fallback_to_device: boolean, };
 
 export type GitHubOAuthFlowStatus = "pending" | "authorized" | "denied" | "expired" | "error";
+
+export type GitHubOAuthCancelRequest = { flow_id: string, };
 
 export type GitHubApiErrorData = { code: string, message: string, retry_after: Date | null, last_synced_at: Date | null, stale: boolean, };
 

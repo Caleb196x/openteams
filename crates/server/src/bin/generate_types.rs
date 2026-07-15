@@ -100,6 +100,7 @@ fn generate_types_content() -> String {
         services::services::github::auth::GitHubOAuthStartResponse::decl(),
         services::services::github::auth::GitHubOAuthStatusResponse::decl(),
         services::services::github::auth::GitHubOAuthFlowStatus::decl(),
+        server::routes::github::GitHubOAuthCancelRequest::decl(),
         services::services::github::rest_client::GitHubApiErrorData::decl(),
         services::services::github::rest_client::GitHubIssueSummary::decl(),
         services::services::github::rest_client::GitHubIssueDetail::decl(),

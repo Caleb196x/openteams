@@ -69,6 +69,7 @@ import type {
   GitHubDeviceFlowStartResponse,
   GitHubIssueSummary,
   GitHubOAuthStartResponse,
+  GitHubOAuthStatusResponse,
   GitHubRepositorySummary,
   IssueIntegrationProvider,
   ProjectIssueIntegrationsResponse,
@@ -748,6 +749,7 @@ export function IssuePage() {
   const [authFlow, setAuthFlow] =
     useState<GitHubDeviceFlowStartResponse | null>(null);
   const [authStatus, setAuthStatus] = useState<string | null>(null);
+  const oauthFallbackStartedRef = useRef(false);
   const workItemsRequestIdRef = useRef(0);
   const selectedProjectName = useMemo(
     () =>
@@ -948,6 +950,41 @@ export function IssuePage() {
     setInteractionMessage(message);
   }, []);
 
+  const startOAuthDeviceFallback = useCallback(
+    async (reason: string, flowId?: string) => {
+      if (oauthFallbackStartedRef.current) return;
+      oauthFallbackStartedRef.current = true;
+      setOauthFlow(null);
+      if (flowId) {
+        await githubAuthApi.cancelOAuthFlow(flowId).catch(() => undefined);
+      }
+      setIntegrationError(
+        tr(
+          'issue.linkDialog.error.oauthFallback',
+          '{reason}. Starting device authorization fallback.',
+          { reason },
+        ),
+      );
+      try {
+        await startDeviceAuthorization(
+          tr(
+            'issue.linkDialog.notice.deviceFallbackStarted',
+            'GitHub device authorization fallback started',
+          ),
+        );
+      } catch (fallbackError) {
+        setIntegrationError(
+          tr(
+            'issue.linkDialog.error.deviceFallbackFailed',
+            '{reason}. Device fallback failed: {error}',
+            { reason, error: errorMessage(fallbackError) },
+          ),
+        );
+      }
+    },
+    [startDeviceAuthorization, tr],
+  );
+
   useEffect(() => {
     void loadIssueIntegrations();
   }, [loadIssueIntegrations]);
@@ -984,6 +1021,13 @@ export function IssuePage() {
   useEffect(() => {
     if (!oauthFlow) return;
     let cancelled = false;
+    let timer: number | undefined;
+    const schedule = (delayMs: number) => {
+      timer = window.setTimeout(
+        () => void poll(),
+        githubOAuthPollDelay(delayMs),
+      );
+    };
     const poll = async () => {
       try {
         const result = await githubAuthApi.getOAuthStatus(oauthFlow.flow_id);
@@ -1010,28 +1054,12 @@ export function IssuePage() {
               'issue.linkDialog.error.oauthFailed',
               'GitHub OAuth authorization failed',
             );
-          setOauthFlow(null);
-          setIntegrationError(
-            tr(
-              'issue.linkDialog.error.oauthFallback',
-              '{reason}. Starting device authorization fallback.',
-              { reason },
-            ),
-          );
-          try {
-            await startDeviceAuthorization(
-              tr(
-                'issue.linkDialog.notice.deviceFallbackStarted',
-                'GitHub device authorization fallback started',
-              ),
-            );
-          } catch (fallbackError) {
+          if (shouldAutoFallbackToDevice(result)) {
+            await startOAuthDeviceFallback(reason, oauthFlow.flow_id);
+          } else {
+            setOauthFlow(null);
             setIntegrationError(
-              tr(
-                'issue.linkDialog.error.deviceFallbackFailed',
-                '{reason}. Device fallback failed: {error}',
-                { reason, error: errorMessage(fallbackError) },
-              ),
+              reason,
             );
           }
           return;
@@ -1045,43 +1073,24 @@ export function IssuePage() {
               { status: result.status },
             ),
           );
+          return;
         }
+        schedule(result.retry_after_ms ?? oauthFlow.poll_after_ms);
       } catch (error) {
         if (!cancelled) {
-          setOauthFlow(null);
-          setIntegrationError(
-            tr(
-              'issue.linkDialog.error.oauthFallback',
-              '{reason}. Starting device authorization fallback.',
-              { reason: errorMessage(error) },
-            ),
+          await startOAuthDeviceFallback(
+            errorMessage(error),
+            oauthFlow.flow_id,
           );
-          try {
-            await startDeviceAuthorization(
-              tr(
-                'issue.linkDialog.notice.deviceFallbackStarted',
-                'GitHub device authorization fallback started',
-              ),
-            );
-          } catch (fallbackError) {
-            setIntegrationError(
-              tr(
-                'issue.linkDialog.error.deviceFallbackOnlyFailed',
-                'Device fallback failed: {error}',
-                { error: errorMessage(fallbackError) },
-              ),
-            );
-          }
         }
       }
     };
-    void poll();
-    const timer = window.setInterval(() => void poll(), 1500);
+    schedule(oauthFlow.poll_after_ms);
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [loadIssueIntegrations, oauthFlow, startDeviceAuthorization, tr]);
+  }, [loadIssueIntegrations, oauthFlow, startOAuthDeviceFallback, tr]);
 
   useEffect(() => {
     if (!authFlow) return;
@@ -1466,43 +1475,25 @@ export function IssuePage() {
 
   const startGitHubOAuthAuthorization = useCallback(
     async (message: string, authWindow?: Window | null) => {
+      oauthFallbackStartedRef.current = false;
       setOauthFlow(null);
       setAuthFlow(null);
       try {
         const flow = await githubAuthApi.startOAuthFlow();
+        if (!openGitHubOAuthFlow(flow, authWindow)) {
+          authWindow?.close();
+          await startOAuthDeviceFallback('GitHub authorization popup was blocked', flow.flow_id);
+          return;
+        }
         setOauthFlow(flow);
         setAuthStatus('pending');
-        openGitHubOAuthFlow(flow, authWindow);
         setInteractionMessage(message);
       } catch (error) {
         authWindow?.close();
-        const reason = errorMessage(error);
-        setIntegrationError(
-          tr(
-            'issue.linkDialog.error.oauthFallback',
-            '{reason}. Starting device authorization fallback.',
-            { reason },
-          ),
-        );
-        try {
-          await startDeviceAuthorization(
-            tr(
-              'issue.linkDialog.notice.deviceFallbackStarted',
-              'GitHub device authorization fallback started',
-            ),
-          );
-        } catch (fallbackError) {
-          setIntegrationError(
-            tr(
-              'issue.linkDialog.error.deviceFallbackFailed',
-              '{reason}. Device fallback failed: {error}',
-              { reason, error: errorMessage(fallbackError) },
-            ),
-          );
-        }
+        await startOAuthDeviceFallback(errorMessage(error));
       }
     },
-    [startDeviceAuthorization, tr],
+    [startOAuthDeviceFallback],
   );
 
   const handleAuthorizeGitHub = async () => {
@@ -2778,14 +2769,27 @@ function openBlankAuthWindow(): Window | null {
 function openGitHubOAuthFlow(
   flow: GitHubOAuthStartResponse,
   authWindow?: Window | null,
-) {
-  if (typeof window === 'undefined') return;
+): boolean {
+  if (typeof window === 'undefined') return false;
   if (authWindow && !authWindow.closed) {
     authWindow.opener = null;
     authWindow.location.href = flow.authorization_url;
-    return;
+    return true;
   }
-  window.open(flow.authorization_url, '_blank', 'noopener,noreferrer');
+  return Boolean(
+    window.open(flow.authorization_url, '_blank', 'noopener,noreferrer'),
+  );
+}
+
+export function githubOAuthPollDelay(value: number | null | undefined): number {
+  const delay = Number.isFinite(value) ? Number(value) : 2_000;
+  return Math.min(15_000, Math.max(1_000, delay));
+}
+
+export function shouldAutoFallbackToDevice(
+  result: GitHubOAuthStatusResponse,
+): boolean {
+  return result.status === 'error' && result.fallback_to_device;
 }
 
 function formatSimpleDate(value: string | Date) {

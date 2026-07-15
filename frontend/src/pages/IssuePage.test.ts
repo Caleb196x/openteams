@@ -1,12 +1,14 @@
 import { readFileSync } from 'node:fs';
 import {
   collectProjectIssueLabels,
+  githubOAuthPollDelay,
   issueDisplayIdFontSizePx,
   issueSourceProviderId,
   projectIssueIdPrefix,
   projectWorkItemDisplayId,
   projectWorkItemIssueStatus,
   projectWorkItemsToIssueGroups,
+  shouldAutoFallbackToDevice,
 } from './IssuePage';
 import {
   composeIssueCommentBody,
@@ -29,6 +31,30 @@ const check = (label: string, condition: boolean, detail?: unknown) => {
     console.log(`ok ${label}`);
   }
 };
+
+check(
+  'GitHub OAuth polling respects the adaptive 1s to 15s bounds',
+  githubOAuthPollDelay(100) === 1_000 &&
+    githubOAuthPollDelay(5_000) === 5_000 &&
+    githubOAuthPollDelay(60_000) === 15_000,
+);
+check(
+  'GitHub OAuth only auto-falls back when the backend marks the error recoverable',
+  shouldAutoFallbackToDevice({
+    status: 'error',
+    account: null,
+    error: 'broker_unavailable',
+    retry_after_ms: null,
+    fallback_to_device: true,
+  }) &&
+    !shouldAutoFallbackToDevice({
+      status: 'denied',
+      account: null,
+      error: 'oauth_denied',
+      retry_after_ms: null,
+      fallback_to_device: false,
+    }),
+);
 
 const item = (
   id: string,

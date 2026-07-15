@@ -36,6 +36,7 @@ env:
   CARGO_XWIN_VERSION: 0.20.2
   ENABLE_MACOS_DMG: "false"
   ENABLE_LINUX_APPIMAGE_UPDATER: ${{ vars.ENABLE_LINUX_APPIMAGE_UPDATER == 'true' }}
+  OPENTEAMS_GITHUB_CLIENT_ID: ${{ vars.OPENTEAMS_GITHUB_CLIENT_ID }}
 
 jobs:
   bump-version:
@@ -297,6 +298,15 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.bump-version.outputs.new_tag }}
+
+      - name: Validate GitHub OAuth Client ID
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${OPENTEAMS_GITHUB_CLIENT_ID:-}" ]; then
+            echo "::error::Missing GitHub Actions Repository Variable: OPENTEAMS_GITHUB_CLIENT_ID"
+            exit 1
+          fi
 
       - name: Disable sccache on macOS
         if: runner.os == 'macOS'
@@ -944,6 +954,15 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.bump-version.outputs.new_tag }}
+
+      - name: Validate GitHub OAuth Client ID
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${OPENTEAMS_GITHUB_CLIENT_ID:-}" ]; then
+            echo "::error::Missing GitHub Actions Repository Variable: OPENTEAMS_GITHUB_CLIENT_ID"
+            exit 1
+          fi
 
       - name: Resolve artifact metadata
         id: artifact_meta

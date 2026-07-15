@@ -391,12 +391,15 @@ export interface GitHubOAuthStartResponse {
   flow_id: string;
   authorization_url: string;
   expires_at: string;
+  poll_after_ms: number;
 }
 
 export interface GitHubOAuthStatusResponse {
   status: 'pending' | 'authorized' | 'expired' | 'denied' | 'error';
   account: GitHubAccount | null;
   error: string | null;
+  retry_after_ms: number | null;
+  fallback_to_device: boolean;
 }
 
 export interface GitHubRepositorySummary {

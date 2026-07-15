@@ -1,7 +1,6 @@
 use axum::{
     Json, Router,
     extract::{Query, State},
-    http::{HeaderMap, header::HOST},
     response::{Html, Json as ResponseJson},
     routing::{get, post},
 };
@@ -30,13 +29,9 @@ pub struct GitHubOAuthStatusQuery {
     pub flow_id: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct GitHubOAuthCallbackQuery {
-    flow_id: String,
-    code: Option<String>,
-    state: Option<String>,
-    error: Option<String>,
-    error_description: Option<String>,
+#[derive(Debug, Deserialize, TS)]
+pub struct GitHubOAuthCancelRequest {
+    pub flow_id: String,
 }
 
 pub fn router() -> Router<DeploymentImpl> {
@@ -44,6 +39,7 @@ pub fn router() -> Router<DeploymentImpl> {
         .route("/github/auth/oauth/start", post(start_oauth_flow))
         .route("/github/auth/oauth/callback", get(oauth_callback))
         .route("/github/auth/oauth/status", get(oauth_status))
+        .route("/github/auth/oauth/cancel", post(cancel_oauth_flow))
         .route("/github/auth/device/start", post(start_device_flow))
         .route("/github/auth/device/poll", post(poll_device_flow))
         .route("/github/auth/account", get(current_account))
@@ -58,11 +54,9 @@ fn provider() -> Result<DeviceFlowGitHubAuthProvider, ApiError> {
 
 async fn start_oauth_flow(
     State(_deployment): State<DeploymentImpl>,
-    headers: HeaderMap,
 ) -> Result<ResponseJson<ApiResponse<GitHubOAuthStartResponse>>, ApiError> {
-    let callback_base_url = oauth_callback_base_url(&headers);
     let response = provider()?
-        .start_oauth_flow(&callback_base_url)
+        .start_oauth_flow()
         .await
         .map_err(|err| ApiError::BadRequest(format!("GitHub OAuth start failed: {err}")))?;
     Ok(ResponseJson(ApiResponse::success(response)))
@@ -72,44 +66,29 @@ async fn oauth_status(
     State(_deployment): State<DeploymentImpl>,
     Query(query): Query<GitHubOAuthStatusQuery>,
 ) -> Result<ResponseJson<ApiResponse<GitHubOAuthStatusResponse>>, ApiError> {
-    let response = provider()?.oauth_flow_status(&query.flow_id);
+    let response = provider()?.oauth_flow_status(&query.flow_id).await;
     Ok(ResponseJson(ApiResponse::success(response)))
 }
 
 async fn oauth_callback(
     State(_deployment): State<DeploymentImpl>,
-    Query(query): Query<GitHubOAuthCallbackQuery>,
 ) -> Result<Html<String>, ApiError> {
-    let provider = provider()?;
-    let response = if let Some(error) = query.error {
-        provider.fail_oauth_flow(
-            &query.flow_id,
-            GitHubOAuthFlowStatus::Denied,
-            query.error_description.unwrap_or(error),
-        )
-    } else {
-        let Some(code) = query.code.as_deref() else {
-            let response = provider.fail_oauth_flow(
-                &query.flow_id,
-                GitHubOAuthFlowStatus::Error,
-                "missing_oauth_code".to_string(),
-            );
-            return Ok(Html(oauth_callback_page(&response)));
-        };
-        let Some(state) = query.state.as_deref() else {
-            let response = provider.fail_oauth_flow(
-                &query.flow_id,
-                GitHubOAuthFlowStatus::Error,
-                "missing_oauth_state".to_string(),
-            );
-            return Ok(Html(oauth_callback_page(&response)));
-        };
-        provider
-            .complete_oauth_callback(&query.flow_id, state, code)
-            .await
-            .map_err(|err| ApiError::BadRequest(format!("GitHub OAuth callback failed: {err}")))?
+    let response = GitHubOAuthStatusResponse {
+        status: GitHubOAuthFlowStatus::Error,
+        account: None,
+        error: Some("oauth_callback_moved_online".to_string()),
+        retry_after_ms: None,
+        fallback_to_device: false,
     };
     Ok(Html(oauth_callback_page(&response)))
+}
+
+async fn cancel_oauth_flow(
+    State(_deployment): State<DeploymentImpl>,
+    Json(payload): Json<GitHubOAuthCancelRequest>,
+) -> Result<ResponseJson<ApiResponse<()>>, ApiError> {
+    provider()?.cancel_oauth_flow(&payload.flow_id).await;
+    Ok(ResponseJson(ApiResponse::success(())))
 }
 
 async fn start_device_flow(
@@ -185,37 +164,6 @@ fn github_error_data(code: &str, message: impl Into<String>) -> GitHubApiErrorDa
         last_synced_at: None,
         stale: false,
     }
-}
-
-fn oauth_callback_base_url(headers: &HeaderMap) -> String {
-    let scheme = headers
-        .get("x-forwarded-proto")
-        .and_then(|value| value.to_str().ok())
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or("http");
-    let host = headers
-        .get(HOST)
-        .and_then(|value| value.to_str().ok())
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or("127.0.0.1:3001");
-    format!(
-        "{scheme}://{}/api/github/auth/oauth/callback",
-        normalize_loopback_host(host)
-    )
-}
-
-fn normalize_loopback_host(host: &str) -> String {
-    let trimmed = host.trim();
-    let lower = trimmed.to_ascii_lowercase();
-    if lower == "localhost" || lower == "0.0.0.0" {
-        return "127.0.0.1".to_string();
-    }
-    for prefix in ["localhost:", "0.0.0.0:"] {
-        if let Some(port) = lower.strip_prefix(prefix) {
-            return format!("127.0.0.1:{port}");
-        }
-    }
-    trimmed.to_string()
 }
 
 fn oauth_callback_page(response: &GitHubOAuthStatusResponse) -> String {
@@ -482,9 +430,7 @@ fn escape_html(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use axum::http::{HeaderMap, HeaderValue, header::HOST};
-
-    use super::{github_error_data, oauth_callback_base_url};
+    use super::github_error_data;
 
     #[test]
     fn github_repo_list_auth_errors_are_structured() {
@@ -493,16 +439,5 @@ mod tests {
         assert_eq!(data.code, "github_auth_required");
         assert_eq!(data.message, "GitHub auth required");
         assert!(!data.stale);
-    }
-
-    #[test]
-    fn oauth_callback_base_url_uses_loopback_literal() {
-        let mut headers = HeaderMap::new();
-        headers.insert(HOST, HeaderValue::from_static("localhost:3001"));
-
-        assert_eq!(
-            oauth_callback_base_url(&headers),
-            "http://127.0.0.1:3001/api/github/auth/oauth/callback"
-        );
     }
 }

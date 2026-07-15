@@ -2340,6 +2340,13 @@ export const githubAuthApi = {
     );
     return handleApiResponse<GitHubOAuthStatusResponse, GitHubErrorData>(r);
   },
+  cancelOAuthFlow: async (flowId: string): Promise<void> => {
+    const r = await makeRequest("/api/github/auth/oauth/cancel", {
+      method: "POST",
+      body: jsonBody({ flow_id: flowId }),
+    });
+    return handleApiResponse<void, GitHubErrorData>(r);
+  },
   startDeviceFlow: async (): Promise<GitHubDeviceFlowStartResponse> => {
     const r = await makeRequest("/api/github/auth/device/start", {
       method: "POST",
