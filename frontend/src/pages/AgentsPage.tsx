@@ -24,6 +24,10 @@ import {
   type DropdownSelectOption,
 } from "@/components/DropdownSelect";
 import { useWorkspace } from "@/context/WorkspaceContext";
+import {
+  useCommandHandler,
+  useShortcutScope,
+} from "@/shortcuts/ShortcutProvider";
 import { agentRuntimeApi } from "@/lib/api";
 import type {
   AgentRuntimeDiagnostics,
@@ -976,7 +980,6 @@ function ModelConfigField({
 
 function AgentConfigSidebar({
   runner,
-  refreshKey,
   saveError,
   onClose,
   onSave,
@@ -984,7 +987,6 @@ function AgentConfigSidebar({
   t,
 }: {
   runner: AgentRuntimeStatus;
-  refreshKey: number;
   saveError: string | null;
   onClose: () => void;
   onSave: (
@@ -1018,6 +1020,10 @@ function AgentConfigSidebar({
   latestRunnerRef.current = runner;
   const schema = agentConfigSchemas[runner.runner_type];
   const diagnosticsFailedLabel = t("agents.diagnostics.failed");
+  const diagnosticsFailedLabelRef = useRef(diagnosticsFailedLabel);
+  diagnosticsFailedLabelRef.current = diagnosticsFailedLabel;
+  const onDiagnosticsLoadedRef = useRef(onDiagnosticsLoaded);
+  onDiagnosticsLoadedRef.current = onDiagnosticsLoaded;
   const schemaFields = Object.entries(schema.properties ?? {}).filter(
     ([fieldKey]) => !isHiddenConfigField(runner.runner_type, fieldKey),
   );
@@ -1166,13 +1172,15 @@ function AgentConfigSidebar({
           const latestRunner = latestRunnerRef.current;
           if (!shouldApplyRuntimeSnapshot(latestRunner, result)) return;
           setDiagnostics(result);
-          onDiagnosticsLoaded(result);
+          onDiagnosticsLoadedRef.current(result);
         }
       })
       .catch((error) => {
         if (active) {
           setDiagnosticsError(
-            error instanceof Error ? error.message : diagnosticsFailedLabel,
+            error instanceof Error
+              ? error.message
+              : diagnosticsFailedLabelRef.current,
           );
         }
       })
@@ -1183,12 +1191,7 @@ function AgentConfigSidebar({
     return () => {
       active = false;
     };
-  }, [
-    diagnosticsFailedLabel,
-    onDiagnosticsLoaded,
-    refreshKey,
-    runner.runner_type,
-  ]);
+  }, [runner.runner_type]);
 
   const handleConfigFieldChange = (
     key: string,
@@ -1277,7 +1280,7 @@ function AgentConfigSidebar({
         )}
       >
         <section className="pb-5">
-          <h3 className="mb-3 text-[11px] font-semibold tracking-[0.12em] text-white/40 uppercase">
+          <h3 className="mb-3 text-[11px] font-semibold tracking-[0.12em] text-[var(--ink-subtle)] uppercase">
             {t("agents.details.runtime")}
           </h3>
           <div className="grid gap-1">
@@ -1299,7 +1302,7 @@ function AgentConfigSidebar({
         </section>
 
         <section className="border-t border-white/10 py-5">
-          <h3 className="mb-3 text-[11px] font-semibold tracking-[0.12em] text-white/40 uppercase">
+          <h3 className="mb-3 text-[11px] font-semibold tracking-[0.12em] text-[var(--ink-subtle)] uppercase">
             {t("agents.env.title")}
           </h3>
           <div>
@@ -1321,7 +1324,7 @@ function AgentConfigSidebar({
         </section>
 
         <section className="border-t border-white/10 py-5">
-          <h3 className="mb-3 text-[11px] font-semibold tracking-[0.12em] text-white/40 uppercase">
+          <h3 className="mb-3 text-[11px] font-semibold tracking-[0.12em] text-[var(--ink-subtle)] uppercase">
             {t("agents.config.title")}
           </h3>
 
@@ -1404,6 +1407,7 @@ export function AgentsPage() {
   const { t, showToast } = useWorkspace();
   const [runners, setRunners] = useState<AgentRuntimeStatus[]>([]);
   const runnersRef = useRef<AgentRuntimeStatus[]>([]);
+  const agentsPageRef = useRef<HTMLDivElement>(null);
   const [filter, setFilter] = useState<AgentRuntimeFilter>("all");
   const [loading, setLoading] = useState(true);
   const [runtimeLoaded, setRuntimeLoaded] = useState(false);
@@ -1413,7 +1417,6 @@ export function AgentsPage() {
   const [selectedRunner, setSelectedRunner] =
     useState<AgentRuntimeStatus | null>(null);
   const [agentNavCollapsed, setAgentNavCollapsed] = useState(false);
-  const [diagnosticsRefreshKey, setDiagnosticsRefreshKey] = useState(0);
   const [saveError, setSaveError] = useState<string | null>(null);
   const discoveryRefreshedNotice = t("agents.notice.discoveryRefreshed");
   const configSavedNotice = t("agents.notice.configSaved");
@@ -1427,22 +1430,15 @@ export function AgentsPage() {
     [configSavedNotice, discoveryRefreshedNotice],
   );
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "b") {
-        return;
-      }
-      const target = event.target as HTMLElement | null;
-      if (target?.closest("input, textarea, [contenteditable='true']")) {
-        return;
-      }
-      event.preventDefault();
-      toggleAgentNavCollapsed();
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [toggleAgentNavCollapsed]);
+  useShortcutScope('agent-runtime', {
+    active: true,
+    rootRef: agentsPageRef,
+  });
+  useCommandHandler('agent-runtime.sidebar.toggle', {
+    scope: 'page',
+    enabled: true,
+    execute: toggleAgentNavCollapsed,
+  });
 
   const notifyRuntimeErrors = useCallback(
     (next: AgentRuntimeStatus[], previous: AgentRuntimeStatus[]) => {
@@ -1644,7 +1640,6 @@ export function AgentsPage() {
     (runner: AgentRuntimeStatus) => {
       setSelectedRunner(runner);
       setSaveError(null);
-      setDiagnosticsRefreshKey((current) => current + 1);
     },
     [],
   );
@@ -1654,7 +1649,7 @@ export function AgentsPage() {
     : "Collapse agent list (Ctrl/Cmd+B)";
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--surface-2)] text-[var(--ink)]">
+    <div ref={agentsPageRef} className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--surface-2)] text-[var(--ink)]">
       <header className="flex h-[49px] shrink-0 items-center justify-between border-b border-[var(--hairline)] bg-[var(--surface-2)] px-[29px]">
         <nav
           aria-label="Breadcrumb"
@@ -1681,6 +1676,7 @@ export function AgentsPage() {
         <div className="flex min-w-0 items-center gap-2">
           <button
             type="button"
+            data-command-id="agent-runtime.sidebar.toggle"
             onClick={toggleAgentNavCollapsed}
             className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--hairline)] bg-[var(--surface-2)] text-[var(--ink-tertiary)] transition hover:bg-[var(--surface-3)] hover:text-[var(--ink)]"
             aria-label={agentNavToggleLabel}
@@ -1787,7 +1783,6 @@ export function AgentsPage() {
             ) : selectedRunner ? (
               <AgentConfigSidebar
                 runner={selectedRunner}
-                refreshKey={diagnosticsRefreshKey}
                 saveError={saveError}
                 onClose={() => setSelectedRunner(null)}
                 onSave={handleSave}

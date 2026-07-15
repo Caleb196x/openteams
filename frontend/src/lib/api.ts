@@ -1608,7 +1608,19 @@ export const skillsApi = {
 // Workflow (session-scoped + global review/iteration)
 // -----------------------------------------------------------------------------
 
+async function stopExecution(
+  sessionId: string,
+  executionId: string,
+): Promise<{ status: string }> {
+  const response = await makeRequest(
+    `/api/chat/sessions/${encodeURIComponent(sessionId)}/workflow/executions/${encodeURIComponent(executionId)}/stop`,
+    { method: 'POST' },
+  );
+  return handleApiResponse<{ status: string }>(response);
+}
+
 export const workflowApi = {
+  stopExecution,
   getSessionStatus: async (
     sessionId: string,
   ): Promise<WorkflowSessionStatusResponse> => {

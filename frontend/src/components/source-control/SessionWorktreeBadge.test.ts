@@ -57,7 +57,7 @@ check(
   source.includes("mergeDisabledReason?: string | null") &&
     source.includes("const mergeDisabled = Boolean(mergeDisabledReason)") &&
     source.includes("disabled={mergeDisabled}") &&
-    source.includes("title={mergeDisabledReason ?? tr('worktree.action.merge', 'Merge')}"),
+    source.includes('commandId="worktree.merge"'),
 );
 
 check(

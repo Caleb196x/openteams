@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { useQuery } from '@/lib/queryCompat';
 import { chatMessagesApi, workflowApi } from '@/lib/api';
@@ -28,6 +28,10 @@ import {
 } from './WorkflowReviewSettingsDialog';
 import { toWorkflowFinalReviewAction } from './WorkflowFinalReviewCard';
 import { WorkflowWindow } from './WorkflowWindow';
+import {
+  useCommandHandler,
+  useShortcutScope,
+} from '@/shortcuts/ShortcutProvider';
 
 interface WorkflowCardProps {
   sessionId: string;
@@ -85,6 +89,7 @@ export function WorkflowCard({
     null,
   );
   const [windowOpen, setWindowOpen] = useState(false);
+  const workflowCardRef = useRef<HTMLDivElement>(null);
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
   const [retryPlanGenerationError, setRetryPlanGenerationError] = useState<
     string | null
@@ -270,6 +275,16 @@ export function WorkflowCard({
     return workflowRuntimeLinesByExecution[projection.execution_id] ?? [];
   }, [projection?.execution_id, workflowRuntimeLinesByExecution]);
 
+  useShortcutScope('workflow-session', {
+    active: Boolean(projection),
+    rootRef: workflowCardRef,
+  });
+  useCommandHandler('workflow.open', {
+    scope: 'page',
+    enabled: Boolean(projection),
+    execute: () => setWindowOpen(true),
+  });
+
   const handleExecute = (nextProjection: WorkflowCardProjection) => {
     setExecuteReviewError(null);
     setExecuteReviewProjection(nextProjection);
@@ -323,6 +338,11 @@ export function WorkflowCard({
 
   const handleStopStep = (stepId: string) =>
     void withPending(stepId, () => workflowApi.stopStep(sessionId, stepId));
+
+  const handleStopExecution = (executionId: string) =>
+    void withPending(executionId, () =>
+      workflowApi.stopExecution(sessionId, executionId),
+    );
 
   const handleApproval = (
     stepId: string,
@@ -412,6 +432,7 @@ export function WorkflowCard({
 
   return (
     <>
+      <div ref={workflowCardRef}>
       <ChatWorkflowCard
         message={message}
         projection={projection}
@@ -429,6 +450,7 @@ export function WorkflowCard({
         onSubmitIterationFeedback={handleIterationFeedback}
         pendingActionId={pendingActionId}
       />
+      </div>
 
       {projection && (
         <WorkflowWindow
@@ -444,6 +466,7 @@ export function WorkflowCard({
           onResume={handleResume}
           onInterruptStep={handleInterruptStep}
           onStopStep={handleStopStep}
+          onStopExecution={handleStopExecution}
           onRetryStep={handleRetryStep}
           onUpdateReviewSettings={handleUpdateReviewSettings}
           onSubmitStepInput={handleStepInput}

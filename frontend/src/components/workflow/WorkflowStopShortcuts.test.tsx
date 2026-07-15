@@ -1,0 +1,26 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+
+const api = readFileSync(new URL('../../lib/api.ts', import.meta.url), 'utf8');
+const card = readFileSync(new URL('./WorkflowCard.tsx', import.meta.url), 'utf8');
+const windowSource = readFileSync(new URL('./WorkflowWindow.tsx', import.meta.url), 'utf8');
+const chatCard = readFileSync(new URL('./ChatWorkflowCard.tsx', import.meta.url), 'utf8');
+assert.ok(api.includes('async function stopExecution('));
+assert.ok(api.includes('stopExecution,'));
+assert.ok(api.includes('/stop`'));
+assert.ok(card.includes('const handleStopExecution'));
+assert.ok(card.includes('workflowApi.stopExecution('));
+assert.ok(card.includes('onStopExecution={handleStopExecution}'));
+assert.ok(windowSource.includes("useCommandHandler('workflow.start'"));
+assert.ok(windowSource.includes("useCommandHandler('workflow.node.stop'"));
+assert.ok(windowSource.includes("useCommandHandler('workflow.stop'"));
+assert.ok(windowSource.includes('type StopConfirmation ='));
+assert.ok(windowSource.includes("{ kind: 'step'; stepId: string }"));
+assert.ok(windowSource.includes("{ kind: 'execution'; executionId: string }"));
+assert.ok(windowSource.includes('onStopStep?.(stopConfirmation.stepId)'));
+assert.ok(windowSource.includes('onStopExecution?.(stopConfirmation.executionId)'));
+const confirmBlock = windowSource.slice(windowSource.indexOf('const confirmStop'));
+assert.equal(confirmBlock.slice(0, confirmBlock.indexOf('};') + 2).includes('onPauseAll'), false);
+assert.equal(chatCard.includes('{projection.stopped_by_user}'), false);
+assert.ok(chatCard.includes('projection.error_message'));
+console.log('Workflow stop shortcut wiring: PASS');

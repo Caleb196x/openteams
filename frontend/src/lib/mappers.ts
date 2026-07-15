@@ -359,6 +359,7 @@ export const mapMessage = (
     mentions: backend.mentions,
     referenceMessageId: referenceMessageIdFromMeta(backend.meta),
     attachments: attachmentsFromMeta(backend.meta),
+    isAgent: backend.sender_type === 'agent' || undefined,
     runId: runIdFromMeta(backend.meta),
     sessionAgentId: sessionAgentIdFromMeta(backend.meta),
     sourceMessageId: sourceMessageIdFromMeta(backend.meta),

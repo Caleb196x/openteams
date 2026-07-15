@@ -25,6 +25,7 @@ import {
   Strategy,
   BackendChatSkill,
   Config,
+  Environment,
   MemberQueuesBySessionAgentId,
   MemberQueueSnapshot,
   QueuedMessageStatus,
@@ -71,6 +72,7 @@ import {
   mapSessionAgentsToMembers,
   mapSessions,
 } from '@/lib/mappers';
+import { resolveMessageReferences } from '@/lib/messageReferences';
 import {
   AsyncResourceState,
   beginLoad,
@@ -86,6 +88,7 @@ import {
   isWorkflowSidebarRunning,
   resolveWorkflowSidebarState,
 } from '@/lib/workflowSidebarState';
+import { createConfigPatchQueue } from './configPatchQueue';
 
 type ListUpdater<T> = T[] | ((prev: T[]) => T[]);
 
@@ -245,9 +248,6 @@ const chatStreamWebSocketUrl = (path: string): string => {
 
 const PENDING_AGENT_MESSAGE_PREFIX = 'pending-agent-';
 const OPTIMISTIC_USER_MESSAGE_PREFIX = 'msg-user-';
-const CHAT_MESSAGE_FONT_SIZE_STORAGE_KEY = 'openteams-chat-message-font-size';
-const LEGACY_AGENT_MARKDOWN_FONT_SIZE_STORAGE_KEY =
-  'openteams-agent-markdown-font-size';
 // Persist the user's last-viewed project/session so a page refresh restores the
 // same context (and therefore reconnects the WS stream to the same session)
 // instead of always falling back to the first session in the list.
@@ -566,6 +566,74 @@ const normalizeChatMessageFontSize = (value: number | string | null): number => 
     CHAT_MESSAGE_FONT_SIZE_DEFAULT
   );
 };
+
+const themePreferenceFromConfig = (theme: Config['theme']): ThemePreference => {
+  const normalized = theme.toLowerCase();
+  return isThemePreference(normalized) ? normalized : 'dark';
+};
+
+const themePreferenceToConfig = (
+  theme: ThemePreference,
+): Config['theme'] => theme.toUpperCase() as Config['theme'];
+
+const resolveBrowserLocale = (): Locale => {
+  if (typeof navigator === 'undefined') return 'zh';
+  const language = navigator.language.toLowerCase();
+  if (language.startsWith('en')) return 'en';
+  if (language.startsWith('ja')) return 'ja';
+  if (language.startsWith('ko')) return 'ko';
+  if (language.startsWith('fr')) return 'fr';
+  if (language.startsWith('es')) return 'es';
+  return 'zh';
+};
+
+const localeFromConfig = (language: Config['language']): Locale => {
+  switch (language) {
+    case 'EN':
+      return 'en';
+    case 'JA':
+      return 'ja';
+    case 'KO':
+      return 'ko';
+    case 'FR':
+      return 'fr';
+    case 'ES':
+      return 'es';
+    case 'ZH_HANS':
+    case 'ZH_HANT':
+      return 'zh';
+    case 'BROWSER':
+    default:
+      return resolveBrowserLocale();
+  }
+};
+
+const localeToConfig = (locale: Locale): Config['language'] => {
+  switch (locale) {
+    case 'en':
+      return 'EN';
+    case 'ja':
+      return 'JA';
+    case 'ko':
+      return 'KO';
+    case 'fr':
+      return 'FR';
+    case 'es':
+      return 'ES';
+    case 'zh':
+    default:
+      return 'ZH_HANS';
+  }
+};
+
+const chatMessageFontSizeFromConfig = (
+  value: Config['chat_bubble_font_size'],
+): number => normalizeChatMessageFontSize(value.replace(/^px/, ''));
+
+const chatMessageFontSizeToConfig = (
+  value: number,
+): Config['chat_bubble_font_size'] =>
+  `px${normalizeChatMessageFontSize(value)}` as Config['chat_bubble_font_size'];
 
 const isPendingAgentPlaceholder = (message: Message): boolean =>
   Boolean(
@@ -1157,36 +1225,6 @@ const resolveProjectMainAgentName = (
   return displayName ? asAgentHandle(displayName) : null;
 };
 
-const summarizeQuotedContent = (content: string): string => {
-  const normalized = content.trim().replace(/\s+/g, ' ');
-  if (!normalized) return '';
-  return normalized.length > 140
-    ? `${normalized.slice(0, 137)}...`
-    : normalized;
-};
-
-const resolveQuotedMessageReferences = (messages: Message[]): Message[] => {
-  const messagesById = new Map(messages.map((message) => [message.id, message]));
-  return messages.map((message) => {
-    if (message.quotedMessage || !message.referenceMessageId) {
-      return message;
-    }
-
-    const referenced = messagesById.get(message.referenceMessageId);
-    if (!referenced) return message;
-
-    return {
-      ...message,
-      quotedMessage: {
-        id: referenced.id,
-        sender: referenced.isUser ? 'You' : referenced.sender,
-        content: referenced.text,
-        summary: summarizeQuotedContent(referenced.text),
-      },
-    };
-  });
-};
-
 const withSessionId = (sessionId: string, message: Message): Message =>
   message.sessionId === sessionId ? message : { ...message, sessionId };
 
@@ -1355,6 +1393,7 @@ const activeRunToMessage = (run: RuntimeActiveRun): Message => {
     time: 'just now',
     createdAt: run.created_at,
     text: '',
+    isAgent: true,
     isThinking: true,
     isAgentRunning: true,
     runId: run.run_id,
@@ -1489,6 +1528,8 @@ export interface WorkspaceContextProps {
   config: Config | null;
   configAsync: AsyncResourceState<Config | null>;
   refreshConfig: () => Promise<void>;
+  saveConfigPatch: (patch: Partial<Config>) => Promise<Config>;
+  environment: Environment | null;
   inboxSummaryAsync: AsyncResourceState<InboxSummary>;
   inboxItemsAsync: AsyncResourceState<InboxItem[]>;
   refreshInbox: () => Promise<void>;
@@ -1520,39 +1561,14 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
   const [themePreference, setThemePreferenceState] =
-    useState<ThemePreference>(() => {
-      try {
-        const saved = localStorage.getItem('openteams-design-mode');
-        return isThemePreference(saved) ? saved : 'dark';
-      } catch {
-        return 'dark';
-      }
-    });
+    useState<ThemePreference>('dark');
   const [systemTheme, setSystemTheme] = useState<Theme>(resolveSystemTheme);
   const theme: Theme =
     themePreference === 'system' ? systemTheme : themePreference;
 
-  const [locale, setLocaleState] = useState<Locale>(() => {
-    try {
-      const saved = localStorage.getItem('openteams-locale');
-      return ['en', 'zh', 'ja', 'ko', 'fr', 'es'].includes(saved ?? '')
-        ? (saved as Locale)
-        : 'zh';
-    } catch {
-      return 'zh';
-    }
-  });
+  const [locale, setLocaleState] = useState<Locale>('zh');
   const [chatMessageFontSize, setChatMessageFontSizeState] =
-    useState<number>(() => {
-      try {
-        return normalizeChatMessageFontSize(
-          localStorage.getItem(CHAT_MESSAGE_FONT_SIZE_STORAGE_KEY) ??
-            localStorage.getItem(LEGACY_AGENT_MARKDOWN_FONT_SIZE_STORAGE_KEY),
-        );
-      } catch {
-        return CHAT_MESSAGE_FONT_SIZE_DEFAULT;
-      }
-    });
+    useState<number>(CHAT_MESSAGE_FONT_SIZE_DEFAULT);
   const [activeSessionId, setActiveSessionId] = useState<string>(() => {
     try {
       return localStorage.getItem(ACTIVE_SESSION_ID_STORAGE_KEY) ?? '';
@@ -1607,6 +1623,35 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
   const [configAsync, setConfigAsync] = useState<
     AsyncResourceState<Config | null>
   >(() => initialAsync(null));
+  const [environment, setEnvironment] = useState<Environment | null>(null);
+  const latestConfigRef = useRef<Config | null>(null);
+  const configPatchQueueRef = useRef<ReturnType<
+    typeof createConfigPatchQueue<Config>
+  > | null>(null);
+  const publishVisibleConfig = useCallback((visible: Config) => {
+    latestConfigRef.current = visible;
+    setConfigAsync(succeed(visible));
+  }, []);
+  const ensureConfigPatchQueue = useCallback(
+    (initial: Config) => {
+      if (!configPatchQueueRef.current) {
+        configPatchQueueRef.current = createConfigPatchQueue<Config>(
+          initial,
+          systemApi.saveConfig,
+          publishVisibleConfig,
+        );
+      } else {
+        configPatchQueueRef.current.replaceAcknowledged(initial);
+      }
+      return configPatchQueueRef.current;
+    },
+    [publishVisibleConfig],
+  );
+  const saveConfigPatch = useCallback((patch: Partial<Config>) => {
+    const queue = configPatchQueueRef.current;
+    if (!queue) return Promise.reject(new Error('Config is not loaded'));
+    return queue.enqueue(patch, { optimistic: false });
+  }, []);
   const [inboxSummaryAsync, setInboxSummaryAsync] = useState<
     AsyncResourceState<InboxSummary>
   >(() => initialAsync(EMPTY_INBOX_SUMMARY));
@@ -1984,29 +2029,34 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
     }, toastDurationMsRef.current);
   };
 
+  const persistUiPreference = (patch: Partial<Config>) => {
+    const queue = configPatchQueueRef.current;
+    if (!queue) {
+      showToast('Settings are still loading. Please try again.', 'error');
+      return;
+    }
+    void queue.enqueue(patch, { optimistic: true }).catch((error) => {
+      console.error('Failed to save UI preferences', error);
+      showToast('Failed to save settings to config.json.', 'error');
+    });
+  };
+
   const setTheme = (t: ThemePreference) => {
     setThemePreferenceState(t);
-    try {
-      localStorage.setItem('openteams-design-mode', t);
-    } catch {}
+    persistUiPreference({ theme: themePreferenceToConfig(t) });
   };
 
   const setLocale = (l: Locale) => {
     setLocaleState(l);
-    try {
-      localStorage.setItem('openteams-locale', l);
-    } catch {}
+    persistUiPreference({ language: localeToConfig(l) });
   };
 
   const setChatMessageFontSize = (size: number) => {
     const normalized = normalizeChatMessageFontSize(size);
     setChatMessageFontSizeState(normalized);
-    try {
-      localStorage.setItem(
-        CHAT_MESSAGE_FONT_SIZE_STORAGE_KEY,
-        String(normalized),
-      );
-    } catch {}
+    persistUiPreference({
+      chat_bubble_font_size: chatMessageFontSizeToConfig(normalized),
+    });
   };
 
   useEffect(() => {
@@ -2116,7 +2166,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
         });
         setAllMessages((prev) => ({
           ...prev,
-          [sid]: resolveQuotedMessageReferences(mapped),
+          [sid]: resolveMessageReferences(mapped),
         }));
       }
     },
@@ -2340,6 +2390,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
             err instanceof Error
               ? `Mode switch failed: ${err.message}`
               : 'Mode switch failed.',
+            'error',
           );
         });
     },
@@ -2934,7 +2985,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
         const currentWithoutAgentRuntime = current.filter(
           (message) => !message.isAgentRunning,
         );
-        const next = resolveQuotedMessageReferences(
+        const next = resolveMessageReferences(
           mergePersistedWithRunningPlaceholders(
             mapped,
             currentWithoutAgentRuntime,
@@ -3236,11 +3287,23 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
     setConfigAsync(beginLoad);
     try {
       const info = await systemApi.getInfo();
-      setConfigAsync(succeed(info.config));
+      setEnvironment(info.environment);
+      ensureConfigPatchQueue(info.config);
     } catch (err) {
       setConfigAsync((prev) => fail(prev, err, null));
     }
-  }, []);
+  }, [ensureConfigPatchQueue]);
+
+  useEffect(() => {
+    const config = configAsync.data;
+    if (!config) return;
+    latestConfigRef.current = config;
+    setThemePreferenceState(themePreferenceFromConfig(config.theme));
+    setLocaleState(localeFromConfig(config.language));
+    setChatMessageFontSizeState(
+      chatMessageFontSizeFromConfig(config.chat_bubble_font_size),
+    );
+  }, [configAsync.data]);
 
   const refreshWorkflowCard = useCallback(
     async (messageId: string): Promise<void> => {
@@ -3473,7 +3536,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
         );
         const next = [...withoutExistingSourceMessage];
         next.splice(runIndex >= 0 ? runIndex : next.length, 0, message);
-        return { ...prev, [sid]: resolveQuotedMessageReferences(next) };
+        return { ...prev, [sid]: resolveMessageReferences(next) };
       });
     },
     [],
@@ -3646,7 +3709,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
             : next;
         return {
           ...prev,
-          [sid]: resolveQuotedMessageReferences(
+          [sid]: resolveMessageReferences(
             orderMessagesForConversation(correlatedNext),
           ),
         };
@@ -4156,10 +4219,12 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
     ? activeRunMessagesForSession(activeRunsByRunId, activeSessionId)
     : [];
   const activeSessionMessageSnapshot = activeSessionId
-    ? orderMessagesForConversation([
-        ...activeSessionMessages.filter((message) => !message.isAgentRunning),
-        ...activeRunMessages,
-      ])
+    ? resolveMessageReferences(
+        orderMessagesForConversation([
+          ...activeSessionMessages.filter((message) => !message.isAgentRunning),
+          ...activeRunMessages,
+        ]),
+      )
     : [];
   const messages = activeSessionId
     ? filterQueuedUserMessagesFromSnapshot(
@@ -4391,6 +4456,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
           err instanceof Error
             ? `Send failed: ${err.message} (using mock reply)`
             : 'Send failed (using mock reply)',
+          'warning',
         );
         dispatchMockReply(text, sid);
       });
@@ -4413,7 +4479,10 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
       modelName: model,
     };
     setMembers((prev) => [...prev, newM]);
-    showToast(`Added agent ${cleanName} equipped with ${model} engine!`);
+    showToast(
+      `Added agent ${cleanName} equipped with ${model} engine!`,
+      'success',
+    );
   };
 
   const addProviderToKeychain = (name: string, key: string) => {
@@ -4429,7 +4498,10 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
       active: true,
     };
     setProviders((prev) => [...prev, newProv]);
-    showToast(`Connected ${name} endpoint securely inside local keychain!`);
+    showToast(
+      `Connected ${name} endpoint securely inside local keychain!`,
+      'success',
+    );
   };
 
   return (
@@ -4523,6 +4595,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
         config: configAsync.data,
         configAsync,
         refreshConfig,
+        saveConfigPatch,
+        environment,
         inboxSummaryAsync,
         inboxItemsAsync,
         refreshInbox,

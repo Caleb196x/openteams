@@ -238,7 +238,7 @@ check(
     source.includes('quotedMessage: options.quotedMessage') &&
     source.includes('referenceMessageId: options.quotedMessage?.id') &&
     source.includes('meta.reference = { message_id: options.quotedMessage.id }') &&
-    source.includes('resolveQuotedMessageReferences') &&
+    source.includes('resolveMessageReferences') &&
     source.includes('content: text') &&
     !source.includes('reference_message_id: options.quotedMessage') &&
     !source.includes('meta.quoted_message') &&
@@ -491,13 +491,17 @@ check(
   source,
 );
 check(
-  'persists chat message font size preference',
+  'persists chat message font size preference in config.json',
   source.includes('CHAT_MESSAGE_FONT_SIZE_OPTIONS = [13, 14, 15, 16]') &&
-    source.includes('openteams-chat-message-font-size') &&
-    source.includes('openteams-agent-markdown-font-size') &&
-    source.includes('chatMessageFontSize') &&
-    source.includes('setChatMessageFontSize') &&
-    source.includes('normalizeChatMessageFontSize'),
+    source.includes('chat_bubble_font_size') &&
+    source.includes('chatMessageFontSizeFromConfig') &&
+    source.includes('chatMessageFontSizeToConfig') &&
+    source.includes('persistUiPreference({') &&
+    source.includes(
+      'chat_bubble_font_size: chatMessageFontSizeToConfig(normalized)',
+    ) &&
+    !source.includes('openteams-chat-message-font-size') &&
+    !source.includes('openteams-agent-markdown-font-size'),
   source,
 );
 
@@ -508,7 +512,10 @@ check(
     source.includes("'(prefers-color-scheme: light)'") &&
     source.includes('themePreference ===') &&
     source.includes('setThemePreferenceState(t)') &&
-    source.includes("localStorage.setItem('openteams-design-mode', t)") &&
+    source.includes('themePreferenceFromConfig') &&
+    source.includes('themePreferenceToConfig') &&
+    !source.includes('openteams-design-mode') &&
+    !source.includes('openteams-locale') &&
     source.includes("document.body.setAttribute('data-mode', theme)") &&
     source.includes('themePreference,'),
   source,
@@ -583,6 +590,24 @@ check(
   'exposes resetWorkspaceChanges',
   source.includes('resetWorkspaceChanges: () => void') &&
     source.includes('resetWorkspaceChanges,'),
+  source,
+);
+
+check(
+  'exposes one config patch queue and server environment',
+  source.includes('createConfigPatchQueue<Config>') &&
+    source.includes(
+      'saveConfigPatch: (patch: Partial<Config>) => Promise<Config>',
+    ) &&
+    source.includes('environment: Environment | null') &&
+    source.includes('setEnvironment(info.environment)'),
+  source,
+);
+
+check(
+  'routes optimistic UI preferences through the same queue',
+  source.includes('enqueue(patch, { optimistic: true })') &&
+    !source.includes('const nextConfig: Config = { ...currentConfig, ...patch }'),
   source,
 );
 

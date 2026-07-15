@@ -22,11 +22,14 @@ import {
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ChangeEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
+  type RefObject,
   type SVGProps,
 } from 'react';
 import { ProjectBreadcrumbAvatar } from '@/components/ProjectBreadcrumbAvatar';
@@ -44,6 +47,8 @@ import {
   type NotificationToastTone,
 } from '@/components/NotificationToast';
 import { useWorkspace } from '@/context/WorkspaceContext';
+import { useCommandHandler } from '@/shortcuts/ShortcutProvider';
+import { preventTabFocusChange } from '@/shortcuts/textInputFocus';
 import {
   chatSessionsApi,
   projectApi,
@@ -390,6 +395,7 @@ export function IssueDetailPage({
     null,
   );
   const propertyMenuRef = useRef<HTMLDivElement | null>(null);
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
   const labelMenuRef = useRef<HTMLDivElement | null>(null);
   const sessionMenuRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -467,6 +473,11 @@ export function IssueDetailPage({
       detailRequestIdRef.current += 1;
     };
   }, [loadDetail]);
+
+  useLayoutEffect(() => {
+    headingRef.current?.focus();
+    headingRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [issue.id]);
 
   useEffect(() => {
     if (!openPropertyMenu) return;
@@ -1160,9 +1171,10 @@ export function IssueDetailPage({
     void handleSaveLabels(nextLabels);
   };
 
-  useEffect(() => {
+  const handlePropertyMenuKeyDown = (
+    event: ReactKeyboardEvent<HTMLElement>,
+  ) => {
     if (!openPropertyMenu) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setOpenPropertyMenu(null);
         setStatusQuery('');
@@ -1246,10 +1258,7 @@ export function IssueDetailPage({
         event.preventDefault();
         handleLabelMenuSelect(option.value);
       }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  });
+  };
 
   const linkSession = async (sessionId: string) => {
     const executionLink = await projectWorkItemsApi.linkExecution(
@@ -1381,6 +1390,48 @@ export function IssueDetailPage({
     }
   };
 
+  const propertyShortcutEnabled = !openPropertyMenu && !action;
+  useCommandHandler('issue.detail.back', {
+    scope: 'page',
+    enabled: !openPropertyMenu && !titleEditing && !descriptionEditing,
+    execute: onBack,
+  });
+  useCommandHandler('issue.status.open', {
+    scope: 'page',
+    enabled: propertyShortcutEnabled,
+    execute: () => {
+      setStatusQuery('');
+      setPriorityQuery('');
+      setLabelQuery('');
+      setSessionQuery('');
+      setOpenPropertyMenu('status');
+    },
+  });
+  useCommandHandler('issue.priority.open', {
+    scope: 'page',
+    enabled: propertyShortcutEnabled,
+    execute: () => {
+      setPriorityQuery('');
+      setStatusQuery('');
+      setLabelQuery('');
+      setSessionQuery('');
+      setOpenPropertyMenu('priority');
+    },
+  });
+  useCommandHandler('issue.labels.open', {
+    scope: 'page',
+    enabled: !openPropertyMenu && canEditLabels,
+    execute: () => setOpenPropertyMenu('labels'),
+  });
+  useCommandHandler('issue.session.create', {
+    scope: 'page',
+    enabled:
+      linkedSessionLinks.length === 0 &&
+      action !== 'create-session' &&
+      !detailLoading,
+    execute: handleOpenCreateSessionDialog,
+  });
+
   const handleWorktreeSessionCreate = async (
     worktreeMode: ChatSessionWorktreeMode | null,
   ) => {
@@ -1440,6 +1491,7 @@ export function IssueDetailPage({
         />
       )}
       <IssueDetailHeader
+        headingRef={headingRef}
         issue={{ ...issue, title: issueTitle, status: issueStatus }}
         projectName={projectName}
         onBack={onBack}
@@ -1458,7 +1510,7 @@ export function IssueDetailPage({
         onCreateWorktreeSession={handleWorktreeSessionCreate}
       />
 
-      <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[var(--surface-2)] text-[var(--ink)]">
+      <main onKeyDown={handlePropertyMenuKeyDown} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[var(--surface-2)] text-[var(--ink)]">
         <div className="grid min-w-[820px] grid-cols-[minmax(0,1fr)_268px] gap-8 px-[15px] pb-14 pt-[6px]">
           <section className="min-w-0 pl-2 pr-1 pt-6">
             {titleEditing ? (
@@ -1471,6 +1523,7 @@ export function IssueDetailPage({
               >
                 <input
                   ref={titleInputRef}
+                  tabIndex={-1}
                   value={titleDraft}
                   className="h-10 min-w-0 flex-1 rounded-[8px] border border-[var(--hairline)] bg-[var(--surface-1)] px-2.5 text-[23px] font-bold leading-tight text-[var(--ink)] outline-none transition placeholder:text-[var(--ink-tertiary)] focus:border-[var(--hairline-strong)]"
                   placeholder={tr(
@@ -1479,6 +1532,7 @@ export function IssueDetailPage({
                   )}
                   onChange={(event) => setTitleDraft(event.target.value)}
                   onKeyDown={(event) => {
+                    if (preventTabFocusChange(event)) return;
                     if (event.key === 'Escape') {
                       event.preventDefault();
                       setTitleEditing(false);
@@ -1543,6 +1597,7 @@ export function IssueDetailPage({
             ) : descriptionEditing ? (
               <textarea
                 autoFocus
+                tabIndex={-1}
                 value={descriptionDraft}
                 placeholder={tr(
                   'issue.detail.addDescription',
@@ -1550,6 +1605,7 @@ export function IssueDetailPage({
                 )}
                 className="mt-[22px] min-h-[126px] w-full resize-y rounded-[8px] border border-[var(--hairline)] bg-[var(--surface-1)] p-[15px] text-[14px] leading-relaxed text-[var(--ink-muted)] outline-none transition placeholder:text-[var(--ink-tertiary)] focus:border-[var(--hairline-strong)]"
                 onChange={(event) => setDescriptionDraft(event.target.value)}
+                onKeyDown={preventTabFocusChange}
                 onBlur={() => {
                   void handleSaveDescriptionDraft();
                   setDescriptionEditing(false);
@@ -1703,6 +1759,7 @@ export function IssueDetailPage({
 
               <div className="mt-6 rounded-[8px] border border-[var(--hairline)] bg-[var(--surface-2)] p-[12px]">
                 <textarea
+                  tabIndex={-1}
                   value={commentText}
                   placeholder={tr(
                     'issue.detail.commentPlaceholder',
@@ -1710,6 +1767,7 @@ export function IssueDetailPage({
                   )}
                   className="min-h-[82px] w-full resize-y bg-transparent text-[14px] leading-relaxed text-[var(--ink-muted)] outline-none placeholder:text-[var(--ink-tertiary)]"
                   onChange={(event) => setCommentText(event.target.value)}
+                  onKeyDown={preventTabFocusChange}
                   onFocus={() =>
                     onAction(
                       tr(
@@ -1943,7 +2001,9 @@ export function IssueDetailPage({
                 {linkedSessionLinks.length === 0 && (
                   <button
                     type="button"
+                    data-command-id="issue.session.create"
                     disabled={action === 'create-session' || detailLoading || worktreeSessionOpen}
+                    title={tr('issue.detail.createSession', 'Create session')}
                     className="inline-flex h-7 max-w-full items-center gap-1.5 rounded-full bg-[var(--primary)] px-2.5 text-[12px] font-bold leading-none text-[var(--on-primary)] transition hover:bg-[var(--primary-hover)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70 disabled:active:scale-100"
                     onClick={() => void handleOpenCreateSessionDialog()}
                   >
@@ -2002,6 +2062,7 @@ export function IssueDetailPage({
 }
 
 function IssueDetailHeader({
+  headingRef,
   issue,
   projectName,
   onBack,
@@ -2019,6 +2080,7 @@ function IssueDetailHeader({
   onCloseWorktreeSession,
   onCreateWorktreeSession,
 }: {
+  headingRef: RefObject<HTMLHeadingElement | null>;
   issue: IssueDetailItem;
   projectName: string;
   onBack: () => void;
@@ -2091,7 +2153,9 @@ function IssueDetailHeader({
         />
         <button
           type="button"
+          data-command-id="issue.detail.back"
           className="truncate text-[16px] font-semibold leading-none text-[var(--ink)] transition hover:text-[var(--ink)]"
+          title={tr('issue.header.title', 'Issues')}
           onClick={onBack}
         >
           {tr('issue.header.title', 'Issues')}
@@ -2101,7 +2165,12 @@ function IssueDetailHeader({
           className="h-[15px] w-[15px] shrink-0 text-[#8f9298]"
           strokeWidth={2.4}
         />
-        <h1 className="flex min-w-0 items-baseline gap-1 text-[16px] font-semibold leading-none text-[var(--ink)]">
+        <h1
+          ref={headingRef}
+          tabIndex={-1}
+          data-shortcut-focus="issue-detail-heading"
+          className="flex min-w-0 items-baseline gap-1 text-[16px] font-semibold leading-none text-[var(--ink)] outline-none"
+        >
           <IssueDisplayId
             id={issue.id}
             maxWidthPx={105}
@@ -2373,7 +2442,9 @@ function StatusDropdown({
     <div className="relative">
       <button
         type="button"
+        data-command-id="issue.status.open"
         disabled={disabled}
+        title={tr('issue.detail.changeStatus', 'Change status...')}
         aria-haspopup="listbox"
         aria-expanded={open}
         className="inline-flex h-7 max-w-full items-center gap-2 rounded-full px-1.5 text-[14px] font-normal leading-none text-[var(--ink)] transition hover:bg-[var(--surface-4)] hover:text-[var(--ink)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
@@ -2471,7 +2542,9 @@ function PriorityDropdown({
     <div className="relative">
       <button
         type="button"
+        data-command-id="issue.priority.open"
         disabled={disabled}
+        title={tr('issue.detail.setPriority', 'Set priority to...')}
         aria-haspopup="listbox"
         aria-expanded={open}
         className="inline-flex h-7 max-w-full items-center gap-2 rounded-full px-1.5 text-[14px] font-normal leading-none text-[var(--ink)] transition hover:bg-[var(--surface-4)] hover:text-[var(--ink)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
@@ -2485,7 +2558,7 @@ function PriorityDropdown({
         <CommandMenuShell>
           <CommandSearchRow
             placeholder={tr('issue.detail.setPriority', 'Set priority to...')}
-            shortcut="P"
+            shortcut="K"
             value={query}
             onChange={onQueryChange}
           />
@@ -2801,6 +2874,7 @@ function LabelDropdown({
         ))}
         <button
           type="button"
+          data-command-id="issue.labels.open"
           disabled={disabled}
           aria-haspopup="listbox"
           aria-expanded={open}

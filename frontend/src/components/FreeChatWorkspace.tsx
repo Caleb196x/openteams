@@ -37,6 +37,12 @@ import { ScrollArea } from "@/components/ScrollArea";
 import { AgentMessageContent } from "@/components/AgentMessageContent";
 import { SessionSourceControlPanel } from "@/components/source-control/SessionSourceControlPanel";
 import {
+  useCommandHandler,
+  useShortcutScope,
+} from "@/shortcuts/ShortcutProvider";
+import { CommandTooltip } from "@/shortcuts/CommandTooltip";
+import { preventTabFocusChange } from "@/shortcuts/textInputFocus";
+import {
   chatMessagesApi,
   chatRunsApi,
   sessionAgentsApi,
@@ -451,12 +457,14 @@ const translateWithFallback = (
 function LinkedWorkItemRow({
   item,
   statusPending,
+  statusMenuRequestKey,
   onOpen,
   onStatusChange,
   t,
 }: {
   item: ProjectWorkItem;
   statusPending: boolean;
+  statusMenuRequestKey: number;
   onOpen: (item: ProjectWorkItem) => void;
   onStatusChange: (
     item: ProjectWorkItem,
@@ -466,6 +474,7 @@ function LinkedWorkItemRow({
 }) {
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const statusMenuRef = useRef<HTMLDivElement | null>(null);
+  const statusTriggerRef = useRef<HTMLButtonElement | null>(null);
   const issueStatus = linkedWorkItemIssueStatus(item.status);
   const statusLabel =
     translateWithFallback(
@@ -484,6 +493,12 @@ function LinkedWorkItemRow({
     document.addEventListener("mousedown", handlePointerDown);
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, [statusMenuOpen]);
+
+  useEffect(() => {
+    if (!statusMenuRequestKey || statusPending) return;
+    setStatusMenuOpen(true);
+    window.requestAnimationFrame(() => statusTriggerRef.current?.focus());
+  }, [statusMenuRequestKey, statusPending]);
 
   const handleStatusSelect = (status: ProjectWorkItem["status"]) => {
     setStatusMenuOpen(false);
@@ -511,8 +526,26 @@ function LinkedWorkItemRow({
           {item.title}
         </span>
       </button>
-      <div ref={statusMenuRef} className="relative shrink-0">
+      <div
+        ref={statusMenuRef}
+        className="relative shrink-0"
+        onKeyDown={(event) => {
+          if (!statusMenuOpen) return;
+          if (event.key === "Escape") {
+            event.preventDefault();
+            setStatusMenuOpen(false);
+            return;
+          }
+          const option = linkedWorkItemStatusOptions.find(
+            (candidate) => candidate.shortcut === event.key,
+          );
+          if (!option) return;
+          event.preventDefault();
+          handleStatusSelect(option.value);
+        }}
+      >
         <button
+          ref={statusTriggerRef}
           type="button"
           disabled={statusPending}
           aria-haspopup="listbox"
@@ -522,12 +555,6 @@ function LinkedWorkItemRow({
             setStatusMenuOpen((current) => !current);
           }}
           className="inline-flex h-full max-w-[128px] items-center gap-1.5 rounded-r-md bg-[var(--surface-1)] px-2 py-1.5 text-[var(--ink-tertiary)] transition hover:bg-[var(--surface-2)] hover:text-[var(--ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/40 disabled:cursor-not-allowed disabled:opacity-70"
-          title={translateWithFallback(
-            t,
-            "linkedWorkItems.changeStatusTitle",
-            "Change status: {status}",
-            { status: statusLabel },
-          )}
           aria-label={translateWithFallback(
             t,
             "linkedWorkItems.changeStatusFor",
@@ -823,7 +850,15 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
   const [relatedFilesWidth, setRelatedFilesWidth] = useState(
     RELATED_FILES_DEFAULT_WIDTH,
   );
+  const [sourceControlFocusRequestKey, setSourceControlFocusRequestKey] =
+    useState(0);
+  const [commitMessageFocusRequestKey, setCommitMessageFocusRequestKey] =
+    useState(0);
   const [linkedWorkItems, setLinkedWorkItems] = useState<ProjectWorkItem[]>([]);
+  const [
+    linkedWorkItemStatusMenuRequestKey,
+    setLinkedWorkItemStatusMenuRequestKey,
+  ] = useState(0);
   const [linkedWorkItemsLoading, setLinkedWorkItemsLoading] = useState(false);
   const [linkedWorkItemsError, setLinkedWorkItemsError] = useState<
     string | null
@@ -835,6 +870,7 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
     () => new Set(),
   );
   const workspaceGridRef = useRef<HTMLDivElement>(null);
+  const workspaceRootRef = useRef<HTMLDivElement>(null);
   const chatMessagesScrollRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -1108,6 +1144,68 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
     setWasRelatedFilesAutoCollapsed(false);
     setIsRelatedFilesOpen(false);
   };
+
+  const handleTogglePlanMode = useCallback(() => {
+    setChatInputMode(chatInputMode === "workflow" ? "free" : "workflow");
+  }, [chatInputMode, setChatInputMode]);
+
+  useShortcutScope('session-workspace', {
+    active: Boolean(activeSessionId),
+    rootRef: workspaceRootRef,
+  });
+  useShortcutScope('chat-composer', {
+    active: Boolean(activeSessionId),
+    rootRef: inputRef,
+  });
+  useCommandHandler('session.plan-mode.toggle', {
+    scope: 'focused-component',
+    enabled: Boolean(activeSessionId),
+    allowInEditable: true,
+    ownsEventTarget: (target) => target === inputRef.current,
+    execute: handleTogglePlanMode,
+  });
+  useCommandHandler('sidebar.right.toggle', {
+    scope: "page",
+    enabled: Boolean(activeSessionId),
+    execute: () => {
+      if (isRelatedFilesOpen) closeRelatedFiles();
+      else openRelatedFiles();
+    },
+  });
+  useCommandHandler('source-control.open', {
+    scope: "global",
+    enabled: Boolean(activeSessionId && selectedProjectId),
+    disabledReason:
+      activeSessionId && selectedProjectId
+        ? undefined
+        : t("shortcuts.reason.selectProject"),
+    execute: () => {
+      openRelatedFiles();
+      setSourceControlFocusRequestKey((value) => value + 1);
+    },
+  });
+  useCommandHandler('source-control.commit-message.focus', {
+    scope: "page",
+    enabled: Boolean(activeSessionId && selectedProjectId),
+    disabledReason:
+      activeSessionId && selectedProjectId
+        ? undefined
+        : t("shortcuts.reason.selectProject"),
+    execute: () => {
+      openRelatedFiles();
+      setCommitMessageFocusRequestKey((value) => value + 1);
+    },
+  });
+  useCommandHandler('session.linked-issue.status.open', {
+    scope: "page",
+    enabled: Boolean(
+      activeSessionId &&
+        linkedWorkItems.length > 0 &&
+        !updatingLinkedWorkItemIds.has(linkedWorkItems[0].id),
+    ),
+    execute: () =>
+      setLinkedWorkItemStatusMenuRequestKey((value) => value + 1),
+  });
 
   useEffect(() => {
     const handleSourceControlRefreshRequested = (event: Event) => {
@@ -1701,8 +1799,8 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
                     }
                     disabled={queueActionIds.has(item.message.id)}
                     className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--ink-tertiary)] transition hover:bg-[var(--surface-3)] hover:text-rose-500 disabled:cursor-wait disabled:opacity-60"
-                    title="删除排队消息"
-                    aria-label="删除排队消息"
+                    title={t("queue.deleteMessage")}
+                    aria-label={t("queue.deleteMessage")}
                   >
                     <Trash2 className="h-3 w-3" />
                   </button>
@@ -1723,8 +1821,8 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
               }
               disabled={queueActionIds.has(continueActionId)}
               className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--ink-tertiary)] transition hover:bg-[var(--surface-2)] hover:text-[var(--primary)] disabled:cursor-wait disabled:opacity-60"
-              title="继续执行队列"
-              aria-label="继续执行队列"
+              title={t("queue.continueExecution")}
+              aria-label={t("queue.continueExecution")}
             >
               <Play className="h-3 w-3" />
             </button>
@@ -1733,6 +1831,24 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
       </div>
     );
   };
+
+  const handleJumpToMessage = useCallback(
+    (messageId: string) => {
+      chatAutoFollowRef.current = false;
+      const scrollToMessage = () =>
+        document
+          .getElementById(`chat-message-${messageId}`)
+          ?.scrollIntoView({ behavior: "smooth", block: "center" });
+
+      if (selectedSidebarMemberId) {
+        setSelectedSidebarMemberId(null);
+        window.requestAnimationFrame(scrollToMessage);
+        return;
+      }
+      scrollToMessage();
+    },
+    [selectedSidebarMemberId],
+  );
 
   const handleCopyAgentMessage = async (messageId: string, text: string) => {
     try {
@@ -1973,6 +2089,11 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Let the shortcut provider consume Shift+Tab for plan mode while keeping
+    // plain Tab from moving focus out of the composer.
+    if (e.key === "Tab" && e.shiftKey) return;
+    if (preventTabFocusChange(e)) return;
+
     if (isMemberPickerOpen) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -2014,10 +2135,6 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
       e.preventDefault();
       void handleSend();
     }
-  };
-
-  const handleTogglePlanMode = () => {
-    setChatInputMode(chatInputMode === "workflow" ? "free" : "workflow");
   };
 
   // Quick summon clicks
@@ -2302,6 +2419,7 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
 
   return (
     <div
+      ref={workspaceRootRef}
       className={
         embedded
           ? "relative h-full w-full flex flex-col font-sans text-xs select-none"
@@ -2387,16 +2505,17 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
               className={`absolute top-1.5 z-20 flex h-7 items-center gap-1.5 rounded-full border border-amber-500/35 bg-[var(--surface-1)]/95 px-3 text-[10px] font-medium text-amber-600 shadow-sm backdrop-blur transition-colors hover:bg-amber-500/10 dark:text-amber-400 ${
                 isRelatedFilesOpen ? "right-7" : "right-10"
               }`}
-              title="Jump to unfinished workflow"
-              aria-label="Jump to unfinished workflow"
+              title={t("workflow.activeWorkflow.jumpToUnfinished")}
+              aria-label={t("workflow.activeWorkflow.jumpToUnfinished")}
             >
               <GitBranch className="h-3.5 w-3.5" />
-              <span>Active Workflow</span>
+              <span>{t("workflow.activeWorkflow.label")}</span>
             </button>
           )}
           {!isRelatedFilesOpen && (
             <button
               type="button"
+              data-command-id="sidebar.right.toggle"
               onClick={openRelatedFiles}
               className="absolute top-1 right-1 z-10 flex h-7 w-7 items-center justify-center rounded-md border border-[var(--hairline)] bg-[var(--surface-1)] text-[var(--ink-subtle)] shadow-sm transition hover:bg-[var(--surface-3)] hover:text-[var(--ink)]"
               title={t("relatedFiles.show")}
@@ -2493,6 +2612,27 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
                         </div>
                       </div>
                     </div>
+                  )}
+
+                  {msg.agentSourceMessage && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleJumpToMessage(msg.agentSourceMessage!.id)
+                      }
+                      className="mb-2 flex w-full min-w-0 items-center gap-1.5 rounded-sm text-left text-[10px] font-mono text-[var(--ink-tertiary)] transition-colors hover:text-[var(--primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-focus)]"
+                      title={msg.agentSourceMessage.content}
+                    >
+                      <Quote className="h-3 w-3 shrink-0" />
+                      <span className="shrink-0 font-semibold text-[var(--ink-muted)]">
+                        {msg.agentSourceMessage.sender}
+                      </span>
+                      <span aria-hidden="true">·</span>
+                      <span className="truncate">
+                        {msg.agentSourceMessage.summary ||
+                          t("message.quoteEmpty")}
+                      </span>
+                    </button>
                   )}
 
                   {msg.isUser ? (
@@ -2761,6 +2901,7 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
               {/* Text Area */}
               <textarea
                 ref={inputRef}
+                tabIndex={-1}
                 rows={1}
                 className="w-full bg-transparent resize-none border-none text-[16px] leading-6 text-[var(--ink)] outline-none placeholder:text-[var(--ink-tertiary)] select-text overflow-y-auto md:text-[13px] md:leading-normal"
                 style={{
@@ -2804,32 +2945,29 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
                     )}
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      handleTogglePlanMode();
-                    }}
-                    className={`plan-mode-toggle flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-medium transition cursor-pointer ${
-                      isPlanMode
-                        ? "plan-mode-toggle-active border-[var(--primary)] bg-[var(--primary-tint)] text-[var(--primary)]"
-                        : "border-[var(--hairline)] bg-[var(--surface-2)] text-[var(--ink-muted)] hover:bg-[var(--surface-3)]"
-                    }`}
-                    title={
-                      isPlanMode
-                        ? t("switchToChatMode")
-                        : t("switchToPlanMode")
-                    }
-                    aria-pressed={isPlanMode}
-                    aria-label={
-                      isPlanMode
-                        ? t("switchToChatMode")
-                        : t("switchToPlanMode")
-                    }
-                  >
-                    <GitBranch className="h-3 w-3" />
-                    <span>{t("planMode")}</span>
-                  </button>
+                  <CommandTooltip commandId="session.plan-mode.toggle">
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleTogglePlanMode();
+                      }}
+                      className={`plan-mode-toggle flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-medium transition cursor-pointer ${
+                        isPlanMode
+                          ? "plan-mode-toggle-active border-[var(--primary)] bg-[var(--primary-tint)] text-[var(--primary)]"
+                          : "border-[var(--hairline)] bg-[var(--surface-2)] text-[var(--ink-muted)] hover:bg-[var(--surface-3)]"
+                      }`}
+                      aria-pressed={isPlanMode}
+                      aria-label={
+                        isPlanMode
+                          ? t("switchToChatMode")
+                          : t("switchToPlanMode")
+                      }
+                    >
+                      <GitBranch className="h-3 w-3" />
+                      <span>{t("planMode")}</span>
+                    </button>
+                  </CommandTooltip>
                 </div>
 
                 {/* Right controls: session members, voice icon, and send action */}
@@ -2978,6 +3116,7 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
           >
             <button
               type="button"
+              data-command-id="sidebar.right.toggle"
               onClick={closeRelatedFiles}
               className="absolute right-1 top-0 z-10 flex h-7 w-7 items-center justify-center rounded-md border border-[var(--hairline)] bg-[var(--surface-1)] text-[var(--ink-subtle)] transition hover:bg-[var(--surface-3)] hover:text-[var(--ink)]"
               title={t("relatedFiles.hide")}
@@ -3060,6 +3199,7 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
                   }
                   className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[var(--hairline)] bg-[var(--surface-1)] text-[var(--ink-subtle)] transition hover:border-[var(--hairline-strong)] hover:bg-[var(--surface-3)] hover:text-[var(--ink)]"
                   title={t("inviteMember")}
+                  data-tooltip-nowrap
                   aria-label={t("inviteMember")}
                 >
                   <Plus className="h-3.5 w-3.5" />
@@ -3105,6 +3245,11 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
                         key={item.id}
                         item={item}
                         statusPending={updatingLinkedWorkItemIds.has(item.id)}
+                        statusMenuRequestKey={
+                          item.id === linkedWorkItems[0]?.id
+                            ? linkedWorkItemStatusMenuRequestKey
+                            : 0
+                        }
                         onOpen={handleOpenLinkedWorkItem}
                         t={t}
                         onStatusChange={(nextItem, status) => {
@@ -3130,6 +3275,8 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
               }
               fallbackRelatedFiles={plainRelatedFilesContent}
               linkedWorkItemIds={linkedWorkItems.map((item) => item.id)}
+              focusRequestKey={sourceControlFocusRequestKey}
+              commitFocusRequestKey={commitMessageFocusRequestKey}
               onOpenDiff={(projectId, sessionId, filePath, area) => {
                 onOpenSourceControlDiffTab?.(
                   projectId,

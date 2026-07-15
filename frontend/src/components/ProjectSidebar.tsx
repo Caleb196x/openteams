@@ -57,6 +57,8 @@ import { useAppScale } from "@/context/AppScaleContext";
 import { chatSessionsApi, filesystemApi } from "@/lib/api";
 import { buildStatsApi } from "@/lib/buildStatsApi";
 import { onBuildStatsUpdated } from "@/lib/buildStatsEvents";
+import { useCommandHandler } from "@/shortcuts/ShortcutProvider";
+import { CommandTooltip } from "@/shortcuts/CommandTooltip";
 import { formatNumber } from "@/lib/buildStatsUtils";
 import {
   projectDisplayDescription,
@@ -336,6 +338,13 @@ function SidebarNavigationButton({
   return (
     <button
       type="button"
+      data-command-id={
+        item.id === "project-issue"
+          ? "issue.open-list"
+          : item.id === "settings"
+            ? "settings.open"
+            : undefined
+      }
       disabled={item.disabled}
       onClick={onClick}
       title={title}
@@ -1319,6 +1328,16 @@ export function ProjectSidebar({
     resetWorkspaceDirectoryRename();
   };
 
+  useCommandHandler('project.create', {
+    scope: 'global',
+    enabled: Boolean(onCreateProject),
+    execute: () => {
+      closeProjectMenus();
+      resetProjectForm();
+      setCreateFormOpen(true);
+    },
+  });
+
   const closeProjectForm = () => {
     setCreateFormOpen(false);
     setCreateError(null);
@@ -1817,20 +1836,22 @@ export function ProjectSidebar({
               </div>
               {onCreateProject && (
                 <div className="border-t border-[var(--hairline)] mt-1.5 pt-1.5">
-                  <button
-                    type="button"
-                    className={`${sidebarItemClass} cursor-pointer border-none bg-transparent font-medium text-[var(--ink)] hover:bg-[var(--surface-1)] hover:text-[var(--ink)]`}
-                    onClick={() => {
-                      resetProjectForm();
-                      setCreateFormOpen(true);
-                      closeProjectMenus();
-                    }}
-                  >
-                    <Plus className="h-3.5 w-3.5 shrink-0 text-[var(--ink-tertiary)]" />
-                    <span className="min-w-0 flex-1 truncate">
-                      {translate("sidebar.createProject", "Create project")}
-                    </span>
-                  </button>
+                  <CommandTooltip commandId="project.create">
+                    <button
+                      type="button"
+                      className={`${sidebarItemClass} cursor-pointer border-none bg-transparent font-medium text-[var(--ink)] hover:bg-[var(--surface-1)] hover:text-[var(--ink)]`}
+                      onClick={() => {
+                        resetProjectForm();
+                        setCreateFormOpen(true);
+                        closeProjectMenus();
+                      }}
+                    >
+                      <Plus className="h-3.5 w-3.5 shrink-0 text-[var(--ink-tertiary)]" />
+                      <span className="min-w-0 flex-1 truncate">
+                        {translate("sidebar.createProject", "Create project")}
+                      </span>
+                    </button>
+                  </CommandTooltip>
                 </div>
               )}
             </div>,
@@ -2699,6 +2720,11 @@ export function ProjectSidebar({
               <button
                 key={action.id}
                 type="button"
+                data-command-id={
+                  action.id === "search"
+                    ? "search.open"
+                    : "session.create"
+                }
                 className={`${sidebarItemClass} cursor-pointer border-transparent text-[var(--ink-subtle)] hover:bg-[var(--surface-1)] hover:text-[var(--ink)]`}
                 onClick={() => onPrimaryAction(action)}
                 title={translate(
@@ -2726,6 +2752,7 @@ export function ProjectSidebar({
           <div className="flex items-center gap-1 px-[7px] py-2">
             <button
               type="button"
+              data-command-id="build-stats.open"
               className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-sm text-left outline-none transition hover:text-[var(--ink)] focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
               onClick={openBuildStatsPage}
               title={translate(

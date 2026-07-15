@@ -84,11 +84,14 @@ interface SourceControlFileRowProps {
   area: SourceControlDiffArea;
   viewModel: SourceControlPanelViewModel;
   pending: boolean;
+  selected: boolean;
+  rowRef: (node: HTMLDivElement | null) => void;
   t: SourceControlTranslator;
   onOpenDiff: (file: SourceControlFile, area: SourceControlDiffArea) => void;
   onStage: (file: SourceControlFile) => void;
   onUnstage: (file: SourceControlFile) => void;
   onDiscard: (file: SourceControlFile) => void;
+  onSelect: (path: string) => void;
 }
 
 const statusTone: Record<SourceControlFile["status"], string> = {
@@ -374,11 +377,14 @@ export const SourceControlFileRow: React.FC<SourceControlFileRowProps> = ({
   area,
   viewModel,
   pending,
+  selected,
+  rowRef,
   t,
   onOpenDiff,
   onStage,
   onUnstage,
   onDiscard,
+  onSelect,
 }) => {
   const stageDisabledReason = getFileActionDisabledReason(
     viewModel,
@@ -423,14 +429,24 @@ export const SourceControlFileRow: React.FC<SourceControlFileRowProps> = ({
 
   return (
     <div
-      className="group/source-file relative flex min-h-8 w-full min-w-0 items-center gap-2 rounded-lg border border-transparent bg-[color-mix(in_srgb,var(--surface-1)_76%,var(--canvas))] px-2 py-1 text-left text-[12px] transition-colors hover:border-[color-mix(in_srgb,var(--hairline)_72%,transparent)] hover:bg-[var(--surface-2)]"
-      title={fullPath}
+      ref={rowRef}
+      data-source-control-path={file.path}
+      tabIndex={selected ? 0 : -1}
+      onFocus={() => onSelect(file.path)}
+      onClick={() => onSelect(file.path)}
+      className={`group/source-file relative flex min-h-8 w-full min-w-0 items-center gap-2 rounded-lg border bg-[color-mix(in_srgb,var(--surface-1)_76%,var(--canvas))] px-2 py-1 text-left text-[12px] transition-colors hover:border-[color-mix(in_srgb,var(--hairline)_72%,transparent)] hover:bg-[var(--surface-2)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)] ${
+        selected
+          ? "border-[color-mix(in_srgb,var(--primary)_45%,var(--hairline))]"
+          : "border-transparent"
+      }`}
     >
       <div className="flex min-w-0 flex-1 items-center">
         <button
           type="button"
           onClick={() => onOpenDiff(file, area)}
           title={fullPath}
+          data-tooltip-break-all
+          data-tooltip-hover-only
           className="flex min-w-0 flex-1 items-center gap-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)]"
           aria-label={translateSourceControl(
             t,
@@ -442,7 +458,6 @@ export const SourceControlFileRow: React.FC<SourceControlFileRowProps> = ({
           <SourceControlFileTypeIcon path={file.path} />
           <span
             className="min-w-0 flex-1 truncate font-mono text-[12px] text-[var(--ink-muted)]"
-            title={fullPath}
           >
             {file.path}
           </span>

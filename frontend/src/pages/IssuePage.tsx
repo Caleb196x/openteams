@@ -24,6 +24,7 @@ import {
   useRef,
   useState,
   type Dispatch,
+  type MutableRefObject,
   type ReactNode,
   type SetStateAction,
   type SVGProps,
@@ -43,6 +44,10 @@ import {
 } from '@/components/NotificationToast';
 import { ProjectBreadcrumbAvatar } from '@/components/ProjectBreadcrumbAvatar';
 import { useWorkspace } from '@/context/WorkspaceContext';
+import {
+  useCommandHandler,
+  useShortcutScope,
+} from '@/shortcuts/ShortcutProvider';
 import {
   githubAuthApi,
   projectApi,
@@ -751,6 +756,10 @@ export function IssuePage() {
   const [authStatus, setAuthStatus] = useState<string | null>(null);
   const oauthFallbackStartedRef = useRef(false);
   const workItemsRequestIdRef = useRef(0);
+  const issueListRef = useRef<HTMLDivElement>(null);
+  const issueDetailRef = useRef<HTMLDivElement>(null);
+  const issueRowRefs = useRef(new Map<string, HTMLElement>());
+  const originIssueRowIdRef = useRef<string | null>(null);
   const selectedProjectName = useMemo(
     () =>
       projects.find((project) => project.id === selectedProjectId)?.name ??
@@ -782,6 +791,13 @@ export function IssuePage() {
   const visibleIssueCount = visibleGroups.reduce(
     (total, group) => total + group.items.length,
     0,
+  );
+  const visibleIssues = useMemo(
+    () =>
+      visibleGroups.flatMap((group) =>
+        collapsedGroups.has(group.id) ? [] : group.items,
+      ),
+    [collapsedGroups, visibleGroups],
   );
   const linkedRepo = integrationState?.primary_repository ?? null;
   const linkedRepoId = linkedRepo?.id ?? '';
@@ -869,12 +885,16 @@ export function IssuePage() {
       selectedProjectName,
       issueRowOverrides,
     ).flatMap((group) => group.items);
+    const pendingTargetWorkItemId =
+      pendingIssueTarget && 'workItemId' in pendingIssueTarget
+        ? pendingIssueTarget.workItemId
+        : null;
     const pendingTargetIssue =
-      pendingIssueTarget?.workItemId &&
-      (!pendingIssueTarget.projectId ||
+      pendingTargetWorkItemId &&
+      (!pendingIssueTarget?.projectId ||
         pendingIssueTarget.projectId === selectedProjectId)
         ? allIssues.find(
-            (issue) => issue.workItemId === pendingIssueTarget.workItemId,
+            (issue) => issue.workItemId === pendingTargetWorkItemId,
           )
         : null;
     if (pendingTargetIssue) {
@@ -885,8 +905,8 @@ export function IssuePage() {
       return;
     }
     if (
-      pendingIssueTarget?.workItemId &&
-      (!pendingIssueTarget.projectId ||
+      pendingTargetWorkItemId &&
+      (!pendingIssueTarget?.projectId ||
         pendingIssueTarget.projectId === selectedProjectId) &&
       !workItemsLoading
     ) {
@@ -1171,15 +1191,81 @@ export function IssuePage() {
   };
 
   const handleIssueSelect = (issue: IssueItem) => {
+    originIssueRowIdRef.current = issue.id;
     setSelectedIssueId(issue.id);
     setActiveIssue(issue);
     setInteractionMessage(tr('issue.action.opened', 'Opened {id}', { id: issue.id }));
   };
 
+  const focusIssueRow = (issueId: string) => {
+    const row = issueRowRefs.current.get(issueId);
+    row?.focus();
+    row?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  };
+
+  const focusSelectedOrFirstIssueRow = useCallback(() => {
+    const nextIssue =
+      visibleIssues.find((issue) => issue.id === selectedIssueId) ??
+      visibleIssues[0];
+    if (!nextIssue) return;
+    setSelectedIssueId(nextIssue.id);
+    focusIssueRow(nextIssue.id);
+  }, [selectedIssueId, visibleIssues]);
+
   const handleIssueBack = () => {
     setActiveIssue(null);
     setInteractionMessage(tr('issue.action.returnedToIssues', 'Returned to issues'));
+    window.requestAnimationFrame(() => {
+      const originId = originIssueRowIdRef.current;
+      if (originId && issueRowRefs.current.has(originId)) focusIssueRow(originId);
+      else focusSelectedOrFirstIssueRow();
+    });
   };
+
+  const moveIssueSelection = (offset: -1 | 1) => {
+    if (visibleIssues.length === 0) return;
+    const currentIndex = Math.max(
+      0,
+      visibleIssues.findIndex((issue) => issue.id === selectedIssueId),
+    );
+    const nextIssue =
+      visibleIssues[
+        (currentIndex + offset + visibleIssues.length) % visibleIssues.length
+      ];
+    setSelectedIssueId(nextIssue.id);
+    focusIssueRow(nextIssue.id);
+  };
+
+  const openSelectedIssue = () => {
+    const issue =
+      visibleIssues.find((candidate) => candidate.id === selectedIssueId) ??
+      visibleIssues[0];
+    if (issue) handleIssueSelect(issue);
+  };
+
+  useShortcutScope('issue-list', {
+    active: activeIssue === null,
+    rootRef: issueListRef,
+  });
+  useShortcutScope('issue-detail', {
+    active: activeIssue !== null,
+    rootRef: issueDetailRef,
+  });
+  useCommandHandler('issue.selection.next', {
+    scope: 'focused-component',
+    enabled: activeIssue === null && visibleIssues.length > 1,
+    execute: () => moveIssueSelection(1),
+  });
+  useCommandHandler('issue.selection.previous', {
+    scope: 'focused-component',
+    enabled: activeIssue === null && visibleIssues.length > 1,
+    execute: () => moveIssueSelection(-1),
+  });
+  useCommandHandler('issue.selection.open', {
+    scope: 'focused-component',
+    enabled: activeIssue === null && visibleIssues.length > 0,
+    execute: openSelectedIssue,
+  });
 
   const handleAction = (message: string) => {
     setInteractionMessage(message);
@@ -1290,6 +1376,34 @@ export function IssuePage() {
     },
     [],
   );
+
+  useEffect(() => {
+    if (!pendingIssueTarget || !workItemsReady) return;
+    if (
+      pendingIssueTarget.projectId &&
+      pendingIssueTarget.projectId !== selectedProjectId
+    ) {
+      return;
+    }
+    if (pendingIssueTarget.kind === 'create') {
+      clearIssueNavigationTarget();
+      setPendingIssueTarget(null);
+      openCreateIssueDialog('open');
+      return;
+    }
+    if (pendingIssueTarget.kind === 'list') {
+      clearIssueNavigationTarget();
+      setPendingIssueTarget(null);
+      setActiveIssue(null);
+      window.requestAnimationFrame(() => focusSelectedOrFirstIssueRow());
+    }
+  }, [
+    focusSelectedOrFirstIssueRow,
+    openCreateIssueDialog,
+    pendingIssueTarget,
+    selectedProjectId,
+    workItemsReady,
+  ]);
 
   const handleCreateIssue = useCallback(
     async ({
@@ -1703,6 +1817,7 @@ export function IssuePage() {
         />
       )}
       {activeIssue && workItemsReady ? (
+        <div ref={issueDetailRef} className="contents">
         <IssueDetailPage
           projectId={selectedProjectId}
           projectName={selectedProjectName}
@@ -1721,6 +1836,7 @@ export function IssuePage() {
           onOpenIntegrations={handleOpenIntegrations}
           tr={tr}
         />
+        </div>
       ) : (
         <>
           <IssueHeader
@@ -1740,7 +1856,7 @@ export function IssuePage() {
             tr={tr}
           />
 
-          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[var(--surface-2)] pb-10">
+          <div ref={issueListRef} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[var(--surface-2)] pb-10">
             {suppressIssuePlaceholder ? (
               null
             ) : workItemsError ? (
@@ -1779,6 +1895,7 @@ export function IssuePage() {
                     group={group}
                     collapsed={collapsedGroups.has(group.id)}
                     selectedIssueId={selectedIssueId}
+                    issueRowRefs={issueRowRefs}
                     onToggle={() => handleGroupToggle(group.id)}
                     onIssueSelect={handleIssueSelect}
                     onCreateIssue={() =>
@@ -2868,8 +2985,10 @@ function IssueToolbar({
         />
         <button
           type="button"
+          data-command-id="issue.create"
           className="ml-5 flex h-[26px] w-[26px] items-center justify-center rounded-full text-[#8a8d93] transition hover:bg-[#1d1e20] hover:text-[#f4f4f5]"
           aria-label={tr('issue.toolbar.createIssue', 'Create issue')}
+          title={tr('issue.toolbar.createIssue', 'Create issue')}
           onClick={() => onCreateIssue()}
         >
           <Plus aria-hidden="true" className="h-[15px] w-[15px]" />
@@ -2981,6 +3100,7 @@ function IssueSection({
   group,
   collapsed,
   selectedIssueId,
+  issueRowRefs,
   onToggle,
   onIssueSelect,
   onCreateIssue,
@@ -2993,6 +3113,7 @@ function IssueSection({
   group: IssueGroup;
   collapsed: boolean;
   selectedIssueId: string;
+  issueRowRefs: MutableRefObject<Map<string, HTMLElement>>;
   onToggle: () => void;
   onIssueSelect: (issue: IssueItem) => void;
   onCreateIssue: () => void;
@@ -3069,6 +3190,10 @@ function IssueSection({
               key={issue.id}
               issue={issue}
               selected={selectedIssueId === issue.id}
+              rowRef={(node) => {
+                if (node) issueRowRefs.current.set(issue.id, node);
+                else issueRowRefs.current.delete(issue.id);
+              }}
               onSelect={() => onIssueSelect(issue)}
               statusOptions={statusOptions}
               priorityOptions={priorityOptions}
@@ -3085,6 +3210,7 @@ function IssueSection({
 function IssueRow({
   issue,
   selected,
+  rowRef: registerRowRef,
   onSelect,
   statusOptions,
   priorityOptions,
@@ -3094,6 +3220,7 @@ function IssueRow({
 }: {
   issue: IssueItem;
   selected: boolean;
+  rowRef: (node: HTMLElement | null) => void;
   onSelect: () => void;
   statusOptions: Array<IssueRowMenuOption<ProjectWorkItemStatus>>;
   priorityOptions: Array<IssueRowMenuOption<ProjectWorkItemPriority>>;
@@ -3181,9 +3308,13 @@ function IssueRow({
 
   return (
     <article
-      ref={rowRef}
+      ref={(node) => {
+        rowRef.current = node;
+        registerRowRef(node);
+      }}
       role="button"
-      tabIndex={0}
+      data-issue-row-id={issue.id}
+      tabIndex={selected ? 0 : -1}
       aria-selected={selected}
       onClick={onSelect}
       onKeyDown={(event) => {

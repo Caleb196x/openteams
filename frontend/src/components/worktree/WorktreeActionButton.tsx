@@ -1,11 +1,13 @@
 import React from 'react';
 import { Loader2 } from 'lucide-react';
+import { CommandTooltip } from '@/shortcuts/CommandTooltip';
 
 export type WorktreeActionButtonTone = 'primary' | 'ghost' | 'danger';
 
 interface WorktreeActionButtonProps {
   label: string;
   title?: string;
+  commandId?: string;
   tone: WorktreeActionButtonTone;
   busy: boolean;
   disabled?: boolean;
@@ -25,20 +27,28 @@ const toneClassName: Record<WorktreeActionButtonTone, string> = {
 export const WorktreeActionButton: React.FC<WorktreeActionButtonProps> = ({
   label,
   title,
+  commandId,
   tone,
   busy,
   disabled = false,
   onClick,
   icon,
-}) => (
-  <button
-    type="button"
-    className={`inline-flex h-6 max-w-full min-w-0 items-center gap-1 rounded-[5px] px-1.5 text-[11px] font-medium leading-none transition disabled:cursor-not-allowed disabled:opacity-40 ${toneClassName[tone]}`}
-    disabled={disabled || busy}
-    onClick={onClick}
-    title={title ?? label}
-  >
-    {busy ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> : icon}
-    <span className="min-w-0 truncate">{label}</span>
-  </button>
-);
+}) => {
+  const button = (
+    <button
+      type="button"
+      className={`inline-flex h-6 max-w-full min-w-0 items-center gap-1 rounded-[5px] px-1.5 text-[11px] font-medium leading-none transition disabled:cursor-not-allowed disabled:opacity-40 ${toneClassName[tone]}`}
+      disabled={disabled || busy}
+      onClick={onClick}
+      {...(commandId ? {} : { title: title ?? label })}
+    >
+      {busy ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> : icon}
+      <span className="min-w-0 truncate">{label}</span>
+    </button>
+  );
+  return commandId ? (
+    <CommandTooltip commandId={commandId}>{button}</CommandTooltip>
+  ) : (
+    button
+  );
+};

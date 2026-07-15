@@ -32,6 +32,7 @@ const hoverWarningIndex = source.indexOf(
   "<FileWarningIndicator file={file} t={t} />",
   actionOverlayIndex,
 );
+const fullPathTitleCount = source.match(/title=\{fullPath\}/g)?.length ?? 0;
 
 check(
   "renders the file warning in both the idle metadata and hover action areas",
@@ -42,14 +43,24 @@ check(
 check(
   "keeps shared-session warning copy on the badge",
   source.includes("Shared with another active session") &&
-    source.includes("file.shared ? \"text-amber-500\" : \"text-rose-500\""),
+    source.includes("file.shared ? \"text-[var(--ink-subtle)]\" : \"text-rose-500\""),
   source,
 );
 
 check(
-  "resolves file-row hover title to the workspace absolute path",
+  "uses one complete absolute-path tooltip source for the file path",
   source.includes("resolveLocalPathToAbsolutePath(file.path, viewModel.workspacePath)") &&
-    source.includes("title={fullPath}"),
+    fullPathTitleCount === 1 &&
+    source.includes("data-tooltip-break-all") &&
+    source.includes("data-tooltip-hover-only"),
+  { fullPathTitleCount, source },
+);
+
+check(
+  "exposes one roving focus target per source-control file",
+  source.includes("data-source-control-path={file.path}") &&
+    source.includes("tabIndex={selected ? 0 : -1}") &&
+    source.includes("onFocus={() => onSelect(file.path)}"),
   source,
 );
 

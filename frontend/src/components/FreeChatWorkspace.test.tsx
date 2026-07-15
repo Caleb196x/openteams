@@ -74,6 +74,10 @@ const memberInviteIndex = source.indexOf(
   'title={t("inviteMember")}',
   memberRailIndex,
 );
+const memberInviteSource =
+  memberInviteIndex >= 0
+    ? source.slice(memberInviteIndex, memberInviteIndex + 160)
+    : "";
 
 check(
   "uses a wider related-files default width",
@@ -188,6 +192,7 @@ check(
     source.includes("ChevronsRight") &&
     source.includes("requestTeamMemberInviteNavigation({") &&
     source.includes("projectId: selectedProjectId ?? undefined") &&
+    memberInviteSource.includes("data-tooltip-nowrap") &&
     !memberRailSource.includes('"..."') &&
     source.includes("selectedSidebarMemberId") &&
     source.includes("const selectedSidebarMember =") &&
@@ -389,6 +394,17 @@ check(
   source,
 );
 check(
+  "agent replies show a compact source-agent message above the response",
+  source.includes("msg.agentSourceMessage") &&
+    source.includes("msg.agentSourceMessage.sender") &&
+    source.includes("msg.agentSourceMessage.summary") &&
+    source.includes('className="truncate"') &&
+    source.includes("handleJumpToMessage(msg.agentSourceMessage!.id)") &&
+    source.includes('getElementById(`chat-message-${messageId}`)') &&
+    source.includes('scrollIntoView({ behavior: "smooth", block: "center" })'),
+  source,
+);
+check(
   "composer supports text/image attachments and clipboard image paste",
   source.includes("CHAT_ATTACHMENT_ACCEPT") &&
     source.includes("allowedAttachmentExtensions") &&
@@ -582,6 +598,11 @@ check(
   source,
 );
 check(
+  "linked work item status trigger does not show a redundant tooltip",
+  !source.includes('"linkedWorkItems.changeStatusTitle"'),
+  source,
+);
+check(
   "refreshes linked work items when a session link event arrives",
   source.includes("LINKED_WORK_ITEMS_CHANGED_EVENT") &&
     source.includes("LinkedWorkItemsChangedDetail") &&
@@ -632,6 +653,14 @@ check(
     !source.includes("handleWorkflowReminderPointerMove") &&
     source.includes('scrollIntoView({ behavior: "smooth", block: "center" })') &&
     source.includes("setSelectedSidebarMemberId(null)"),
+  source,
+);
+check(
+  "localizes the active workflow shortcut",
+  source.includes('t("workflow.activeWorkflow.label")') &&
+    source.includes('t("workflow.activeWorkflow.jumpToUnfinished")') &&
+    !source.includes(">Active Workflow<") &&
+    !source.includes('title="Jump to unfinished workflow"'),
   source,
 );
 

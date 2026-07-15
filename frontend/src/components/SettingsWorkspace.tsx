@@ -32,6 +32,7 @@ import {
 import { DropdownSelect, type DropdownSelectOption } from '@/components/DropdownSelect';
 import { ResourceStateNotice } from '@/components/ResourceState';
 import { ProviderSettingsPanel } from '@/components/settings/ProviderSettingsPanel';
+import { KeyboardShortcutSettings } from '@/shortcuts/KeyboardShortcutSettings';
 import {
   filesystemApi,
   githubAuthApi,
@@ -888,7 +889,7 @@ export const SettingsWorkspace: React.FC = () => {
                     <p className="settings-row-title leading-tight">
                       {translate(
                         'settings.storage.worktreeSessionsDir',
-                        'Session worktree directory',
+                        'Default git worktree directory',
                       )}
                     </p>
                     <p className="settings-row-description mt-1 leading-snug">
@@ -1291,25 +1292,7 @@ export const SettingsWorkspace: React.FC = () => {
       case 'shortcuts':
         return (
           <div className="settings-content-panel space-y-4">
-            <div>
-              <h3 className="text-sm font-semibold text-[var(--ink)] tracking-tight">{t('settings.shortcuts.title')}</h3>
-              <p className="mt-0.5 text-sm text-[var(--ink-subtle)]">{t('settings.shortcuts.desc')}</p>
-            </div>
-
-            <div className="rounded-lg border border-[var(--hairline)] bg-[var(--surface-1)] divide-y divide-[var(--hairline)] font-mono text-sm text-[var(--ink-muted)]">
-              <div className="flex justify-between items-center p-3">
-                <span>{t('settings.shortcuts.toggleWorkspaceSearch')}</span>
-                <kbd className="rounded border border-[var(--hairline-strong)] bg-[var(--surface-3)] px-1.5 py-0.5 text-sm text-[var(--ink)]">⌘K</kbd>
-              </div>
-              <div className="flex justify-between items-center p-3">
-                <span>{t('settings.shortcuts.startTaskExecution')}</span>
-                <kbd className="rounded border border-[var(--hairline-strong)] bg-[var(--surface-3)] px-1.5 py-0.5 text-sm text-[var(--ink)]">⌘↵</kbd>
-              </div>
-              <div className="flex justify-between items-center p-3">
-                <span>{t('settings.shortcuts.dismissModalTriggers')}</span>
-                <kbd className="rounded border border-[var(--hairline-strong)] bg-[var(--surface-3)] px-1.5 py-0.5 text-sm text-[var(--ink)]">esc</kbd>
-              </div>
-            </div>
+            <KeyboardShortcutSettings translate={t} />
           </div>
         );
 

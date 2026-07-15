@@ -1,4 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ChevronRight,
   Loader2,
@@ -7,6 +13,12 @@ import {
 } from "lucide-react";
 import { ConfirmationDialog } from "@/components/ConfirmationDialog";
 import { ScrollArea } from "@/components/ScrollArea";
+import {
+  useCommandHandler,
+  useCommandPresentation,
+  useShortcutScope,
+} from "@/shortcuts/ShortcutProvider";
+import { preventTabFocusChange } from "@/shortcuts/textInputFocus";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import { useSessionSourceControl } from "@/hooks/useSessionSourceControl";
 import { useSessionWorktree } from "@/hooks/useSessionWorktree";
@@ -35,6 +47,7 @@ import {
   type SourceControlSectionViewModel,
   type SourceControlTranslator,
 } from "./sourceControlViewModel";
+import { sourceControlSelectionKey } from "./sourceControlSelection";
 
 interface SessionSourceControlPanelProps {
   projectId: string | null;
@@ -43,6 +56,8 @@ interface SessionSourceControlPanelProps {
   worktreeMode?: ChatSessionWorktreeMode;
   fallbackRelatedFiles: React.ReactNode;
   linkedWorkItemIds?: string[];
+  focusRequestKey?: number;
+  commitFocusRequestKey?: number;
   onOpenDiff: (
     projectId: string,
     sessionId: string,
@@ -62,6 +77,114 @@ interface SourceControlConfirmDialogState {
 
 type ScopedErrorState = Record<string, string>;
 type ScopedTextState = Record<string, string>;
+
+type SelectableSourceControlFile = SourceControlFile & {
+  area: SourceControlDiffArea;
+};
+
+interface SessionSourceControlShortcutBindingsProps {
+  panelRootRef: React.RefObject<HTMLDivElement | null>;
+  listRootRef: React.RefObject<HTMLDivElement | null>;
+  commitMessageRef: React.RefObject<HTMLTextAreaElement | null>;
+  worktreeActive: boolean;
+  files: SelectableSourceControlFile[];
+  selectedFile: SelectableSourceControlFile | null;
+  viewModel: Pick<SourceControlPanelViewModel, "canCommit" | "commitDisabledReason">;
+  canStageAll: boolean;
+  commitMessage: string;
+  mergeDisabledReason: string | null;
+  onMoveSelection: (offset: -1 | 1) => void;
+  onToggleStage: (file: SelectableSourceControlFile) => void;
+  onOpenDiff: (file: SelectableSourceControlFile) => void;
+  onStageAll: () => void;
+  onCommit: () => void;
+  requestWorktreeAction: (action: "merge" | "discard") => void;
+}
+
+const SessionSourceControlShortcutBindings: React.FC<
+  SessionSourceControlShortcutBindingsProps
+> = ({
+  panelRootRef,
+  listRootRef,
+  commitMessageRef,
+  worktreeActive,
+  files,
+  selectedFile,
+  viewModel,
+  canStageAll,
+  commitMessage,
+  mergeDisabledReason,
+  onMoveSelection,
+  onToggleStage,
+  onOpenDiff,
+  onStageAll,
+  onCommit,
+  requestWorktreeAction,
+}) => {
+  useShortcutScope('worktree', {
+    active: worktreeActive,
+    rootRef: panelRootRef,
+  });
+  useShortcutScope('source-control-list', {
+    active: files.length > 0,
+    rootRef: listRootRef,
+  });
+  useShortcutScope('source-control-commit', {
+    active: viewModel.canCommit,
+    rootRef: commitMessageRef,
+  });
+
+  useCommandHandler('source-control.selection.next', {
+    scope: "focused-component",
+    enabled: files.length > 1,
+    execute: () => onMoveSelection(1),
+  });
+  useCommandHandler('source-control.selection.previous', {
+    scope: "focused-component",
+    enabled: files.length > 1,
+    execute: () => onMoveSelection(-1),
+  });
+  useCommandHandler('source-control.selection.toggle-stage', {
+    scope: "focused-component",
+    enabled: Boolean(selectedFile),
+    execute: () => {
+      if (selectedFile) onToggleStage(selectedFile);
+    },
+  });
+  useCommandHandler('source-control.selection.open-diff', {
+    scope: "focused-component",
+    enabled: Boolean(selectedFile),
+    execute: () => {
+      if (selectedFile) onOpenDiff(selectedFile);
+    },
+  });
+  useCommandHandler('source-control.stage-all', {
+    scope: "focused-component",
+    enabled: canStageAll,
+    execute: onStageAll,
+  });
+  useCommandHandler('source-control.commit', {
+    scope: "focused-component",
+    enabled: viewModel.canCommit && commitMessage.trim().length > 0,
+    disabledReason: viewModel.commitDisabledReason ?? undefined,
+    allowInEditable: true,
+    ownsEventTarget: (target) => target === commitMessageRef.current,
+    execute: onCommit,
+  });
+  useCommandHandler('worktree.merge', {
+    scope: "focused-component",
+    enabled: worktreeActive && !mergeDisabledReason,
+    disabledReason: mergeDisabledReason ?? undefined,
+    execute: () => requestWorktreeAction('merge'),
+  });
+  useCommandHandler('worktree.discard', {
+    scope: "focused-component",
+    enabled: worktreeActive,
+    execute: () => requestWorktreeAction('discard'),
+  });
+
+  return null;
+};
 
 const scopedError = (errors: ScopedErrorState, scopeKey: string) =>
   errors[scopeKey] ?? null;
@@ -262,10 +385,15 @@ export const SessionSourceControlPanel: React.FC<
   worktreeMode,
   fallbackRelatedFiles,
   linkedWorkItemIds = [],
+  focusRequestKey = 0,
+  commitFocusRequestKey = 0,
   onOpenDiff,
   onOpenConflictResolver,
 }) => {
   const { t, showToast } = useWorkspace();
+  const commitCommandPresentation = useCommandPresentation(
+    "source-control.commit",
+  );
   const {
     status,
     loading,
@@ -317,7 +445,15 @@ export const SessionSourceControlPanel: React.FC<
   >(null);
   const [worktreeActionErrorsByScope, setWorktreeActionErrorsByScope] =
     useState<ScopedErrorState>({});
+  const [selectedFileKeysByScope, setSelectedFileKeysByScope] =
+    useState<Record<string, string>>({});
   const scopeKeyRef = useRef(scopeKey);
+  const panelRootRef = useRef<HTMLDivElement>(null);
+  const sourceControlListRef = useRef<HTMLDivElement>(null);
+  const emptyStateHeadingRef = useRef<HTMLHeadingElement>(null);
+  const commitMessageRef = useRef<HTMLTextAreaElement>(null);
+  const fileRowRefs = useRef(new Map<string, HTMLDivElement>());
+  const shortcutSelectionFocusKeyRef = useRef<string | null>(null);
   scopeKeyRef.current = scopeKey;
 
   const isCurrentScope = (key: string) => scopeKeyRef.current === key;
@@ -356,6 +492,22 @@ export const SessionSourceControlPanel: React.FC<
     () => buildSourceControlViewModel(status, t),
     [status, t],
   );
+  const files = useMemo<SelectableSourceControlFile[]>(
+    () =>
+      viewModel.sections.flatMap((section) =>
+        section.files.map((file) => ({ ...file, area: section.area })),
+      ),
+    [viewModel],
+  );
+  const selectableFileKeys = files
+    .map((file) => sourceControlSelectionKey(file.area, file.path))
+    .join("\n");
+  const selectedFileKey = selectedFileKeysByScope[scopeKey] ?? null;
+  const selectedFile =
+    files.find(
+      (file) =>
+        sourceControlSelectionKey(file.area, file.path) === selectedFileKey,
+    ) ?? null;
   const tr = (
     key: string,
     fallback: string,
@@ -410,28 +562,87 @@ export const SessionSourceControlPanel: React.FC<
     }
   }, [scopeKey, worktree?.status]);
 
+  useEffect(() => {
+    const firstFile = files[0];
+    const nextKey = files.some(
+      (file) =>
+        sourceControlSelectionKey(file.area, file.path) === selectedFileKey,
+    )
+      ? selectedFileKey
+      : firstFile
+        ? sourceControlSelectionKey(firstFile.area, firstFile.path)
+        : null;
+    setSelectedFileKeysByScope((current) => {
+      if ((current[scopeKey] ?? null) === nextKey) return current;
+      const next = { ...current };
+      if (nextKey) next[scopeKey] = nextKey;
+      else delete next[scopeKey];
+      return next;
+    });
+  }, [scopeKey, selectableFileKeys, selectedFileKey]);
+
+  useLayoutEffect(() => {
+    const key = shortcutSelectionFocusKeyRef.current;
+    if (!key || selectedFileKey !== key || !selectedFile) return;
+    fileRowRefs.current.get(key)?.focus();
+    shortcutSelectionFocusKeyRef.current = null;
+  }, [selectableFileKeys, selectedFile, selectedFileKey]);
+
+  useEffect(() => {
+    if (!focusRequestKey || !enabled || !projectId || !sessionId) return;
+    const frame = window.requestAnimationFrame(() => {
+      const firstFile = files[0];
+      const key =
+        selectedFileKeysByScope[scopeKey] ??
+        (firstFile
+          ? sourceControlSelectionKey(firstFile.area, firstFile.path)
+          : null);
+      if (key) fileRowRefs.current.get(key)?.focus();
+      else emptyStateHeadingRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    enabled,
+    focusRequestKey,
+    projectId,
+    scopeKey,
+    selectableFileKeys,
+    selectedFileKeysByScope,
+    sessionId,
+  ]);
+
+  useEffect(() => {
+    if (
+      !commitFocusRequestKey ||
+      !enabled ||
+      !projectId ||
+      !sessionId ||
+      viewModel.stagedPaths.length === 0
+    ) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      commitMessageRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    commitFocusRequestKey,
+    enabled,
+    projectId,
+    sessionId,
+    viewModel.stagedPaths.length,
+  ]);
+
   if (!enabled || !projectId || !sessionId) {
     return <>{fallbackRelatedFiles}</>;
   }
 
-  const handleWorktreeAction = async (action: SessionWorktreeAction) => {
+  const handleConfirmedWorktreeAction = async (
+    action: SessionWorktreeAction,
+  ) => {
     if (worktreeBusy) return;
     const actionScopeKey = scopeKeyRef.current;
     if (action === "merge" && worktreeMergeDisabledReason) return;
-    if (action === "discard") {
-      const confirmed = await requestConfirm({
-        title: tr("worktree.confirm.deleteTitle", "Delete worktree?"),
-        description: tr(
-          "worktree.confirm.deleteDescription",
-          "Delete this session worktree? Unmerged changes in the isolated workspace will be removed. This cannot be undone.",
-        ),
-        confirmLabel: tr("worktree.action.discard", "Delete"),
-        tone: "danger",
-      });
-      if (!isCurrentScope(actionScopeKey)) return;
-      if (!confirmed) return;
-    }
-
     setWorktreeBusyScopeKey(actionScopeKey);
     setWorktreeActionErrorForScope(actionScopeKey, null);
     try {
@@ -517,6 +728,37 @@ export const SessionSourceControlPanel: React.FC<
     new Promise((resolve) => {
       setConfirmDialog({ ...request, resolve });
     });
+
+  const confirmCopy: Record<
+    "merge" | "discard",
+    Omit<SourceControlConfirmDialogState, "resolve">
+  > = {
+    merge: {
+      title: tr("worktree.confirm.mergeTitle", "Merge worktree?"),
+      description: tr(
+        "worktree.confirm.mergeDescription",
+        "Merge this session worktree into the base workspace?",
+      ),
+      confirmLabel: tr("worktree.action.merge", "Merge"),
+      tone: "warning",
+    },
+    discard: {
+      title: tr("worktree.confirm.deleteTitle", "Delete worktree?"),
+      description: tr(
+        "worktree.confirm.deleteDescription",
+        "Delete this session worktree? Unmerged changes in the isolated workspace will be removed. This cannot be undone.",
+      ),
+      confirmLabel: tr("worktree.action.discard", "Delete"),
+      tone: "danger",
+    },
+  };
+
+  const requestWorktreeAction = async (action: "merge" | "discard") => {
+    const requestScopeKey = scopeKeyRef.current;
+    const confirmed = await requestConfirm(confirmCopy[action]);
+    if (!isCurrentScope(requestScopeKey)) return;
+    if (confirmed) await handleConfirmedWorktreeAction(action);
+  };
 
   const closeConfirmDialog = (confirmed: boolean) => {
     const request = confirmDialog;
@@ -613,7 +855,7 @@ export const SessionSourceControlPanel: React.FC<
     section: SourceControlSectionViewModel,
   ) => {
     if (action.disabled || pendingAction) return;
-    if (action.id === "stage-all") {
+    if (action.id === 'stage-all') {
       handleStageFiles(section.files);
       return;
     }
@@ -656,6 +898,64 @@ export const SessionSourceControlPanel: React.FC<
         return { ok: true, failed: [] };
       });
     })();
+  };
+
+  const changesSection = findSection(viewModel, "changes");
+  const stageAllAction = changesSection?.batchActions.find(
+    (action) => action.id === 'stage-all',
+  );
+  const canStageAll = Boolean(
+    changesSection &&
+      stageAllAction &&
+      changesSection.files.length > 0 &&
+      !stageAllAction.disabled &&
+      !pendingAction,
+  );
+
+  const selectFile = (area: SourceControlDiffArea, path: string) => {
+    const key = sourceControlSelectionKey(area, path);
+    setSelectedFileKeysByScope((current) => ({
+      ...current,
+      [scopeKey]: key,
+    }));
+  };
+
+  const moveSelection = (offset: -1 | 1) => {
+    if (files.length === 0) return;
+    const currentIndex = Math.max(
+      0,
+      files.findIndex(
+        (file) =>
+          sourceControlSelectionKey(file.area, file.path) === selectedFileKey,
+      ),
+    );
+    const nextFile = files[(currentIndex + offset + files.length) % files.length];
+    const nextKey = sourceControlSelectionKey(nextFile.area, nextFile.path);
+    selectFile(nextFile.area, nextFile.path);
+    window.requestAnimationFrame(() =>
+      fileRowRefs.current.get(nextKey)?.focus(),
+    );
+  };
+
+  const handleToggleSelectedStage = (
+    selectedFile: SelectableSourceControlFile,
+  ) => {
+    const nextArea = selectedFile.area === "changes" ? "staged" : "changes";
+    const nextKey = sourceControlSelectionKey(nextArea, selectedFile.path);
+    shortcutSelectionFocusKeyRef.current = nextKey;
+    selectFile(nextArea, selectedFile.path);
+    if (selectedFile.area === "changes") handleStageFiles([selectedFile]);
+    else handleUnstageFiles([selectedFile]);
+  };
+
+  const handleOpenSelectedDiff = (
+    selectedFile: SelectableSourceControlFile,
+  ) => handleOpenDiff(selectedFile, selectedFile.area);
+
+  const handleStageAll = () => {
+    if (changesSection && stageAllAction) {
+      handleBatchAction(stageAllAction, changesSection);
+    }
   };
 
   if (!status && !error) {
@@ -705,7 +1005,25 @@ export const SessionSourceControlPanel: React.FC<
       : "";
   return (
     <>
-      <div className="flex min-h-0 flex-1 flex-col pt-3">
+      <div ref={panelRootRef} className="flex min-h-0 flex-1 flex-col">
+      <SessionSourceControlShortcutBindings
+        panelRootRef={panelRootRef}
+        listRootRef={sourceControlListRef}
+        commitMessageRef={commitMessageRef}
+        worktreeActive={Boolean(worktree)}
+        files={files}
+        selectedFile={selectedFile}
+        viewModel={viewModel}
+        canStageAll={canStageAll}
+        commitMessage={commitMessage}
+        mergeDisabledReason={worktreeMergeDisabledReason}
+        onMoveSelection={moveSelection}
+        onToggleStage={handleToggleSelectedStage}
+        onOpenDiff={handleOpenSelectedDiff}
+        onStageAll={handleStageAll}
+        onCommit={handleCommit}
+        requestWorktreeAction={(action) => void requestWorktreeAction(action)}
+      />
       <div className="flex h-9 shrink-0 items-center justify-between px-3">
         <div className="flex min-w-0 items-center gap-2">
           <h2 className="truncate text-[14px] font-semibold text-[var(--ink)]">
@@ -742,7 +1060,11 @@ export const SessionSourceControlPanel: React.FC<
             pendingCreate={!worktree && !worktreeLoading}
             busy={worktreeBusy}
             mergeDisabledReason={worktreeMergeDisabledReason}
-            onAction={(action) => void handleWorktreeAction(action)}
+            onAction={(action) =>
+              void (action === "merge" || action === "discard"
+                ? requestWorktreeAction(action)
+                : handleConfirmedWorktreeAction(action))
+            }
             tr={tr}
           />
           {showWorktreeHistory && worktree?.status === "merged" && (
@@ -794,6 +1116,16 @@ export const SessionSourceControlPanel: React.FC<
             title={tr("sourceControl.sessionCommits", "Session commits")}
             commitFallback={tr("sourceControl.commit.fallback", "Commit")}
           />
+          {files.length === 0 && (
+            <h3
+              ref={emptyStateHeadingRef}
+              tabIndex={-1}
+              className="rounded-lg border border-dashed border-[color-mix(in_srgb,var(--hairline)_72%,transparent)] px-3 py-2 text-[12px] font-normal text-[var(--ink-tertiary)] outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary)]"
+            >
+              {tr('sourceControl.empty.noChanges', 'No file changes')}
+            </h3>
+          )}
+          <div ref={sourceControlListRef} className="space-y-4">
           {viewModel.sections.map((section) => (
             <section key={section.id} className="space-y-1.5">
               <div className="flex min-h-6 items-center justify-between gap-2">
@@ -822,30 +1154,49 @@ export const SessionSourceControlPanel: React.FC<
                 </div>
               ) : (
                 <div className="space-y-1">
-                  {section.files.map((file) => (
-                    <SourceControlFileRow
-                      key={`${section.id}-${file.status}-${file.path}`}
-                      file={file}
-                      area={section.area}
-                      viewModel={viewModel}
-                      pending={Boolean(pendingAction)}
-                      t={t}
-                      onOpenDiff={handleOpenDiff}
-                      onStage={(target) => handleStageFiles([target])}
-                      onUnstage={(target) => handleUnstageFiles([target])}
-                      onDiscard={(target) => handleDiscardFiles([target])}
-                    />
-                  ))}
+                  {section.files.map((file) => {
+                    const fileKey = sourceControlSelectionKey(
+                      section.area,
+                      file.path,
+                    );
+                    return (
+                      <SourceControlFileRow
+                        key={`${section.id}-${file.status}-${file.path}`}
+                        file={file}
+                        area={section.area}
+                        viewModel={viewModel}
+                        pending={Boolean(pendingAction)}
+                        selected={selectedFileKey === fileKey}
+                        rowRef={(node) => {
+                          if (node) fileRowRefs.current.set(fileKey, node);
+                          else fileRowRefs.current.delete(fileKey);
+                        }}
+                        t={t}
+                        onOpenDiff={handleOpenDiff}
+                        onStage={(target) => handleStageFiles([target])}
+                        onUnstage={(target) => handleUnstageFiles([target])}
+                        onDiscard={(target) => handleDiscardFiles([target])}
+                        onSelect={(path) => selectFile(section.area, path)}
+                      />
+                    );
+                  })}
                 </div>
               )}
             </section>
           ))}
+          </div>
         </div>
       </ScrollArea>
 
       {viewModel.stagedPaths.length > 0 && (
         <div className="shrink-0 border-t border-[color-mix(in_srgb,var(--hairline)_72%,transparent)] p-3">
           <textarea
+            ref={commitMessageRef}
+            tabIndex={-1}
+            onKeyDown={preventTabFocusChange}
+            aria-keyshortcuts={
+              commitCommandPresentation.ariaKeyShortcuts || undefined
+            }
             value={commitMessage}
             onChange={(event) =>
               setCommitMessageForScope(scopeKey, event.target.value)
@@ -856,6 +1207,7 @@ export const SessionSourceControlPanel: React.FC<
           />
           <button
             type="button"
+            data-command-id="source-control.commit"
             onClick={handleCommit}
             disabled={
               Boolean(pendingAction) ||

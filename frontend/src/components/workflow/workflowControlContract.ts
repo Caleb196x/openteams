@@ -1,6 +1,9 @@
 import type { WorkflowCardData } from '@/lib/api';
 
-type WorkflowProjectionLike = Pick<WorkflowCardData, 'execution_status'>;
+type WorkflowProjectionLike = Pick<
+  WorkflowCardData,
+  'execution_status' | 'stopped_by_user'
+>;
 type WorkflowStepLike = Pick<
   WorkflowCardData['steps'][number],
   | 'lead_review_required'
@@ -38,8 +41,9 @@ export function canPauseWorkflowExecution(projection: WorkflowProjectionLike) {
 }
 
 export function canResumeWorkflowExecution(projection: WorkflowProjectionLike) {
+  if (projection.execution_status === 'paused') return true;
   return (
-    projection.execution_status === 'paused' ||
-    projection.execution_status === 'failed'
+    projection.execution_status === 'failed' &&
+    !projection.stopped_by_user
   );
 }

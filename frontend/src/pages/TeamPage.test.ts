@@ -134,6 +134,18 @@ check(
 );
 
 check(
+  "empty role prompt preserves placeholder line breaks and fills its panel",
+  configTabsSource.includes(
+    '<span className="whitespace-pre-wrap text-[var(--ink-muted)]">',
+  ) &&
+    configTabsSource.includes('bodyClassName="!p-0 flex flex-col"') &&
+    configTabsSource.includes(
+      'minHeightClassName="min-h-[360px] flex-1"',
+    ),
+  configTabsSource,
+);
+
+check(
   "team protocol remains available when the project has no selected member",
   configTabsSource.includes(
     'const effectiveActiveTab = selectedMember ? activeTab : "teamProtocol"',

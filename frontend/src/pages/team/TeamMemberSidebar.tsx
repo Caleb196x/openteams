@@ -6,7 +6,7 @@ import {
   Trash2,
   UserPlus,
 } from "lucide-react";
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, useLayoutEffect } from "react";
 import type { BackendChatAgent, BaseCodingAgent } from "@/types";
 import {
   compactRunnerLabel,
@@ -118,6 +118,7 @@ export function TeamAddMemberButton({
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const previousOpenRequestKeyRef = useRef(openRequestKey);
 
   useEffect(() => {
@@ -139,6 +140,12 @@ export function TeamAddMemberButton({
     setShowAddMenu(true);
   }, [openRequestKey]);
 
+  useLayoutEffect(() => {
+    if (!showAddMenu) return;
+    searchInputRef.current?.focus();
+    searchInputRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [showAddMenu, openRequestKey]);
+
   const filteredRuntimeOptions = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     if (!query) return runtimeOptions;
@@ -155,6 +162,7 @@ export function TeamAddMemberButton({
     <div className="relative" ref={menuRef}>
       <button
         type="button"
+        data-command-id="team.member.add"
         onClick={() => setShowAddMenu((current) => !current)}
         disabled={saving}
         className={cx(
@@ -163,6 +171,7 @@ export function TeamAddMemberButton({
         )}
         aria-label={t("teamPage.sidebar.addMember")}
         title={t("teamPage.sidebar.addMember")}
+        data-tooltip-nowrap
       >
         <UserPlus
           aria-hidden="true"
@@ -176,7 +185,7 @@ export function TeamAddMemberButton({
           <div className="flex items-center gap-2 border-b border-[var(--hairline)] px-3 py-2">
             <Search className="h-3.5 w-3.5 text-[var(--ink-tertiary)]" />
             <input
-              autoFocus
+              ref={searchInputRef}
               type="text"
               placeholder={t("teamPage.sidebar.findAgent")}
               value={searchQuery}

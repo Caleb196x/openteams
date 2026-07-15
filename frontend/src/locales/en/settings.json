@@ -1,4 +1,6 @@
 {
+  "settings.providers.custom.modality.image": "Image",
+  "settings.providers.custom.modality.text": "Text",
   "settings.account.desc": "Manage developer profiling configurations.",
   "settings.account.emailEndpoint": "Account",
   "settings.account.title": "Account settings",
@@ -101,7 +103,7 @@
   "settings.storage.browse": "Browse",
   "settings.storage.saveFailed": "Failed to save settings.",
   "settings.storage.saving": "Saving...",
-  "settings.storage.worktreeSessionsDir": "Session worktree directory",
+  "settings.storage.worktreeSessionsDir": "Default git worktree directory",
   "settings.storage.worktreeSessionsDirDesc": "Choose where isolated session worktree folders are created.",
   "settings.storage.worktreeSessionsDirPickerTitle": "Select session worktree directory",
   "settings.storage.worktreeSessionsDirSelectFailed": "The file picker did not return a local folder path. Enter the path manually.",

@@ -242,6 +242,7 @@ const buildWorkflowPlanGenerationProjection = (
     goal: planGoal,
     state: status === 'failed' ? 'failed' : 'pending',
     execution_status: 'plan_generation',
+    stopped_by_user: false,
     error_message: errorMessage,
     completed_step_count: 0,
     total_step_count: 0,

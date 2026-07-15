@@ -150,8 +150,13 @@ export function SimpleLineChart<T extends { date: string }>({
     activeIndex === null ? null : (chartData[activeIndex] ?? null);
   const activeTooltipRows = activeDatum ? (tooltipRows?.(activeDatum) ?? []) : [];
   const tooltipWidth = 240;
+  const tooltipRowCount = chartSeries.length + activeTooltipRows.length;
   const tooltipHeight =
-    38 + chartSeries.length * 18 + activeTooltipRows.length * 22;
+    38 +
+    chartSeries.length * 16 +
+    activeTooltipRows.length * 21 +
+    Math.max(0, tooltipRowCount - 1) * 4 +
+    4; // Keep the SVG viewport from clipping the rounded bottom border.
   const tooltipX =
     activeIndex === null
       ? 0
@@ -303,6 +308,7 @@ export function SimpleLineChart<T extends { date: string }>({
               y={tooltipY}
               width={tooltipWidth}
               height={tooltipHeight}
+              overflow="visible"
             >
               <div className="rounded-md border border-[var(--hairline-strong)] bg-[var(--surface-3)] px-3 py-2 text-xs">
                 <div className="mb-1 font-semibold text-[var(--ink)]">

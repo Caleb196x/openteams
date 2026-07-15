@@ -4,6 +4,7 @@ import enBuildStats from '@/locales/en/build-stats.json';
 import enCommon from '@/locales/en/common.json';
 import enIssue from '@/locales/en/issue.json';
 import enSettings from '@/locales/en/settings.json';
+import enShortcuts from '@/locales/en/shortcuts.json';
 import enTeam from '@/locales/en/team.json';
 import enWorkflow from '@/locales/en/workflow.json';
 import enWorkspace from '@/locales/en/workspace.json';
@@ -12,6 +13,7 @@ import esBuildStats from '@/locales/es/build-stats.json';
 import esCommon from '@/locales/es/common.json';
 import esIssue from '@/locales/es/issue.json';
 import esSettings from '@/locales/es/settings.json';
+import esShortcuts from '@/locales/es/shortcuts.json';
 import esTeam from '@/locales/es/team.json';
 import esWorkflow from '@/locales/es/workflow.json';
 import esWorkspace from '@/locales/es/workspace.json';
@@ -20,6 +22,7 @@ import frBuildStats from '@/locales/fr/build-stats.json';
 import frCommon from '@/locales/fr/common.json';
 import frIssue from '@/locales/fr/issue.json';
 import frSettings from '@/locales/fr/settings.json';
+import frShortcuts from '@/locales/fr/shortcuts.json';
 import frTeam from '@/locales/fr/team.json';
 import frWorkflow from '@/locales/fr/workflow.json';
 import frWorkspace from '@/locales/fr/workspace.json';
@@ -28,6 +31,7 @@ import jaBuildStats from '@/locales/ja/build-stats.json';
 import jaCommon from '@/locales/ja/common.json';
 import jaIssue from '@/locales/ja/issue.json';
 import jaSettings from '@/locales/ja/settings.json';
+import jaShortcuts from '@/locales/ja/shortcuts.json';
 import jaTeam from '@/locales/ja/team.json';
 import jaWorkflow from '@/locales/ja/workflow.json';
 import jaWorkspace from '@/locales/ja/workspace.json';
@@ -36,6 +40,7 @@ import koBuildStats from '@/locales/ko/build-stats.json';
 import koCommon from '@/locales/ko/common.json';
 import koIssue from '@/locales/ko/issue.json';
 import koSettings from '@/locales/ko/settings.json';
+import koShortcuts from '@/locales/ko/shortcuts.json';
 import koTeam from '@/locales/ko/team.json';
 import koWorkflow from '@/locales/ko/workflow.json';
 import koWorkspace from '@/locales/ko/workspace.json';
@@ -44,6 +49,7 @@ import zhBuildStats from '@/locales/zh/build-stats.json';
 import zhCommon from '@/locales/zh/common.json';
 import zhIssue from '@/locales/zh/issue.json';
 import zhSettings from '@/locales/zh/settings.json';
+import zhShortcuts from '@/locales/zh/shortcuts.json';
 import zhTeam from '@/locales/zh/team.json';
 import zhWorkflow from '@/locales/zh/workflow.json';
 import zhWorkspace from '@/locales/zh/workspace.json';
@@ -63,6 +69,7 @@ export const i18nDict: Record<Locale, LocaleDict> = {
     enSettings,
     enTeam,
     enWorkflow,
+    enShortcuts,
   ),
   zh: mergeLocale(
     zhCommon,
@@ -73,6 +80,7 @@ export const i18nDict: Record<Locale, LocaleDict> = {
     zhSettings,
     zhTeam,
     zhWorkflow,
+    zhShortcuts,
   ),
   ja: mergeLocale(
     jaCommon,
@@ -83,6 +91,7 @@ export const i18nDict: Record<Locale, LocaleDict> = {
     jaSettings,
     jaTeam,
     jaWorkflow,
+    jaShortcuts,
   ),
   ko: mergeLocale(
     koCommon,
@@ -93,6 +102,7 @@ export const i18nDict: Record<Locale, LocaleDict> = {
     koSettings,
     koTeam,
     koWorkflow,
+    koShortcuts,
   ),
   fr: mergeLocale(
     frCommon,
@@ -103,6 +113,7 @@ export const i18nDict: Record<Locale, LocaleDict> = {
     frSettings,
     frTeam,
     frWorkflow,
+    frShortcuts,
   ),
   es: mergeLocale(
     esCommon,
@@ -113,5 +124,6 @@ export const i18nDict: Record<Locale, LocaleDict> = {
     esSettings,
     esTeam,
     esWorkflow,
+    esShortcuts,
   ),
 };

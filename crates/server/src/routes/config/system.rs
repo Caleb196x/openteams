@@ -80,17 +80,14 @@ async fn update_config(
 ) -> ResponseJson<ApiResponse<Config>> {
     let config_path = config_path();
 
-    // Validate git branch prefix
-    if !git::is_valid_branch_prefix(&new_config.git_branch_prefix) {
-        return ResponseJson(ApiResponse::error(
-            "Invalid git branch prefix. Must be a valid git branch name component without slashes.",
-        ));
-    }
-
     // Get old config state before updating
     let old_config = deployment.config().read().await.clone();
 
-    match save_config_to_file(&new_config, &config_path).await {
+    if let Err(error) = validate_config_update(&old_config, &new_config) {
+        return ResponseJson(ApiResponse::error(&error));
+    }
+
+    match save_config_to_file_atomic(&new_config, &config_path).await {
         Ok(_) => {
             let mut config = deployment.config().write().await;
             *config = new_config.clone();
@@ -105,6 +102,19 @@ async fn update_config(
         }
         Err(e) => ResponseJson(ApiResponse::error(&format!("Failed to save config: {}", e))),
     }
+}
+
+fn validate_config_update(previous: &Config, candidate: &Config) -> Result<(), String> {
+    if !git::is_valid_branch_prefix(&candidate.git_branch_prefix) {
+        return Err(
+            "Invalid git branch prefix. Must be a valid git branch name component without slashes."
+                .to_string(),
+        );
+    }
+    candidate
+        .keyboard_shortcuts
+        .validate_for_save_against(&previous.keyboard_shortcuts)
+        .map_err(|error| error.to_string())
 }
 
 fn configured_path(value: Option<&str>) -> Option<std::path::PathBuf> {

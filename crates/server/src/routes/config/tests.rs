@@ -1,6 +1,11 @@
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use serde_json::json;
+    use services::services::config::{
+        KeyboardShortcutBinding, KeyboardShortcutOverride, ThemeMode,
+    };
 
     use super::*;
 
@@ -8,6 +13,128 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("openteams-config-test-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&dir).expect("failed to create temp test dir");
         dir.join(name)
+    }
+
+    fn config_with_shortcut(
+        platform: &str,
+        command_id: &str,
+        value: KeyboardShortcutOverride,
+    ) -> Config {
+        let mut config = Config::default();
+        config.keyboard_shortcuts.platform_overrides = BTreeMap::from([(
+            platform.to_string(),
+            BTreeMap::from([(command_id.to_string(), value)]),
+        )]);
+        config
+    }
+
+    fn binding(sequence: &[&str]) -> KeyboardShortcutOverride {
+        KeyboardShortcutOverride::Binding(KeyboardShortcutBinding {
+            sequence: sequence
+                .iter()
+                .map(|stroke| (*stroke).to_string())
+                .collect(),
+        })
+    }
+
+    #[test]
+    fn keyboard_shortcuts_save_rejects_future_schema() {
+        let mut config = Config::default();
+        config.keyboard_shortcuts.schema_version = 2;
+        assert!(
+            validate_config_update(&Config::default(), &config)
+                .expect_err("future schema must fail")
+                .contains("Unsupported keyboard shortcut schema version: 2")
+        );
+    }
+
+    #[test]
+    fn keyboard_shortcuts_save_rejects_invalid_platform_value_and_sequence() {
+        let cases = [
+            config_with_shortcut("darwin", "search.open", binding(&["meta+k"])),
+            config_with_shortcut("macos", "search.open", binding(&["g", "i", "x"])),
+            config_with_shortcut("macos", "search.open", binding(&["meta+meta+k"])),
+            config_with_shortcut("macos", "search.open", binding(&["meta+k+p"])),
+            config_with_shortcut(
+                "macos",
+                "search.open",
+                KeyboardShortcutOverride::Invalid(json!({ "no_sequence": true })),
+            ),
+        ];
+        for config in cases {
+            assert!(validate_config_update(&Config::default(), &config).is_err());
+        }
+    }
+
+    #[test]
+    fn keyboard_shortcuts_save_preserves_legal_unknown_command() {
+        let config = config_with_shortcut("linux", "future.command", binding(&["ctrl+9"]));
+        validate_config_update(&Config::default(), &config)
+            .expect("legal future command should save");
+    }
+
+    #[test]
+    fn keyboard_shortcuts_quarantined_invalid_does_not_block_unrelated_save() {
+        let mut raw = serde_json::to_value(Config::default()).expect("serialize config");
+        raw["keyboard_shortcuts"] = json!({
+            "schema_version": 1,
+            "platform_overrides": {
+                "macos": {
+                    "session.create": { "sequence": ["meta+n"] }
+                },
+                "windows": {
+                    "broken.command": { "no_sequence": true }
+                }
+            }
+        });
+        let loaded =
+            Config::try_from_raw_config(&raw.to_string()).expect("invalid item must survive tolerant read");
+        assert!(matches!(
+            &loaded.keyboard_shortcuts.platform_overrides["windows"]["broken.command"],
+            KeyboardShortcutOverride::Invalid(_)
+        ));
+        assert!(loaded.keyboard_shortcuts.validate_for_save().is_err());
+
+        let mut theme_update = loaded.clone();
+        theme_update.theme = ThemeMode::Dark;
+        validate_config_update(&loaded, &theme_update)
+            .expect("unchanged quarantined invalid must not block theme save");
+
+        let mut shortcut_update = loaded.clone();
+        shortcut_update
+            .keyboard_shortcuts
+            .platform_overrides
+            .entry("macos".to_string())
+            .or_default()
+            .insert("search.open".to_string(), binding(&["meta+shift+k"]));
+        validate_config_update(&loaded, &shortcut_update)
+            .expect("invalid entry on another platform must not block shortcut save");
+
+        let mut injected = loaded.clone();
+        injected
+            .keyboard_shortcuts
+            .platform_overrides
+            .get_mut("windows")
+            .expect("windows overrides")
+            .insert(
+                "new.broken".to_string(),
+                KeyboardShortcutOverride::Invalid(json!({ "new_damage": true })),
+            );
+        assert!(
+            validate_config_update(&loaded, &injected)
+                .expect_err("new invalid item must fail")
+                .contains("Invalid keyboard shortcut override: windows.new.broken")
+        );
+
+        let mut repaired = loaded.clone();
+        repaired
+            .keyboard_shortcuts
+            .platform_overrides
+            .get_mut("windows")
+            .expect("windows overrides")
+            .remove("broken.command");
+        validate_config_update(&loaded, &repaired)
+            .expect("removing quarantined invalid must be allowed");
     }
 
     #[tokio::test]

@@ -88,6 +88,18 @@ body {
   margin: 0;
 }
 
+.app-tooltip {
+  pointer-events: none;
+  overflow: hidden;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 6px;
+  background: var(--surface-1);
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+}
+
 .macos-titlebar-drag-region {
   display: none;
 }

@@ -32,10 +32,21 @@ import {
   formatPrice,
 } from '@/lib/buildStatsUtils';
 import { ChatMarkdown } from '@/components/conversation/ChatMarkdown';
+import { ConfirmationDialog } from '@/components/ConfirmationDialog';
+import { CommandTooltip } from '@/shortcuts/CommandTooltip';
 import { useWorkspace } from '@/context/WorkspaceContext';
+import {
+  useCommandHandler,
+  useCommandPresentation,
+  useShortcutScope,
+} from '@/shortcuts/ShortcutProvider';
 import { getWorkflowTranscriptRefetchInterval } from '@/lib/workflowRequestPolicy';
 import { WorkflowIterationFeedbackCard } from './WorkflowIterationFeedbackCard';
-import { WorkflowGraphBoard } from './WorkflowGraphBoard';
+import {
+  findNextWorkflowNodeId,
+  WorkflowGraphBoard,
+  type WorkflowNodeRect,
+} from './WorkflowGraphBoard';
 import { WorkflowPendingInputCard } from './WorkflowPendingInputCard';
 import { WorkflowPendingReviewCard } from './WorkflowPendingReviewCard';
 import { WorkflowAgentLogPanel } from './WorkflowAgentLogPanel';
@@ -716,6 +727,7 @@ export type WorkflowWindowProps = {
   ) => void;
   onInterruptStep?: (stepId: string) => void;
   onStopStep?: (stepId: string) => void;
+  onStopExecution?: (executionId: string) => void;
   onRetryStep?: (stepId: string, retryTarget?: 'task' | 'review') => void;
   onUpdateReviewSettings?: (
     executionId: string,
@@ -745,6 +757,16 @@ export type WorkflowWindowProps = {
     };
   }) => void;
   pendingActionId?: string | null;
+};
+
+type StopConfirmation =
+  | { kind: 'step'; stepId: string }
+  | { kind: 'execution'; executionId: string };
+
+type ReviewSelection = {
+  reviewId: string;
+  stepId?: string;
+  action: 'approve' | 'reject';
 };
 
 // -----------------------------------------------------------------------
@@ -965,6 +987,14 @@ function InspectorCard({
   const hasError = isFailed;
   const leadReviewRequired = step.lead_review_required;
   const canRetryReviewStep = canRetryWorkflowStepReview(step);
+  const retryPresentation = useCommandPresentation('workflow.node.retry');
+  const retryReviewPresentation = useCommandPresentation(
+    'workflow.node.retry-review'
+  );
+  const terminatePresentation = useCommandPresentation('workflow.node.stop');
+  const chatPresentation = useCommandPresentation(
+    'workflow.node.chat.toggle'
+  );
   const hasFooterActions =
     step.status === 'running' ||
     step.status === 'waiting_review' ||
@@ -1318,6 +1348,7 @@ function InspectorCard({
           <button
             type="button"
             onClick={onOpenChat}
+            aria-keyshortcuts={chatPresentation.ariaKeyShortcuts || undefined}
             className={cn(
               'flex-none flex items-center gap-1.5 text-[12px] font-medium transition-colors',
               isChatVisible
@@ -1331,6 +1362,9 @@ function InspectorCard({
                   defaultValue: 'Close Chat',
                 })
               : t('workflow.inspector.openChat', { defaultValue: 'Open Chat' })}
+            <kbd className="ml-1 text-[10px] text-[var(--ink-tertiary)] font-mono">
+              {chatPresentation.label}
+            </kbd>
           </button>
 
           {/* Right-side action buttons */}
@@ -1341,6 +1375,9 @@ function InspectorCard({
               (onInterruptStep || onStopStep) && (
                 <button
                   type="button"
+                  aria-keyshortcuts={
+                    terminatePresentation.ariaKeyShortcuts || undefined
+                  }
                   onClick={() => {
                     if (onInterruptStep) {
                       onInterruptStep(step.id);
@@ -1354,6 +1391,9 @@ function InspectorCard({
                   {t('workflow.inspector.terminate', {
                     defaultValue: 'Terminate',
                   })}
+                  <kbd className="ml-0.5 text-[10px] text-[var(--ink-tertiary)] font-mono">
+                    {terminatePresentation.label}
+                  </kbd>
                 </button>
               )}
             {isRetryableWorkflowStepStatus(step.status) &&
@@ -1363,6 +1403,9 @@ function InspectorCard({
                   <button
                     type="button"
                     onClick={() => onRetryStep(step.id)}
+                    aria-keyshortcuts={
+                      retryPresentation.ariaKeyShortcuts || undefined
+                    }
                     disabled={pendingActionId === step.id}
                     className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--ink-subtle)] hover:text-[var(--ink)] transition-colors disabled:opacity-50"
                   >
@@ -1375,9 +1418,15 @@ function InspectorCard({
                     {t('workflow.inspector.retryTask', {
                       defaultValue: 'Retry task',
                     })}
+                    <kbd className="ml-0.5 text-[10px] text-[var(--ink-tertiary)] font-mono">
+                      {retryPresentation.label}
+                    </kbd>
                   </button>
                   <button
                     type="button"
+                    aria-keyshortcuts={
+                      retryReviewPresentation.ariaKeyShortcuts || undefined
+                    }
                     onClick={() => {
                       if (!canRetryReviewStep) return;
                       onRetryStep(step.id, 'review');
@@ -1401,12 +1450,18 @@ function InspectorCard({
                     {t('workflow.inspector.retryReview', {
                       defaultValue: 'Retry review',
                     })}
+                    <kbd className="ml-0.5 text-[10px] text-[var(--ink-tertiary)] font-mono">
+                      {retryReviewPresentation.label}
+                    </kbd>
                   </button>
                 </>
               ) : (
                 <button
                   type="button"
                   onClick={() => onRetryStep(step.id)}
+                  aria-keyshortcuts={
+                    retryPresentation.ariaKeyShortcuts || undefined
+                  }
                   disabled={pendingActionId === step.id}
                   className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--ink-subtle)] hover:text-[var(--ink)] transition-colors disabled:opacity-50"
                 >
@@ -1417,6 +1472,9 @@ function InspectorCard({
                     )}
                   />
                   {t('workflow.inspector.retry', { defaultValue: 'Retry' })}
+                  <kbd className="ml-0.5 text-[10px] text-[var(--ink-tertiary)] font-mono">
+                    {retryPresentation.label}
+                  </kbd>
                 </button>
               ))}
           </div>
@@ -1750,6 +1808,7 @@ export function WorkflowWindow({
   onResume,
   onInterruptStep,
   onStopStep,
+  onStopExecution,
   onRetryStep,
   onUpdateReviewSettings,
   onSubmitStepInput,
@@ -1775,10 +1834,16 @@ export function WorkflowWindow({
     null
   );
   const [isSavingReviewSettings, setIsSavingReviewSettings] = useState(false);
+  const [stopConfirmation, setStopConfirmation] =
+    useState<StopConfirmation | null>(null);
+  const [reviewSelection, setReviewSelection] =
+    useState<ReviewSelection | null>(null);
   const [selectedRoundIndex, setSelectedRoundIndex] = useState<number | null>(
     null
   );
   const initializedWorkflowKeyRef = useRef<string | null>(null);
+  const workflowWindowRef = useRef<HTMLDivElement>(null);
+  const reviewCardRef = useRef<HTMLDivElement>(null);
   const previousExecutionIdRef = useRef<string | null>(null);
 
   const roundGraphs = useMemo(
@@ -1873,6 +1938,23 @@ export function WorkflowWindow({
   const hasPendingReview =
     pendingReviews.length > 0 ||
     projection.steps.some((step) => step.status === 'waiting_review');
+  const pendingAction = Boolean(pendingActionId);
+  useShortcutScope('workflow-review', {
+    active: hasPendingReview && !pendingAction,
+    rootRef: reviewCardRef,
+  });
+  useShortcutScope('workflow-preview', {
+    active: isPreview,
+    rootRef: workflowWindowRef,
+  });
+  useShortcutScope('workflow-running', {
+    active: !isPreview && projection.execution_status === 'running',
+    rootRef: workflowWindowRef,
+  });
+  useShortcutScope('workflow-node-detail', {
+    active: isOpen && Boolean(activeNodeId),
+    rootRef: workflowWindowRef,
+  });
   const isReviewSettingsLocked =
     hasWorkflowCompleted ||
     hasWorkflowFailed ||
@@ -2044,6 +2126,10 @@ export function WorkflowWindow({
     if (!isOpen || typeof document === 'undefined') return undefined;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        if (reviewSelection) {
+          setReviewSelection(null);
+          return;
+        }
         if (isChatVisible) {
           setIsChatVisible(false);
           return;
@@ -2062,7 +2148,29 @@ export function WorkflowWindow({
       document.body.style.overflow = previousOverflow;
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [activeNodeId, isChatVisible, isOpen, onClose]);
+  }, [activeNodeId, isChatVisible, isOpen, onClose, reviewSelection]);
+
+  useEffect(() => {
+    if (!isOpen || typeof document === 'undefined') return;
+    const frame = window.requestAnimationFrame(() => {
+      const selectedNode = activeNodeId
+        ? Array.from(
+            workflowWindowRef.current?.querySelectorAll<HTMLElement>(
+              '[data-workflow-node-id]',
+            ) ?? [],
+          ).find(
+            (element) => element.dataset.workflowNodeId === activeNodeId,
+          )
+        : null;
+      selectedNode?.focus();
+      if (!selectedNode) {
+        workflowWindowRef.current
+          ?.querySelector<HTMLElement>('[data-workflow-graph-root="true"]')
+          ?.focus();
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeNodeId, isOpen]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -2406,6 +2514,210 @@ export function WorkflowWindow({
       ? projection.pending_input
       : null;
 
+  const workflowNodeElements = () =>
+    Array.from(
+      workflowWindowRef.current?.querySelectorAll<HTMLElement>(
+        '[data-workflow-node-id]',
+      ) ?? [],
+    );
+
+  const currentWorkflowNodeId = () => {
+    if (activeNodeId) return activeNodeId;
+    const focused = document.activeElement as HTMLElement | null;
+    return focused?.closest<HTMLElement>('[data-workflow-node-id]')?.dataset
+      .workflowNodeId ?? workflowNodeElements()[0]?.dataset.workflowNodeId ?? null;
+  };
+
+  const focusWorkflowNode = (nodeId: string) => {
+    window.requestAnimationFrame(() => {
+      workflowNodeElements()
+        .find((element) => element.dataset.workflowNodeId === nodeId)
+        ?.focus();
+    });
+  };
+
+  const moveWorkflowNode = (
+    direction: 'up' | 'down' | 'left' | 'right',
+  ) => {
+    const elements = workflowNodeElements();
+    const currentId = currentWorkflowNodeId();
+    const currentElement = elements.find(
+      (element) => element.dataset.workflowNodeId === currentId,
+    );
+    if (!currentElement) return;
+    const rects: WorkflowNodeRect[] = elements.flatMap((element) => {
+      const id = element.dataset.workflowNodeId;
+      if (!id) return [];
+      const rect = element.getBoundingClientRect();
+      return [{ id, centerX: rect.left + rect.width / 2, centerY: rect.top + rect.height / 2 }];
+    });
+    const current = rects.find((rect) => rect.id === currentId);
+    if (!current) return;
+    const nextId = findNextWorkflowNodeId(current, rects, direction);
+    if (!nextId) return;
+    handleNodeClick(nextId);
+    focusWorkflowNode(nextId);
+  };
+
+  const confirmStop = () => {
+    if (stopConfirmation?.kind === 'step') onStopStep?.(stopConfirmation.stepId);
+    if (stopConfirmation?.kind === 'execution') {
+      onStopExecution?.(stopConfirmation.executionId);
+    }
+    setStopConfirmation(null);
+  };
+
+  const currentPendingReview = activeStepPendingReview ?? pendingReviews[0] ?? null;
+  const currentPendingReviewStep = currentPendingReview
+    ? getPendingReviewStep(currentPendingReview)
+    : null;
+
+  useEffect(() => {
+    if (
+      reviewSelection &&
+      !pendingReviews.some(
+        (review) => review.review_id === reviewSelection.reviewId,
+      )
+    ) {
+      setReviewSelection(null);
+    }
+  }, [pendingReviews, reviewSelection]);
+
+  useCommandHandler('workflow.node.up', {
+    scope: 'focused-component',
+    enabled: isOpen && isViewingCurrentRound,
+    execute: () => moveWorkflowNode('up'),
+  });
+  useCommandHandler('workflow.node.down', {
+    scope: 'focused-component',
+    enabled: isOpen && isViewingCurrentRound,
+    execute: () => moveWorkflowNode('down'),
+  });
+  useCommandHandler('workflow.node.left', {
+    scope: 'focused-component',
+    enabled: isOpen && isViewingCurrentRound,
+    execute: () => moveWorkflowNode('left'),
+  });
+  useCommandHandler('workflow.node.right', {
+    scope: 'focused-component',
+    enabled: isOpen && isViewingCurrentRound,
+    execute: () => moveWorkflowNode('right'),
+  });
+  useCommandHandler('workflow.node.open', {
+    scope: 'focused-component',
+    enabled: isOpen && isViewingCurrentRound && graphPlan.nodes.length > 0,
+    execute: () => {
+      const nodeId = currentWorkflowNodeId();
+      if (nodeId) handleNodeClick(nodeId);
+    },
+  });
+  useCommandHandler('workflow.start', {
+    scope: 'focused-component',
+    enabled: isOpen && isPreview && Boolean(projection.plan_id && onExecute),
+    execute: () => onExecute?.(projection),
+  });
+  useCommandHandler('workflow.node.retry', {
+    scope: 'global',
+    enabled: Boolean(
+      isOpen &&
+        activeStep?.id &&
+        isRetryableWorkflowStepStatus(activeStep.status) &&
+        onRetryStep &&
+        pendingActionId !== activeStep.id
+    ),
+    execute: () => {
+      if (activeStep?.id) onRetryStep?.(activeStep.id);
+    },
+  });
+  useCommandHandler('workflow.node.retry-review', {
+    scope: 'global',
+    enabled: Boolean(
+      isOpen &&
+        activeStep?.id &&
+        canRetryWorkflowStepReview(activeStep) &&
+        onRetryStep &&
+        pendingActionId !== activeStep.id
+    ),
+    execute: () => {
+      if (activeStep?.id) onRetryStep?.(activeStep.id, 'review');
+    },
+  });
+  useCommandHandler('workflow.node.stop', {
+    scope: 'global',
+    enabled: Boolean(
+      isOpen &&
+        activeStep?.id &&
+        ['running', 'waiting_review', 'waiting_input'].includes(
+          activeStep.status
+        ) &&
+        (onInterruptStep || onStopStep) &&
+        pendingActionId !== activeStep.id
+    ),
+    execute: () => {
+      if (!activeStep?.id) return;
+      if (onInterruptStep) {
+        onInterruptStep(activeStep.id);
+        return;
+      }
+      setStopConfirmation({ kind: 'step', stepId: activeStep.id });
+    },
+  });
+  useCommandHandler('workflow.node.chat.toggle', {
+    scope: 'global',
+    enabled: Boolean(isOpen && activeStep?.id),
+    execute: () => setIsChatVisible((visible) => !visible),
+  });
+  useCommandHandler('workflow.stop', {
+    scope: 'focused-component',
+    enabled: Boolean(isOpen && projection.execution_id && onStopExecution),
+    execute: () => {
+      if (projection.execution_id) {
+        setStopConfirmation({
+          kind: 'execution',
+          executionId: projection.execution_id,
+        });
+      }
+    },
+  });
+  useCommandHandler('workflow.review.select-approve', {
+    scope: 'focused-component',
+    enabled: Boolean(currentPendingReview && !pendingAction),
+    execute: () => {
+      if (!currentPendingReview) return;
+      setReviewSelection({
+        reviewId: currentPendingReview.review_id,
+        stepId: currentPendingReviewStep?.id,
+        action: 'approve',
+      });
+    },
+  });
+  useCommandHandler('workflow.review.select-reject', {
+    scope: 'focused-component',
+    enabled: Boolean(currentPendingReview && !pendingAction),
+    execute: () => {
+      if (!currentPendingReview) return;
+      setReviewSelection({
+        reviewId: currentPendingReview.review_id,
+        stepId: currentPendingReviewStep?.id,
+        action: 'reject',
+      });
+    },
+  });
+  useCommandHandler('workflow.review.confirm', {
+    scope: 'focused-component',
+    enabled: Boolean(reviewSelection && onRespondPendingReview && !pendingAction),
+    execute: () => {
+      if (!reviewSelection || !onRespondPendingReview) return;
+      onRespondPendingReview(
+        reviewSelection.reviewId,
+        reviewSelection.action,
+        undefined,
+        reviewSelection.stepId,
+      );
+      setReviewSelection(null);
+    },
+  });
+
   const handleSendStepInput = useCallback(
     (stepId: string, inputText: string) => {
       if (!onSubmitStepInput) return;
@@ -2435,7 +2747,7 @@ export function WorkflowWindow({
   if (!isOpen) return null;
 
   const windowContent = (
-    <div className="workflow-window-root flex h-full w-full flex-col overflow-hidden bg-[var(--surface-2)] font-sans text-slate-900 rounded-lg">
+    <div ref={workflowWindowRef} className="workflow-window-root flex h-full w-full flex-col overflow-hidden bg-[var(--surface-2)] font-sans text-slate-900 rounded-lg">
       {/* Header */}
       <header className="flex h-[49px] shrink-0 items-center justify-between border-b border-[var(--hairline)] bg-[var(--surface-2)] px-[29px] z-20">
         <div className="flex min-w-0 items-center gap-[7px]">
@@ -2473,16 +2785,18 @@ export function WorkflowWindow({
           {/* Control buttons */}
           <div className="flex items-center gap-1">
             {isPreview && projection.plan_id && onExecute && (
+              <CommandTooltip commandId="workflow.start">
               <button
                 type="button"
                 onClick={() => onExecute(projection)}
                 className="p-1.5 rounded-md transition-all text-[#5E6AD2] hover:text-[#4850B8] hover:bg-[rgba(94,106,210,0.1)]"
-                title={t('workflow.controls.executePlan', {
+                aria-label={t('workflow.controls.executePlan', {
                   defaultValue: 'Execute Plan',
                 })}
               >
                 <Play className="w-4 h-4 fill-current" />
               </button>
+              </CommandTooltip>
             )}
             {canResumeExecution && projection.execution_id && onResume && (
               <button
@@ -2508,15 +2822,22 @@ export function WorkflowWindow({
                 <Pause className="w-4 h-4" />
               </button>
             )}
-            {projection.execution_id && onPauseAll && isRunning && (
+            {projection.execution_id && onStopExecution && isRunning && (
+              <CommandTooltip commandId="workflow.stop">
               <button
                 type="button"
-                onClick={() => onPauseAll(projection.execution_id!)}
+                onClick={() =>
+                  setStopConfirmation({
+                    kind: 'execution',
+                    executionId: projection.execution_id!,
+                  })
+                }
                 className="p-1.5 rounded-md transition-all text-[var(--ink-subtle)] hover:text-[var(--ink)] hover:bg-[var(--surface-3)]"
-                title={t('workflow.controls.stop', { defaultValue: 'Stop' })}
+                aria-label={t('workflow.controls.stop', { defaultValue: 'Stop' })}
               >
                 <Square className="w-4 h-4" />
               </button>
+              </CommandTooltip>
             )}
           </div>
           {projection.execution_id && onUpdateReviewSettings && (
@@ -2538,7 +2859,7 @@ export function WorkflowWindow({
       </header>
 
       {/* Main Content Area */}
-      <div className="relative flex-1 overflow-hidden flex">
+      <div ref={reviewCardRef} className="relative flex-1 overflow-hidden flex">
         <WorkflowReviewSettingsDialog
           projection={projection}
           isOpen={isReviewSettingsOpen}
@@ -2572,6 +2893,8 @@ export function WorkflowWindow({
           onSelectStep={isViewingCurrentRound ? handleNodeClick : undefined}
           onRetryStep={isViewingCurrentRound ? onRetryStep : undefined}
           pendingActionId={pendingActionId}
+          isOpen={isOpen}
+          historicalRound={!isViewingCurrentRound}
           className="flex-1 min-w-0 h-full"
         />
 
@@ -2694,6 +3017,24 @@ export function WorkflowWindow({
                       </>
                     ) : null}
                   </div>
+                  {reviewSelection?.reviewId === notif.id && (
+                    <p
+                      className="mt-2 text-[10px] font-medium text-[var(--workflow-notification-label)]"
+                      aria-live="polite"
+                    >
+                      {reviewSelection.action === 'approve'
+                        ? t('workflow.notifications.approveSelected', {
+                            defaultValue: 'Approve selected',
+                          })
+                        : t('workflow.notifications.rejectSelected', {
+                            defaultValue: 'Reject selected',
+                          })}
+                      {' · '}
+                      {t('workflow.notifications.pressEnterToConfirm', {
+                        defaultValue: 'Press Enter to confirm',
+                      })}
+                    </p>
+                  )}
                 </div>
               </motion.div>
             ))}
@@ -2806,7 +3147,9 @@ export function WorkflowWindow({
                 onOpenChat={() => setIsChatVisible(!isChatVisible)}
                 isChatVisible={isChatVisible}
                 onInterruptStep={onInterruptStep}
-                onStopStep={onStopStep}
+                onStopStep={(stepId) =>
+                  setStopConfirmation({ kind: 'step', stepId })
+                }
                 onRetryStep={onRetryStep}
                 pendingActionId={pendingActionId}
                 transcriptEntries={visibleActiveTranscript}
@@ -2823,6 +3166,29 @@ export function WorkflowWindow({
           </div>
         )}
       </div>
+      {stopConfirmation && (
+        <ConfirmationDialog
+          title={
+            stopConfirmation.kind === 'execution'
+              ? t('workflow.confirm.stopExecutionTitle', {
+                  defaultValue: 'Stop workflow?',
+                })
+              : t('workflow.confirm.stopStepTitle', {
+                  defaultValue: 'Stop step?',
+                })
+          }
+          description={t('workflow.confirm.stopDescription', {
+            defaultValue: 'This action cannot be resumed automatically.',
+          })}
+          confirmLabel={t('workflow.controls.stop', { defaultValue: 'Stop' })}
+          cancelLabel={t('cancel', { defaultValue: 'Cancel' })}
+          escLabel={t('escToCancel', { defaultValue: 'Esc to cancel' })}
+          tone="danger"
+          idPrefix="workflow-stop-confirm"
+          onCancel={() => setStopConfirmation(null)}
+          onConfirm={confirmStop}
+        />
+      )}
     </div>
   );
 
