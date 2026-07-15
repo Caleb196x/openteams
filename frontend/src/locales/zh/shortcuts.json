@@ -10,6 +10,8 @@
   "shortcuts.command.build-stats.open": "打开构建统计",
   "shortcuts.command.session-tab.next": "下一个会话标签页",
   "shortcuts.command.session-tab.previous": "上一个会话标签页",
+  "shortcuts.command.session.next": "激活下一个会话",
+  "shortcuts.command.session.previous": "激活上一个会话",
   "shortcuts.command.source-control.open": "打开文件变更",
   "shortcuts.command.source-control.selection.next": "下一个变更文件",
   "shortcuts.command.source-control.selection.previous": "上一个变更文件",

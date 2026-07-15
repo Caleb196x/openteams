@@ -10,6 +10,8 @@
   "shortcuts.command.build-stats.open": "ビルド統計を開く",
   "shortcuts.command.session-tab.next": "次のセッションタブ",
   "shortcuts.command.session-tab.previous": "前のセッションタブ",
+  "shortcuts.command.session.next": "次のセッションをアクティブ化",
+  "shortcuts.command.session.previous": "前のセッションをアクティブ化",
   "shortcuts.command.source-control.open": "ファイル変更を開く",
   "shortcuts.command.source-control.selection.next": "次の変更ファイル",
   "shortcuts.command.source-control.selection.previous": "前の変更ファイル",

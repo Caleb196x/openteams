@@ -72,6 +72,8 @@ export const expectedCommandRegistry = [
   expectedCommand('build-stats.open', 4, 'navigation', same(sequence('g', 'b')), ['global'], 'safe', 'build-stats-heading'),
   expectedCommand('session-tab.next', 5, 'navigation', same(sequence('ctrl+tab')), ['global'], 'safe', 'next-tab-content'),
   expectedCommand('session-tab.previous', 5, 'navigation', same(sequence('ctrl+shift+tab')), ['global'], 'safe', 'previous-tab-content'),
+  expectedCommand('session.next', 5, 'navigation', same(sequence('alt+arrowdown')), ['session-workspace'], 'safe', 'tab-main-content'),
+  expectedCommand('session.previous', 5, 'navigation', same(sequence('alt+arrowup')), ['session-workspace'], 'safe', 'tab-main-content'),
   expectedCommand('source-control.open', 6, 'sourceControl', same(sequence('ctrl+shift+g')), ['session-workspace'], 'safe', 'selected-or-first-source-file'),
   expectedCommand('source-control.selection.next', 6, 'sourceControl', same(sequence('j'), sequence('arrowdown')), ['source-control-list'], 'safe', 'next-source-file'),
   expectedCommand('source-control.selection.previous', 6, 'sourceControl', same(sequence('k'), sequence('arrowup')), ['source-control-list'], 'safe', 'previous-source-file'),

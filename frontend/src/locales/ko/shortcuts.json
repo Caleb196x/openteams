@@ -10,6 +10,8 @@
   "shortcuts.command.build-stats.open": "빌드 통계 열기",
   "shortcuts.command.session-tab.next": "다음 세션 탭",
   "shortcuts.command.session-tab.previous": "이전 세션 탭",
+  "shortcuts.command.session.next": "다음 세션 활성화",
+  "shortcuts.command.session.previous": "이전 세션 활성화",
   "shortcuts.command.source-control.open": "파일 변경 열기",
   "shortcuts.command.source-control.selection.next": "다음 변경 파일",
   "shortcuts.command.source-control.selection.previous": "이전 변경 파일",

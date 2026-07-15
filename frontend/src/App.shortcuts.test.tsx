@@ -33,6 +33,8 @@ const requiredGlobalHandlers = [
   'build-stats.open',
   'session-tab.next',
   'session-tab.previous',
+  'session.next',
+  'session.previous',
   'settings.open',
   'shortcuts.settings.open',
   'issue.open-list',
@@ -54,6 +56,8 @@ assert.ok(
   app.includes("pendingFocusTargetRef.current = 'build-stats-heading'"),
 );
 assert.ok(app.includes("pendingFocusTargetRef.current = 'tab-main-content'"));
+assert.ok(app.includes('getRelativeSessionId('));
+assert.ok(app.includes('prioritizeSessions('));
 assert.ok(app.includes('useLayoutEffect(() => {'));
 assert.ok(app.includes('data-shortcut-focus="tab-main-content"'));
 assert.ok(app.includes("openSettingsTab('shortcuts')"));

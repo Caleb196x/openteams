@@ -10,6 +10,8 @@
   "shortcuts.command.build-stats.open": "Abrir estadísticas de compilación",
   "shortcuts.command.session-tab.next": "Siguiente pestaña de sesión",
   "shortcuts.command.session-tab.previous": "Pestaña de sesión anterior",
+  "shortcuts.command.session.next": "Activar la sesión siguiente",
+  "shortcuts.command.session.previous": "Activar la sesión anterior",
   "shortcuts.command.source-control.open": "Abrir cambios de archivos",
   "shortcuts.command.source-control.selection.next": "Siguiente archivo modificado",
   "shortcuts.command.source-control.selection.previous": "Archivo modificado anterior",

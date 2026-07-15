@@ -10,6 +10,8 @@
   "shortcuts.command.build-stats.open": "Ouvrir les statistiques de build",
   "shortcuts.command.session-tab.next": "Onglet de session suivant",
   "shortcuts.command.session-tab.previous": "Onglet de session précédent",
+  "shortcuts.command.session.next": "Activer la session suivante",
+  "shortcuts.command.session.previous": "Activer la session précédente",
   "shortcuts.command.source-control.open": "Ouvrir les modifications de fichiers",
   "shortcuts.command.source-control.selection.next": "Fichier modifié suivant",
   "shortcuts.command.source-control.selection.previous": "Fichier modifié précédent",

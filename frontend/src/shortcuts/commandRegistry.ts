@@ -50,6 +50,8 @@ export const commandRegistry = [
   command('build-stats.open', 4, 'navigation', same(sequence('g', 'b')), ['global'], 'safe', 'build-stats-heading'),
   command('session-tab.next', 5, 'navigation', same(sequence('ctrl+tab')), ['global'], 'safe', 'next-tab-content'),
   command('session-tab.previous', 5, 'navigation', same(sequence('ctrl+shift+tab')), ['global'], 'safe', 'previous-tab-content'),
+  command('session.next', 5, 'navigation', same(sequence('alt+arrowdown')), ['session-workspace'], 'safe', 'tab-main-content'),
+  command('session.previous', 5, 'navigation', same(sequence('alt+arrowup')), ['session-workspace'], 'safe', 'tab-main-content'),
   command('source-control.open', 6, 'sourceControl', same(sequence('ctrl+shift+g')), ['session-workspace'], 'safe', 'selected-or-first-source-file'),
   command('source-control.selection.next', 6, 'sourceControl', same(sequence('j'), sequence('arrowdown')), ['source-control-list'], 'safe', 'next-source-file'),
   command('source-control.selection.previous', 6, 'sourceControl', same(sequence('k'), sequence('arrowup')), ['source-control-list'], 'safe', 'previous-source-file'),

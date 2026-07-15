@@ -168,6 +168,46 @@ assert.deepEqual(
   'browser: overriding session-tab.next away from ctrl+tab produces no merge warning',
 );
 
+// 1f. Session navigation uses vertical Alt+Arrow shortcuts and is scoped to
+//     the session workspace rather than the global tab-switching context.
+const nextSessionBinding = browserBindings.find(
+  (binding) => binding.commandId === 'session.next',
+);
+const previousSessionBinding = browserBindings.find(
+  (binding) => binding.commandId === 'session.previous',
+);
+assert.deepEqual(nextSessionBinding?.sequence, ['alt+arrowdown']);
+assert.deepEqual(previousSessionBinding?.sequence, ['alt+arrowup']);
+assert.deepEqual(nextSessionBinding?.contexts, ['session-workspace']);
+assert.deepEqual(previousSessionBinding?.contexts, ['session-workspace']);
+
+const sessionWorkspaceContexts = new Set([
+  'global',
+  'session-workspace',
+] as const);
+assert.deepEqual(
+  resolveBinding({
+    event: event('ArrowDown', 'ArrowDown', { altKey: true }),
+    chordPrefix: null,
+    bindings: browserBindings,
+    availableCommandIds: allCommandIds,
+    activeContextIds: sessionWorkspaceContexts,
+    now: 0,
+  }),
+  { kind: 'execute', commandId: 'session.next' },
+);
+assert.deepEqual(
+  resolveBinding({
+    event: event('ArrowUp', 'ArrowUp', { altKey: true }),
+    chordPrefix: null,
+    bindings: browserBindings,
+    availableCommandIds: allCommandIds,
+    activeContextIds: sessionWorkspaceContexts,
+    now: 0,
+  }),
+  { kind: 'execute', commandId: 'session.previous' },
+);
+
 // ---------------------------------------------------------------------------
 // 2. Tauri desktop shell: Ctrl+Tab / Ctrl+Shift+Tab are fully allowed —
 //    no compatibility warning.

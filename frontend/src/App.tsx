@@ -18,7 +18,10 @@ import { CreateAgentSessionModal } from "@/components/CreateAgentSessionModal";
 import { DiffViewTab } from "@/components/DiffViewTab";
 import { WorktreeMergeConflictsSection } from "@/pages/worktree/WorktreeMergeConflictsSection";
 import { NotificationToast } from "@/components/NotificationToast";
-import { ProjectSidebar } from "@/components/ProjectSidebar";
+import {
+  ProjectSidebar,
+  prioritizeSessions,
+} from "@/components/ProjectSidebar";
 import { GlobalSearchDialog } from "@/components/GlobalSearchDialog";
 import {
   OnboardingGuide,
@@ -82,6 +85,7 @@ import {
 import { notifyLinkedWorkItemsChanged } from "@/lib/linkedWorkItemsEvents";
 import { notifySourceControlRefreshRequested } from "@/lib/sourceControlEvents";
 import { resolveGlobalSearchNavigationAction } from "@/lib/globalSearchNavigation";
+import { getRelativeSessionId } from "@/lib/sessionNavigation";
 import { notifyInboxWorkflowFocus } from "@/lib/inboxNavigation";
 import { mapSession } from "@/lib/mappers";
 import { mockFrontendApi } from "@/lib/mockFrontendApi";
@@ -535,6 +539,10 @@ function WorkspaceLayout() {
   const pendingFocusTargetRef = useRef<
     "build-stats-heading" | "tab-main-content" | null
   >(null);
+  const shortcutSessionOrderRef = useRef<{
+    rosterKey: string;
+    orderIds: string[];
+  }>({ rosterKey: "", orderIds: [] });
 
   const loadLeadMember = useCallback(
     async (projectId: string): Promise<Member | null> => {
@@ -933,6 +941,23 @@ function WorkspaceLayout() {
   const activeTab = openTabs.find((tab) => tab.id === activeTabId);
   const activeAppPage: SidebarNavigationTarget =
     activeTab?.kind === "page" ? activeTab.page : "workspace";
+  const shortcutSessionRosterKey = sessions
+    .map((session) => session.id)
+    .join("\u001f");
+  const shortcutPreviousSessionOrder =
+    shortcutSessionOrderRef.current.rosterKey === shortcutSessionRosterKey
+      ? shortcutSessionOrderRef.current.orderIds
+      : [];
+  const shortcutOrderedSessions = prioritizeSessions(
+    sessions,
+    shortcutPreviousSessionOrder,
+  );
+  useEffect(() => {
+    shortcutSessionOrderRef.current = {
+      rosterKey: shortcutSessionRosterKey,
+      orderIds: shortcutOrderedSessions.map((session) => session.id),
+    };
+  }, [shortcutOrderedSessions, shortcutSessionRosterKey]);
   useLayoutEffect(() => {
     const pendingTarget = pendingFocusTargetRef.current;
     if (!pendingTarget) return;
@@ -1496,6 +1521,19 @@ function WorkspaceLayout() {
     if (nextTab.kind === 'session') setActiveSessionId(nextTab.sessionId);
   };
 
+  const activateRelativeSession = (offset: -1 | 1) => {
+    const nextSessionId = getRelativeSessionId(
+      shortcutOrderedSessions.map((session) => session.id),
+      activeSessionId,
+      offset,
+    );
+    if (!nextSessionId) return;
+
+    pendingFocusTargetRef.current = 'tab-main-content';
+    replaceActiveTab(createSessionTab(nextSessionId));
+    setActiveSessionId(nextSessionId);
+  };
+
   useCommandHandler('search.open', {
     scope: 'global',
     enabled: true,
@@ -1524,6 +1562,24 @@ function WorkspaceLayout() {
     scope: 'global',
     enabled: openTabs.length > 1,
     execute: () => activateRelativeTab(-1),
+  });
+  useCommandHandler('session.next', {
+    scope: 'page',
+    enabled: Boolean(activeSessionId) && shortcutOrderedSessions.length > 1,
+    disabledReason:
+      activeSessionId && shortcutOrderedSessions.length > 1
+        ? undefined
+        : t('shortcuts.reason.unavailable'),
+    execute: () => activateRelativeSession(1),
+  });
+  useCommandHandler('session.previous', {
+    scope: 'page',
+    enabled: Boolean(activeSessionId) && shortcutOrderedSessions.length > 1,
+    disabledReason:
+      activeSessionId && shortcutOrderedSessions.length > 1
+        ? undefined
+        : t('shortcuts.reason.unavailable'),
+    execute: () => activateRelativeSession(-1),
   });
   useCommandHandler('settings.open', {
     scope: 'global',
