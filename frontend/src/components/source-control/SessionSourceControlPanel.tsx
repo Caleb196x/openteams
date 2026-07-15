@@ -18,6 +18,7 @@ import {
   useCommandPresentation,
   useShortcutScope,
 } from "@/shortcuts/ShortcutProvider";
+import { preventTabFocusChange } from "@/shortcuts/textInputFocus";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import { useSessionSourceControl } from "@/hooks/useSessionSourceControl";
 import { useSessionWorktree } from "@/hooks/useSessionWorktree";
@@ -46,6 +47,7 @@ import {
   type SourceControlSectionViewModel,
   type SourceControlTranslator,
 } from "./sourceControlViewModel";
+import { sourceControlSelectionKey } from "./sourceControlSelection";
 
 interface SessionSourceControlPanelProps {
   projectId: string | null;
@@ -443,7 +445,7 @@ export const SessionSourceControlPanel: React.FC<
   >(null);
   const [worktreeActionErrorsByScope, setWorktreeActionErrorsByScope] =
     useState<ScopedErrorState>({});
-  const [selectedPathsByScope, setSelectedPathsByScope] =
+  const [selectedFileKeysByScope, setSelectedFileKeysByScope] =
     useState<Record<string, string>>({});
   const scopeKeyRef = useRef(scopeKey);
   const panelRootRef = useRef<HTMLDivElement>(null);
@@ -451,7 +453,7 @@ export const SessionSourceControlPanel: React.FC<
   const emptyStateHeadingRef = useRef<HTMLHeadingElement>(null);
   const commitMessageRef = useRef<HTMLTextAreaElement>(null);
   const fileRowRefs = useRef(new Map<string, HTMLDivElement>());
-  const shortcutSelectionFocusPathRef = useRef<string | null>(null);
+  const shortcutSelectionFocusKeyRef = useRef<string | null>(null);
   scopeKeyRef.current = scopeKey;
 
   const isCurrentScope = (key: string) => scopeKeyRef.current === key;
@@ -497,10 +499,15 @@ export const SessionSourceControlPanel: React.FC<
       ),
     [viewModel],
   );
-  const selectableFilePaths = files.map((file) => file.path).join("\n");
-  const selectedPath = selectedPathsByScope[scopeKey] ?? null;
+  const selectableFileKeys = files
+    .map((file) => sourceControlSelectionKey(file.area, file.path))
+    .join("\n");
+  const selectedFileKey = selectedFileKeysByScope[scopeKey] ?? null;
   const selectedFile =
-    files.find((file) => file.path === selectedPath) ?? null;
+    files.find(
+      (file) =>
+        sourceControlSelectionKey(file.area, file.path) === selectedFileKey,
+    ) ?? null;
   const tr = (
     key: string,
     fallback: string,
@@ -556,30 +563,41 @@ export const SessionSourceControlPanel: React.FC<
   }, [scopeKey, worktree?.status]);
 
   useEffect(() => {
-    const nextPath = files.some((file) => file.path === selectedPath)
-      ? selectedPath
-      : (files[0]?.path ?? null);
-    setSelectedPathsByScope((current) => {
-      if ((current[scopeKey] ?? null) === nextPath) return current;
+    const firstFile = files[0];
+    const nextKey = files.some(
+      (file) =>
+        sourceControlSelectionKey(file.area, file.path) === selectedFileKey,
+    )
+      ? selectedFileKey
+      : firstFile
+        ? sourceControlSelectionKey(firstFile.area, firstFile.path)
+        : null;
+    setSelectedFileKeysByScope((current) => {
+      if ((current[scopeKey] ?? null) === nextKey) return current;
       const next = { ...current };
-      if (nextPath) next[scopeKey] = nextPath;
+      if (nextKey) next[scopeKey] = nextKey;
       else delete next[scopeKey];
       return next;
     });
-  }, [scopeKey, selectableFilePaths, selectedPath]);
+  }, [scopeKey, selectableFileKeys, selectedFileKey]);
 
   useLayoutEffect(() => {
-    const path = shortcutSelectionFocusPathRef.current;
-    if (!path || selectedFile?.path !== path) return;
-    fileRowRefs.current.get(path)?.focus();
-    shortcutSelectionFocusPathRef.current = null;
-  }, [selectedFile?.area, selectedFile?.path]);
+    const key = shortcutSelectionFocusKeyRef.current;
+    if (!key || selectedFileKey !== key || !selectedFile) return;
+    fileRowRefs.current.get(key)?.focus();
+    shortcutSelectionFocusKeyRef.current = null;
+  }, [selectableFileKeys, selectedFile, selectedFileKey]);
 
   useEffect(() => {
     if (!focusRequestKey || !enabled || !projectId || !sessionId) return;
     const frame = window.requestAnimationFrame(() => {
-      const path = selectedPathsByScope[scopeKey] ?? files[0]?.path;
-      if (path) fileRowRefs.current.get(path)?.focus();
+      const firstFile = files[0];
+      const key =
+        selectedFileKeysByScope[scopeKey] ??
+        (firstFile
+          ? sourceControlSelectionKey(firstFile.area, firstFile.path)
+          : null);
+      if (key) fileRowRefs.current.get(key)?.focus();
       else emptyStateHeadingRef.current?.focus();
     });
     return () => window.cancelAnimationFrame(frame);
@@ -588,8 +606,8 @@ export const SessionSourceControlPanel: React.FC<
     focusRequestKey,
     projectId,
     scopeKey,
-    selectableFilePaths,
-    selectedPathsByScope,
+    selectableFileKeys,
+    selectedFileKeysByScope,
     sessionId,
   ]);
 
@@ -894,27 +912,38 @@ export const SessionSourceControlPanel: React.FC<
       !pendingAction,
   );
 
-  const selectPath = (path: string) => {
-    setSelectedPathsByScope((current) => ({ ...current, [scopeKey]: path }));
+  const selectFile = (area: SourceControlDiffArea, path: string) => {
+    const key = sourceControlSelectionKey(area, path);
+    setSelectedFileKeysByScope((current) => ({
+      ...current,
+      [scopeKey]: key,
+    }));
   };
 
   const moveSelection = (offset: -1 | 1) => {
     if (files.length === 0) return;
     const currentIndex = Math.max(
       0,
-      files.findIndex((file) => file.path === selectedPath),
+      files.findIndex(
+        (file) =>
+          sourceControlSelectionKey(file.area, file.path) === selectedFileKey,
+      ),
     );
     const nextFile = files[(currentIndex + offset + files.length) % files.length];
-    selectPath(nextFile.path);
+    const nextKey = sourceControlSelectionKey(nextFile.area, nextFile.path);
+    selectFile(nextFile.area, nextFile.path);
     window.requestAnimationFrame(() =>
-      fileRowRefs.current.get(nextFile.path)?.focus(),
+      fileRowRefs.current.get(nextKey)?.focus(),
     );
   };
 
   const handleToggleSelectedStage = (
     selectedFile: SelectableSourceControlFile,
   ) => {
-    shortcutSelectionFocusPathRef.current = selectedFile.path;
+    const nextArea = selectedFile.area === "changes" ? "staged" : "changes";
+    const nextKey = sourceControlSelectionKey(nextArea, selectedFile.path);
+    shortcutSelectionFocusKeyRef.current = nextKey;
+    selectFile(nextArea, selectedFile.path);
     if (selectedFile.area === "changes") handleStageFiles([selectedFile]);
     else handleUnstageFiles([selectedFile]);
   };
@@ -1125,26 +1154,32 @@ export const SessionSourceControlPanel: React.FC<
                 </div>
               ) : (
                 <div className="space-y-1">
-                  {section.files.map((file) => (
-                    <SourceControlFileRow
-                      key={`${section.id}-${file.status}-${file.path}`}
-                      file={file}
-                      area={section.area}
-                      viewModel={viewModel}
-                      pending={Boolean(pendingAction)}
-                      selected={selectedPath === file.path}
-                      rowRef={(node) => {
-                        if (node) fileRowRefs.current.set(file.path, node);
-                        else fileRowRefs.current.delete(file.path);
-                      }}
-                      t={t}
-                      onOpenDiff={handleOpenDiff}
-                      onStage={(target) => handleStageFiles([target])}
-                      onUnstage={(target) => handleUnstageFiles([target])}
-                      onDiscard={(target) => handleDiscardFiles([target])}
-                      onSelect={selectPath}
-                    />
-                  ))}
+                  {section.files.map((file) => {
+                    const fileKey = sourceControlSelectionKey(
+                      section.area,
+                      file.path,
+                    );
+                    return (
+                      <SourceControlFileRow
+                        key={`${section.id}-${file.status}-${file.path}`}
+                        file={file}
+                        area={section.area}
+                        viewModel={viewModel}
+                        pending={Boolean(pendingAction)}
+                        selected={selectedFileKey === fileKey}
+                        rowRef={(node) => {
+                          if (node) fileRowRefs.current.set(fileKey, node);
+                          else fileRowRefs.current.delete(fileKey);
+                        }}
+                        t={t}
+                        onOpenDiff={handleOpenDiff}
+                        onStage={(target) => handleStageFiles([target])}
+                        onUnstage={(target) => handleUnstageFiles([target])}
+                        onDiscard={(target) => handleDiscardFiles([target])}
+                        onSelect={(path) => selectFile(section.area, path)}
+                      />
+                    );
+                  })}
                 </div>
               )}
             </section>
@@ -1157,6 +1192,8 @@ export const SessionSourceControlPanel: React.FC<
         <div className="shrink-0 border-t border-[color-mix(in_srgb,var(--hairline)_72%,transparent)] p-3">
           <textarea
             ref={commitMessageRef}
+            tabIndex={-1}
+            onKeyDown={preventTabFocusChange}
             aria-keyshortcuts={
               commitCommandPresentation.ariaKeyShortcuts || undefined
             }

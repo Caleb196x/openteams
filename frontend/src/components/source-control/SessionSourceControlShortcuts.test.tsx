@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { sourceControlSelectionKey } from './sourceControlSelection';
 
 const panel = readFileSync(new URL('./SessionSourceControlPanel.tsx', import.meta.url), 'utf8');
 const row = readFileSync(new URL('./SourceControlFileRow.tsx', import.meta.url), 'utf8');
@@ -12,8 +13,12 @@ for (const commandId of [
   assert.ok(panel.includes(`useCommandHandler('${commandId}'`), commandId);
 }
 assert.ok(panel.includes("useShortcutScope('source-control-list'"));
-assert.ok(panel.includes('files.some((file) => file.path === selectedPath)'));
-assert.ok(panel.includes('files[0]?.path ?? null'));
+assert.notEqual(
+  sourceControlSelectionKey('staged', 'src/shared.ts'),
+  sourceControlSelectionKey('changes', 'src/shared.ts'),
+);
+assert.ok(panel.includes('selectedFileKeysByScope'));
+assert.ok(panel.includes('selected={selectedFileKey === fileKey}'));
 assert.ok(panel.includes('emptyStateHeadingRef.current?.focus()'));
 assert.ok(panel.includes('commitMessageRef.current?.focus()'));
 assert.ok(panel.includes('commitFocusRequestKey'));
@@ -21,9 +26,9 @@ assert.match(panel, /tabIndex=\{-1\}/);
 assert.ok(panel.includes("tr('sourceControl.empty.noChanges'"));
 assert.ok(panel.includes('handleStageFiles([selectedFile])'));
 assert.ok(panel.includes('handleUnstageFiles([selectedFile])'));
-assert.ok(panel.includes('shortcutSelectionFocusPathRef.current = selectedFile.path'));
-assert.ok(panel.includes('fileRowRefs.current.get(path)?.focus()'));
-assert.ok(panel.includes('[selectedFile?.area, selectedFile?.path]'));
+assert.ok(panel.includes('shortcutSelectionFocusKeyRef.current = nextKey'));
+assert.ok(panel.includes('fileRowRefs.current.get(key)?.focus()'));
+assert.ok(panel.includes('fileRowRefs.current.get(nextKey)?.focus()'));
 assert.ok(panel.includes('handleOpenDiff(selectedFile'));
 assert.ok(row.includes('data-source-control-path={file.path}'));
 assert.ok(row.includes('tabIndex={selected ? 0 : -1}'));

@@ -40,6 +40,7 @@ import {
   useCommandHandler,
   useShortcutScope,
 } from "@/shortcuts/ShortcutProvider";
+import { preventTabFocusChange } from "@/shortcuts/textInputFocus";
 import {
   chatMessagesApi,
   chatRunsApi,
@@ -2060,6 +2061,8 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (preventTabFocusChange(e)) return;
+
     if (isMemberPickerOpen) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -2849,6 +2852,7 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
               {/* Text Area */}
               <textarea
                 ref={inputRef}
+                tabIndex={-1}
                 rows={1}
                 className="w-full bg-transparent resize-none border-none text-[16px] leading-6 text-[var(--ink)] outline-none placeholder:text-[var(--ink-tertiary)] select-text overflow-y-auto md:text-[13px] md:leading-normal"
                 style={{

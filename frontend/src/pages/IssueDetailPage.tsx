@@ -48,6 +48,7 @@ import {
 } from '@/components/NotificationToast';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import { useCommandHandler } from '@/shortcuts/ShortcutProvider';
+import { preventTabFocusChange } from '@/shortcuts/textInputFocus';
 import {
   chatSessionsApi,
   projectApi,
@@ -1522,6 +1523,7 @@ export function IssueDetailPage({
               >
                 <input
                   ref={titleInputRef}
+                  tabIndex={-1}
                   value={titleDraft}
                   className="h-10 min-w-0 flex-1 rounded-[8px] border border-[var(--hairline)] bg-[var(--surface-1)] px-2.5 text-[23px] font-bold leading-tight text-[var(--ink)] outline-none transition placeholder:text-[var(--ink-tertiary)] focus:border-[var(--hairline-strong)]"
                   placeholder={tr(
@@ -1530,6 +1532,7 @@ export function IssueDetailPage({
                   )}
                   onChange={(event) => setTitleDraft(event.target.value)}
                   onKeyDown={(event) => {
+                    if (preventTabFocusChange(event)) return;
                     if (event.key === 'Escape') {
                       event.preventDefault();
                       setTitleEditing(false);
@@ -1594,6 +1597,7 @@ export function IssueDetailPage({
             ) : descriptionEditing ? (
               <textarea
                 autoFocus
+                tabIndex={-1}
                 value={descriptionDraft}
                 placeholder={tr(
                   'issue.detail.addDescription',
@@ -1601,6 +1605,7 @@ export function IssueDetailPage({
                 )}
                 className="mt-[22px] min-h-[126px] w-full resize-y rounded-[8px] border border-[var(--hairline)] bg-[var(--surface-1)] p-[15px] text-[14px] leading-relaxed text-[var(--ink-muted)] outline-none transition placeholder:text-[var(--ink-tertiary)] focus:border-[var(--hairline-strong)]"
                 onChange={(event) => setDescriptionDraft(event.target.value)}
+                onKeyDown={preventTabFocusChange}
                 onBlur={() => {
                   void handleSaveDescriptionDraft();
                   setDescriptionEditing(false);
@@ -1754,6 +1759,7 @@ export function IssueDetailPage({
 
               <div className="mt-6 rounded-[8px] border border-[var(--hairline)] bg-[var(--surface-2)] p-[12px]">
                 <textarea
+                  tabIndex={-1}
                   value={commentText}
                   placeholder={tr(
                     'issue.detail.commentPlaceholder',
@@ -1761,6 +1767,7 @@ export function IssueDetailPage({
                   )}
                   className="min-h-[82px] w-full resize-y bg-transparent text-[14px] leading-relaxed text-[var(--ink-muted)] outline-none placeholder:text-[var(--ink-tertiary)]"
                   onChange={(event) => setCommentText(event.target.value)}
+                  onKeyDown={preventTabFocusChange}
                   onFocus={() =>
                     onAction(
                       tr(
