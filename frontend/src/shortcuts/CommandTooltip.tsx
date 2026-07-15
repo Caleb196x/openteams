@@ -46,7 +46,7 @@ export function CommandTooltip({ commandId, children }: Props) {
         <span
           id={tooltipId}
           role="tooltip"
-          className="command-tooltip absolute bottom-full left-1/2 z-[80] mb-2 -translate-x-1/2 whitespace-nowrap rounded bg-zinc-900 px-2 py-1 text-xs text-white shadow-lg"
+          className="app-tooltip command-tooltip absolute bottom-full left-1/2 z-[80] mb-2 -translate-x-1/2 whitespace-nowrap px-2 py-1"
         >
           {presentation.tooltip}
         </span>

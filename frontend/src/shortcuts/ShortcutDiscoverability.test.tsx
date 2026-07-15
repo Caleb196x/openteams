@@ -48,9 +48,7 @@ assert.ok(
 assert.ok(tooltip.includes('onPointerEnter'));
 assert.ok(tooltip.includes('onFocusCapture'));
 assert.equal(tooltip.includes('title={presentation.tooltip}'), false);
-assert.ok(tooltip.includes('rounded-md border border-[var(--hairline-strong)]'));
-assert.ok(tooltip.includes('bg-[var(--surface-1)]'));
-assert.ok(tooltip.includes('text-[var(--ink)]'));
+assert.ok(tooltip.includes('className="app-tooltip command-tooltip'));
 assert.equal(tooltip.includes('bg-zinc-900'), false);
 assert.ok(palette.includes('data-command-palette'));
 assert.ok(palette.includes('data-command-search'));
