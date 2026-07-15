@@ -344,3 +344,80 @@ body[data-mode="light"] .workflow-window-root .wf-log-markdown pre {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* Error entries render as a single collapsible code block. */
+.wf-log-error-block {
+  margin: 3px 0;
+  border: 1px solid var(--hairline, rgba(255, 255, 255, 0.12));
+  border-radius: 6px;
+  background: var(--surface-3, #18191a);
+  color: var(--ink-muted, #a1a5ad);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  overflow: hidden;
+}
+
+/* Match the content column used by regular activity rows in both variants. */
+:is(.wf-log-panel, .wf-log-panel-inline) .wf-log-error-block {
+  margin-left: 24px;
+}
+
+.wf-log-error-block--single {
+  padding: 7px 9px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.wf-log-error-block > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.wf-log-error-block > summary::-webkit-details-marker {
+  display: none;
+}
+
+.wf-log-error-block-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 30px;
+  padding: 7px 9px;
+}
+
+.wf-log-error-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wf-log-error-chevron {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  margin-top: 2px;
+  color: var(--ink-tertiary, #62666d);
+  transition: transform 120ms ease;
+}
+
+.wf-log-error-block[open] .wf-log-error-chevron {
+  transform: rotate(90deg);
+}
+
+.wf-log-error-detail {
+  max-height: 240px;
+  margin: 0;
+  padding: 0 9px 8px 27px;
+  color: inherit;
+  font: inherit;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

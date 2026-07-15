@@ -781,7 +781,7 @@ async fn run_workflow_agent_prompt_inner(
     persist_workflow_runtime_session_ids(&db.pool, session_agent.id, workflow_session, &history)
         .await?;
     if let Some(context) = stream_context.as_ref() {
-        persist_missing_workflow_runtime_thinking_transcripts(
+        persist_missing_workflow_runtime_activity_transcripts(
             &context.pool,
             context.execution_id,
             context.workflow_agent_session_id,

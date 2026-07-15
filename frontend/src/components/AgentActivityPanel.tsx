@@ -265,6 +265,30 @@ const ContentLineItem: React.FC<{
   );
 };
 
+const ErrorLineItem: React.FC<{
+  line: AgentActivityDisplayRow;
+}> = ({ line }) => {
+  const content = line.content.trim();
+  const [preview = content, ...detailLines] = content.split(/\r\n|\r|\n/u);
+  const detail = detailLines.join("\n").trim();
+
+  if (!detail) {
+    return <pre className="wf-log-error-block wf-log-error-block--single">{preview}</pre>;
+  }
+
+  return (
+    <details className="wf-log-error-block">
+      <summary className="wf-log-error-block-summary">
+        <ChevronRight className="wf-log-error-chevron" aria-hidden="true" />
+        <code className="wf-log-error-preview" title={preview}>
+          {preview}
+        </code>
+      </summary>
+      <pre className="wf-log-error-detail">{detail}</pre>
+    </details>
+  );
+};
+
 // ---------------------------------------------------------------------------
 // Panel
 // ---------------------------------------------------------------------------
@@ -335,6 +359,11 @@ export const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
     const renderLine = (line: AgentActivityDisplayRow) =>
       isToolCallLine(line) ? (
         <ToolLineItem
+          key={line.row_id}
+          line={line}
+        />
+      ) : line.line_type === "error" ? (
+        <ErrorLineItem
           key={line.row_id}
           line={line}
         />
@@ -433,6 +462,11 @@ export const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({
             {visibleRows.map((line) =>
               isToolCallLine(line) ? (
                 <ToolLineItem
+                  key={line.row_id}
+                  line={line}
+                />
+              ) : line.line_type === "error" ? (
+                <ErrorLineItem
                   key={line.row_id}
                   line={line}
                 />
