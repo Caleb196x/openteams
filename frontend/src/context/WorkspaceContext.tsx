@@ -2418,6 +2418,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
             err instanceof Error
               ? `Mode switch failed: ${err.message}`
               : 'Mode switch failed.',
+            'error',
           );
         });
     },
@@ -4481,6 +4482,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
           err instanceof Error
             ? `Send failed: ${err.message} (using mock reply)`
             : 'Send failed (using mock reply)',
+          'warning',
         );
         dispatchMockReply(text, sid);
       });
@@ -4503,7 +4505,10 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
       modelName: model,
     };
     setMembers((prev) => [...prev, newM]);
-    showToast(`Added agent ${cleanName} equipped with ${model} engine!`);
+    showToast(
+      `Added agent ${cleanName} equipped with ${model} engine!`,
+      'success',
+    );
   };
 
   const addProviderToKeychain = (name: string, key: string) => {
@@ -4519,7 +4524,10 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
       active: true,
     };
     setProviders((prev) => [...prev, newProv]);
-    showToast(`Connected ${name} endpoint securely inside local keychain!`);
+    showToast(
+      `Connected ${name} endpoint securely inside local keychain!`,
+      'success',
+    );
   };
 
   return (

@@ -1402,7 +1402,7 @@ function WorkspaceLayout() {
     );
 
     if (!nextSession) {
-      showToast(t("toast.allSessionsOpen"));
+      showToast(t("toast.allSessionsOpen"), "warning");
       return;
     }
 
@@ -1417,7 +1417,7 @@ function WorkspaceLayout() {
 
   const handleCloseTab = (closingTab: WorkspaceTab) => {
     if (openTabs.length <= 1) {
-      showToast(t("toast.keepOneTab"));
+      showToast(t("toast.keepOneTab"), "warning");
       return;
     }
 
@@ -1450,6 +1450,7 @@ function WorkspaceLayout() {
           'createSession.noProject',
           'Please select a project first',
         ),
+        'warning',
       );
       return;
     }
@@ -1489,6 +1490,7 @@ function WorkspaceLayout() {
         err instanceof Error
           ? err.message
           : String(err ?? 'Failed to create session'),
+        'error',
       );
     }
   };
@@ -1640,6 +1642,7 @@ function WorkspaceLayout() {
           'createSession.noProject',
           'Please select a project first',
         ),
+        'warning',
       );
       return;
     }
@@ -1827,6 +1830,7 @@ function WorkspaceLayout() {
         t('createSession.taskSentToast', {
           member: options.memberName ?? t('createSession.memberFallback'),
         }),
+        'success',
       );
 
       void refreshSessions();
@@ -1835,6 +1839,7 @@ function WorkspaceLayout() {
         err instanceof Error
           ? err.message
           : String(err ?? 'Failed to create session'),
+        'error',
       );
     }
   };
@@ -1952,7 +1957,7 @@ function WorkspaceLayout() {
         : translate("toast.projectCreated", `Created ${project.name}`, {
               name: project.name,
             });
-    showToast(createdProjectToast);
+    showToast(createdProjectToast, teamSetupFailed ? 'warning' : 'success');
     if (options?.createDefaultSession) {
       await handleCreateDefaultSession({
         projectId: project.id,
@@ -1974,6 +1979,7 @@ function WorkspaceLayout() {
       translate("toast.projectUpdated", `Updated ${projectName}`, {
         name: projectName,
       }),
+      'success',
     );
   };
 
@@ -1995,6 +2001,7 @@ function WorkspaceLayout() {
       translate("toast.projectDeleted", `Deleted ${projectName}`, {
         name: projectName,
       }),
+      'success',
     );
   };
 

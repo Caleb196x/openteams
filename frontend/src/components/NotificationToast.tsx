@@ -1,7 +1,7 @@
 import {
-  AlertCircle,
   CheckCircle2,
   Info,
+  TriangleAlert,
   X,
   XCircle,
   type LucideIcon,
@@ -42,7 +42,7 @@ const toneStyles = {
     border: 'border-[var(--success)]/30',
   },
   warning: {
-    icon: AlertCircle,
+    icon: TriangleAlert,
     accent: 'text-amber-400',
     background: 'bg-amber-400/10',
     border: 'border-amber-400/30',
@@ -88,7 +88,7 @@ export function NotificationToast({
       role={liveRole}
       aria-live={liveRole === 'alert' ? 'assertive' : 'polite'}
       className={cn(
-        'fixed bottom-5 right-5 z-[70] inline-flex w-fit max-w-[min(360px,calc(100vw-40px))] items-start gap-3 rounded-lg border bg-[var(--surface-1)] px-4 py-3 text-[var(--ink)] shadow-[0_18px_45px_rgba(0,0,0,0.28)] animate-fade-in-up',
+        'fixed bottom-5 right-5 z-[70] inline-flex w-fit max-w-[min(360px,calc(100vw-40px))] items-start gap-3 rounded-[8px] border bg-[var(--surface-1)] px-4 py-3 text-[var(--ink)] shadow-[0_18px_45px_rgba(0,0,0,0.28)] animate-fade-in-up',
         style.border,
         className,
       )}
@@ -101,7 +101,7 @@ export function NotificationToast({
           style.accent,
         )}
       >
-        {icon ?? <Icon className="h-4 w-4" />}
+        {icon ?? <Icon aria-hidden="true" className="h-[18px] w-[18px]" />}
       </span>
       <span className="min-w-0 max-w-full">
         {title && (
