@@ -71,6 +71,13 @@ assert.equal(
   ) !== null,
   true,
 );
+const binding = document.querySelector<HTMLElement>(
+  '[data-command-id="search.open"] [data-shortcut-binding]',
+)!;
+assert.equal(binding.textContent, '⌘K');
+assert.equal(binding.classList.contains('text-center'), true);
+assert.equal(binding.classList.contains('text-xs'), true);
+assert.equal(binding.classList.contains('text-[var(--ink-subtle)]'), true);
 
 await act(async () => root.unmount());
 console.log('KeyboardShortcutSettings readonly: PASS');

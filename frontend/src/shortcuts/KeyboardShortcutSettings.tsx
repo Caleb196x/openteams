@@ -224,35 +224,44 @@ export function KeyboardShortcutSettings({
       <div className="divide-y divide-[var(--hairline)] rounded-lg border border-[var(--hairline)]">
         {visibleRows.map((row) => (
           <div key={row.id} data-command-id={row.id} className="p-3">
-            <div className="flex items-center gap-3">
-              <div className="min-w-0 flex-1">
+            <div className="grid grid-cols-[minmax(0,1fr)_minmax(8rem,1fr)_minmax(0,1fr)] items-center gap-3">
+              <div className="min-w-0">
                 <div className="text-sm font-medium">{row.title}</div>
-                <div className="text-xs text-[var(--ink-subtle)]">
-                  {row.currentLabel}
-                  {row.modified ? ` · ${translate('shortcuts.filter.modified')}` : ''}
-                </div>
+                {row.modified && (
+                  <div className="text-xs text-[var(--ink-subtle)]">
+                    {translate('shortcuts.filter.modified')}
+                  </div>
+                )}
               </div>
-              <button
-                type="button"
-                data-shortcut-edit
-                onClick={() => {
-                  setEditingCommandId(row.id);
-                  setPendingConflict(null);
-                  setSaveError(null);
-                }}
-                className="rounded border border-[var(--hairline)] px-2 py-1 text-xs"
+              <div
+                data-shortcut-binding
+                className="text-center text-xs font-medium text-[var(--ink-subtle)]"
               >
-                {translate('shortcuts.action.record')}
-              </button>
-              {row.modified && (
+                {row.currentLabel}
+              </div>
+              <div className="flex min-w-0 items-center justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => void restoreCommand(row.id)}
+                  data-shortcut-edit
+                  onClick={() => {
+                    setEditingCommandId(row.id);
+                    setPendingConflict(null);
+                    setSaveError(null);
+                  }}
                   className="rounded border border-[var(--hairline)] px-2 py-1 text-xs"
                 >
-                  {translate('shortcuts.action.reset')}
+                  {translate('shortcuts.action.record')}
                 </button>
-              )}
+                {row.modified && (
+                  <button
+                    type="button"
+                    onClick={() => void restoreCommand(row.id)}
+                    className="rounded border border-[var(--hairline)] px-2 py-1 text-xs"
+                  >
+                    {translate('shortcuts.action.reset')}
+                  </button>
+                )}
+              </div>
             </div>
             {editingCommandId === row.id && (
               <div className="mt-3 space-y-2">
