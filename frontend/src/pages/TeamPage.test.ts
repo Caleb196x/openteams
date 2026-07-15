@@ -134,6 +134,14 @@ check(
 );
 
 check(
+  "empty markdown fields preserve placeholder line breaks",
+  configTabsSource.includes(
+    '<span className="whitespace-pre-wrap text-[var(--ink-muted)]">',
+  ),
+  configTabsSource,
+);
+
+check(
   "team protocol remains available when the project has no selected member",
   configTabsSource.includes(
     'const effectiveActiveTab = selectedMember ? activeTab : "teamProtocol"',

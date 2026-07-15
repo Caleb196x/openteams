@@ -214,7 +214,9 @@ function MarkdownEditableField({
       {value.trim() ? (
         <AgentMarkdown content={value} fontSize={14} />
       ) : (
-        <span className="text-[var(--ink-muted)]">{placeholder}</span>
+        <span className="whitespace-pre-wrap text-[var(--ink-muted)]">
+          {placeholder}
+        </span>
       )}
     </div>
   );
