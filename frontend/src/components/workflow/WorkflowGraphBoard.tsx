@@ -11,6 +11,7 @@ import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { motion } from 'framer-motion';
 import type { WorkflowCardData, WorkflowCardLoopData } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { useShortcutScope } from '@/shortcuts/ShortcutProvider';
 import {
   canRetryWorkflowStepReview,
   isRetryableWorkflowStepStatus,
@@ -51,7 +52,50 @@ type WorkflowGraphBoardProps = {
   pendingActionId?: string | null;
   compact?: boolean;
   className?: string;
+  isOpen?: boolean;
+  historicalRound?: boolean;
 };
+
+export type WorkflowNodeRect = {
+  id: string;
+  centerX: number;
+  centerY: number;
+};
+
+export function findNextWorkflowNodeId(
+  current: WorkflowNodeRect,
+  candidates: readonly WorkflowNodeRect[],
+  direction: 'up' | 'down' | 'left' | 'right',
+): string | null {
+  return candidates
+    .map((candidate) => ({
+      candidate,
+      dx: candidate.centerX - current.centerX,
+      dy: candidate.centerY - current.centerY,
+    }))
+    .filter(({ dx, dy }) => {
+      const horizontal = direction === 'left' || direction === 'right';
+      const pointsTowardDirection =
+        direction === 'left'
+          ? dx < 0
+          : direction === 'right'
+            ? dx > 0
+            : direction === 'up'
+              ? dy < 0
+              : dy > 0;
+      const primary = horizontal ? Math.abs(dx) : Math.abs(dy);
+      const secondary = horizontal ? Math.abs(dy) : Math.abs(dx);
+      return pointsTowardDirection && secondary <= primary * 2;
+    })
+    .sort((left, right) => {
+      const horizontal = direction === 'left' || direction === 'right';
+      const leftPrimary = horizontal ? Math.abs(left.dx) : Math.abs(left.dy);
+      const rightPrimary = horizontal ? Math.abs(right.dx) : Math.abs(right.dy);
+      const leftSecondary = horizontal ? Math.abs(left.dy) : Math.abs(left.dx);
+      const rightSecondary = horizontal ? Math.abs(right.dy) : Math.abs(right.dx);
+      return leftPrimary - rightPrimary || leftSecondary - rightSecondary;
+    })[0]?.candidate.id ?? null;
+}
 
 const elk = new ELK();
 
@@ -391,6 +435,8 @@ export function WorkflowGraphBoard({
   pendingActionId = null,
   compact = false,
   className,
+  isOpen = false,
+  historicalRound = false,
 }: WorkflowGraphBoardProps) {
   const { t } = useAppTranslation();
   const [layout, setLayout] = useState<ElkLayoutNode | null>(null);
@@ -401,6 +447,7 @@ export function WorkflowGraphBoard({
     null
   );
   const containerRef = useRef<HTMLDivElement>(null);
+  const workflowGraphRef = containerRef;
   const isDragging = useRef(false);
   const lastMousePos = useRef({ x: 0, y: 0 });
   const layoutInputRef = useRef({
@@ -409,6 +456,11 @@ export function WorkflowGraphBoard({
     loops,
     planLoops,
     steps,
+  });
+
+  useShortcutScope('workflow-graph', {
+    active: isOpen && !historicalRound,
+    rootRef: workflowGraphRef,
   });
 
   useEffect(() => {
@@ -736,6 +788,7 @@ export function WorkflowGraphBoard({
       }
 
       if (mode === 'nodes') {
+        const node = child;
         const step = stepByKey.get(child.id);
         const status = step?.status ?? dataNode.data.status ?? 'pending';
         const retryStepId = step?.id ?? null;
@@ -782,8 +835,9 @@ export function WorkflowGraphBoard({
             onMouseEnter={() => setHoveredNodeId(child.id)}
             onMouseLeave={() => setHoveredNodeId(null)}
             data-workflow-node="true"
+            data-workflow-node-id={node.id}
             role={onSelectStep ? 'button' : undefined}
-            tabIndex={onSelectStep ? 0 : -1}
+            tabIndex={onSelectStep && selectedStepId === child.id ? 0 : -1}
             onKeyDown={(e) => {
               if (onSelectStep && (e.key === 'Enter' || e.key === ' ')) {
                 e.preventDefault();
@@ -924,6 +978,8 @@ export function WorkflowGraphBoard({
         className
       )}
       ref={containerRef}
+      tabIndex={-1}
+      data-workflow-graph-root="true"
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}

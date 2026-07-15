@@ -496,7 +496,10 @@ check(
     source.includes('chat_bubble_font_size') &&
     source.includes('chatMessageFontSizeFromConfig') &&
     source.includes('chatMessageFontSizeToConfig') &&
-    source.includes('systemApi.saveConfig(configToSave)') &&
+    source.includes('persistUiPreference({') &&
+    source.includes(
+      'chat_bubble_font_size: chatMessageFontSizeToConfig(normalized)',
+    ) &&
     !source.includes('openteams-chat-message-font-size') &&
     !source.includes('openteams-agent-markdown-font-size'),
   source,
@@ -587,6 +590,24 @@ check(
   'exposes resetWorkspaceChanges',
   source.includes('resetWorkspaceChanges: () => void') &&
     source.includes('resetWorkspaceChanges,'),
+  source,
+);
+
+check(
+  'exposes one config patch queue and server environment',
+  source.includes('createConfigPatchQueue<Config>') &&
+    source.includes(
+      'saveConfigPatch: (patch: Partial<Config>) => Promise<Config>',
+    ) &&
+    source.includes('environment: Environment | null') &&
+    source.includes('setEnvironment(info.environment)'),
+  source,
+);
+
+check(
+  'routes optimistic UI preferences through the same queue',
+  source.includes('enqueue(patch, { optimistic: true })') &&
+    !source.includes('const nextConfig: Config = { ...currentConfig, ...patch }'),
   source,
 );
 

@@ -37,6 +37,10 @@ import { ScrollArea } from "@/components/ScrollArea";
 import { AgentMessageContent } from "@/components/AgentMessageContent";
 import { SessionSourceControlPanel } from "@/components/source-control/SessionSourceControlPanel";
 import {
+  useCommandHandler,
+  useShortcutScope,
+} from "@/shortcuts/ShortcutProvider";
+import {
   chatMessagesApi,
   chatRunsApi,
   sessionAgentsApi,
@@ -823,6 +827,8 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
   const [relatedFilesWidth, setRelatedFilesWidth] = useState(
     RELATED_FILES_DEFAULT_WIDTH,
   );
+  const [sourceControlFocusRequestKey, setSourceControlFocusRequestKey] =
+    useState(0);
   const [linkedWorkItems, setLinkedWorkItems] = useState<ProjectWorkItem[]>([]);
   const [linkedWorkItemsLoading, setLinkedWorkItemsLoading] = useState(false);
   const [linkedWorkItemsError, setLinkedWorkItemsError] = useState<
@@ -835,6 +841,7 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
     () => new Set(),
   );
   const workspaceGridRef = useRef<HTMLDivElement>(null);
+  const workspaceRootRef = useRef<HTMLDivElement>(null);
   const chatMessagesScrollRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -1108,6 +1115,31 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
     setWasRelatedFilesAutoCollapsed(false);
     setIsRelatedFilesOpen(false);
   };
+
+  useShortcutScope('session-workspace', {
+    active: Boolean(activeSessionId),
+    rootRef: workspaceRootRef,
+  });
+  useCommandHandler('sidebar.right.toggle', {
+    scope: "page",
+    enabled: Boolean(activeSessionId),
+    execute: () => {
+      if (isRelatedFilesOpen) closeRelatedFiles();
+      else openRelatedFiles();
+    },
+  });
+  useCommandHandler('source-control.open', {
+    scope: "global",
+    enabled: Boolean(activeSessionId && selectedProjectId),
+    disabledReason:
+      activeSessionId && selectedProjectId
+        ? undefined
+        : t("shortcuts.reason.selectProject"),
+    execute: () => {
+      openRelatedFiles();
+      setSourceControlFocusRequestKey((value) => value + 1);
+    },
+  });
 
   useEffect(() => {
     const handleSourceControlRefreshRequested = (event: Event) => {
@@ -2302,6 +2334,7 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
 
   return (
     <div
+      ref={workspaceRootRef}
       className={
         embedded
           ? "relative h-full w-full flex flex-col font-sans text-xs select-none"
@@ -3130,6 +3163,7 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
               }
               fallbackRelatedFiles={plainRelatedFilesContent}
               linkedWorkItemIds={linkedWorkItems.map((item) => item.id)}
+              focusRequestKey={sourceControlFocusRequestKey}
               onOpenDiff={(projectId, sessionId, filePath, area) => {
                 onOpenSourceControlDiffTab?.(
                   projectId,

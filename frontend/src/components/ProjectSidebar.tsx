@@ -57,6 +57,8 @@ import { useAppScale } from "@/context/AppScaleContext";
 import { chatSessionsApi, filesystemApi } from "@/lib/api";
 import { buildStatsApi } from "@/lib/buildStatsApi";
 import { onBuildStatsUpdated } from "@/lib/buildStatsEvents";
+import { useCommandHandler } from "@/shortcuts/ShortcutProvider";
+import { CommandTooltip } from "@/shortcuts/CommandTooltip";
 import { formatNumber } from "@/lib/buildStatsUtils";
 import {
   projectDisplayDescription,
@@ -1319,6 +1321,16 @@ export function ProjectSidebar({
     resetWorkspaceDirectoryRename();
   };
 
+  useCommandHandler('project.create', {
+    scope: 'global',
+    enabled: Boolean(onCreateProject),
+    execute: () => {
+      closeProjectMenus();
+      resetProjectForm();
+      setCreateFormOpen(true);
+    },
+  });
+
   const closeProjectForm = () => {
     setCreateFormOpen(false);
     setCreateError(null);
@@ -1817,20 +1829,22 @@ export function ProjectSidebar({
               </div>
               {onCreateProject && (
                 <div className="border-t border-[var(--hairline)] mt-1.5 pt-1.5">
-                  <button
-                    type="button"
-                    className={`${sidebarItemClass} cursor-pointer border-none bg-transparent font-medium text-[var(--ink)] hover:bg-[var(--surface-1)] hover:text-[var(--ink)]`}
-                    onClick={() => {
-                      resetProjectForm();
-                      setCreateFormOpen(true);
-                      closeProjectMenus();
-                    }}
-                  >
-                    <Plus className="h-3.5 w-3.5 shrink-0 text-[var(--ink-tertiary)]" />
-                    <span className="min-w-0 flex-1 truncate">
-                      {translate("sidebar.createProject", "Create project")}
-                    </span>
-                  </button>
+                  <CommandTooltip commandId="project.create">
+                    <button
+                      type="button"
+                      className={`${sidebarItemClass} cursor-pointer border-none bg-transparent font-medium text-[var(--ink)] hover:bg-[var(--surface-1)] hover:text-[var(--ink)]`}
+                      onClick={() => {
+                        resetProjectForm();
+                        setCreateFormOpen(true);
+                        closeProjectMenus();
+                      }}
+                    >
+                      <Plus className="h-3.5 w-3.5 shrink-0 text-[var(--ink-tertiary)]" />
+                      <span className="min-w-0 flex-1 truncate">
+                        {translate("sidebar.createProject", "Create project")}
+                      </span>
+                    </button>
+                  </CommandTooltip>
                 </div>
               )}
             </div>,

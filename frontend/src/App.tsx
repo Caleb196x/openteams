@@ -8,6 +8,11 @@ import React, {
 } from "react";
 import { WorkspaceProvider, useWorkspace } from "@/context/WorkspaceContext";
 import { AppScaleContext } from "@/context/AppScaleContext";
+import { ShortcutProvider } from "@/shortcuts/ShortcutProvider";
+import { ShortcutOverlays } from "@/shortcuts/ShortcutOverlays";
+import { useCommandHandler } from "@/shortcuts/ShortcutProvider";
+import { detectShortcutRuntime } from "@/shortcuts/platform";
+import { getTauriInvoke } from "@/lib/tauriBridge";
 import { WorkflowWorkspace } from "@/components/WorkflowWorkspace";
 import { CreateAgentSessionModal } from "@/components/CreateAgentSessionModal";
 import { DiffViewTab } from "@/components/DiffViewTab";
@@ -63,12 +68,14 @@ import { notifyChatInputPrefill } from "@/lib/chatInputPrefill";
 import {
   ISSUE_NAVIGATION_EVENT,
   ISSUE_NAVIGATION_TARGET_CHANGED_EVENT,
+  requestIssueNavigation,
   storeIssueNavigationTarget,
   type IssueNavigationTarget,
 } from "@/lib/issueNavigation";
 import {
   TEAM_MEMBER_INVITE_NAVIGATION_EVENT,
   TEAM_MEMBER_INVITE_TARGET_CHANGED_EVENT,
+  requestTeamMemberInviteNavigation,
   storeTeamMemberInviteTarget,
   type TeamMemberInviteNavigationTarget,
 } from "@/lib/teamNavigation";
@@ -524,6 +531,10 @@ function WorkspaceLayout() {
     scale: 1,
   });
   const onboardingAppTransitionTimerRef = useRef<number | null>(null);
+  const mainContentRef = useRef<HTMLElement | null>(null);
+  const pendingFocusTargetRef = useRef<
+    "build-stats-heading" | "tab-main-content" | null
+  >(null);
 
   const loadLeadMember = useCallback(
     async (projectId: string): Promise<Member | null> => {
@@ -922,6 +933,15 @@ function WorkspaceLayout() {
   const activeTab = openTabs.find((tab) => tab.id === activeTabId);
   const activeAppPage: SidebarNavigationTarget =
     activeTab?.kind === "page" ? activeTab.page : "workspace";
+  useLayoutEffect(() => {
+    const pendingTarget = pendingFocusTargetRef.current;
+    if (!pendingTarget) return;
+    const selector = `[data-shortcut-focus="${pendingTarget}"]`;
+    const target = document.querySelector<HTMLElement>(selector);
+    if (!target) return;
+    target.focus();
+    pendingFocusTargetRef.current = null;
+  }, [activeAppPage, activeTabId]);
   const renderedTabs = openTabs
     .map<RenderedWorkspaceTab | null>((tab) => {
       if (tab.kind === "session") {
@@ -1077,6 +1097,11 @@ function WorkspaceLayout() {
     replaceActiveTab(createPageTab(page, label));
   };
 
+  const openSettingsTab = (tab: string) => {
+    setActiveSettingsTab(tab);
+    openPageTab("providers", getPageTabLabel("providers"));
+  };
+
   const openIssueTarget = (target: IssueNavigationTarget) => {
     storeIssueNavigationTarget(target);
     if (target.projectId && target.projectId !== selectedProjectId) {
@@ -1131,9 +1156,12 @@ function WorkspaceLayout() {
     };
     const handleNavigateIssue = (event: Event) => {
       const target = (event as CustomEvent<IssueNavigationTarget>).detail;
-      if (!target?.workItemId) return;
-
-      openIssueTarget(target);
+      if (!target) return;
+      if (target.kind === 'list' || target.kind === 'create') {
+        openIssueTarget(target);
+        return;
+      }
+      if ('workItemId' in target && target.workItemId) openIssueTarget(target);
     };
     const handleNavigateTeamMemberInvite = (event: Event) => {
       const target =
@@ -1313,7 +1341,9 @@ function WorkspaceLayout() {
     }
 
     if (item.targetPage === "providers") {
-      setActiveSettingsTab("appearance");
+      openSettingsTab("appearance");
+      closeMobileSidebar();
+      return;
     }
 
     openPageTab(item.targetPage, item.label);
@@ -1452,6 +1482,88 @@ function WorkspaceLayout() {
     showToast(translate(`sidebar.primary.${action.id}.helper`, action.helper));
     closeMobileSidebar();
   };
+
+  const activateRelativeTab = (offset: -1 | 1) => {
+    if (openTabs.length < 2) return;
+    const currentIndex = Math.max(
+      0,
+      openTabs.findIndex((tab) => tab.id === activeTabId),
+    );
+    const nextTab =
+      openTabs[(currentIndex + offset + openTabs.length) % openTabs.length];
+    pendingFocusTargetRef.current = 'tab-main-content';
+    setActiveTabId(nextTab.id);
+    if (nextTab.kind === 'session') setActiveSessionId(nextTab.sessionId);
+  };
+
+  useCommandHandler('search.open', {
+    scope: 'global',
+    enabled: true,
+    execute: () => setIsGlobalSearchOpen(true),
+  });
+  useCommandHandler('session.create', {
+    scope: 'global',
+    enabled: Boolean(selectedProjectId),
+    disabledReason: selectedProjectId ? undefined : t('shortcuts.reason.selectProject'),
+    execute: () => setIsCreateSessionModalOpen(true),
+  });
+  useCommandHandler('build-stats.open', {
+    scope: 'global',
+    enabled: true,
+    execute: () => {
+      pendingFocusTargetRef.current = 'build-stats-heading';
+      openPageTab('build-stats', getPageTabLabel('build-stats'));
+    },
+  });
+  useCommandHandler('session-tab.next', {
+    scope: 'global',
+    enabled: openTabs.length > 1,
+    execute: () => activateRelativeTab(1),
+  });
+  useCommandHandler('session-tab.previous', {
+    scope: 'global',
+    enabled: openTabs.length > 1,
+    execute: () => activateRelativeTab(-1),
+  });
+  useCommandHandler('settings.open', {
+    scope: 'global',
+    enabled: true,
+    execute: () => openSettingsTab('appearance'),
+  });
+  useCommandHandler('shortcuts.settings.open', {
+    scope: 'global',
+    enabled: true,
+    execute: () => openSettingsTab('shortcuts'),
+  });
+  useCommandHandler('issue.open-list', {
+    scope: 'global',
+    enabled: Boolean(selectedProjectId),
+    disabledReason: selectedProjectId ? undefined : t('shortcuts.reason.selectProject'),
+    execute: () =>
+      requestIssueNavigation({
+        kind: 'list',
+        projectId: selectedProjectId ?? undefined,
+      }),
+  });
+  useCommandHandler('issue.create', {
+    scope: 'global',
+    enabled: Boolean(selectedProjectId),
+    disabledReason: selectedProjectId ? undefined : t('shortcuts.reason.selectProject'),
+    execute: () =>
+      requestIssueNavigation({
+        kind: 'create',
+        projectId: selectedProjectId ?? undefined,
+      }),
+  });
+  useCommandHandler('team.member.add', {
+    scope: 'global',
+    enabled: Boolean(selectedProjectId),
+    disabledReason: selectedProjectId ? undefined : t('shortcuts.reason.selectProject'),
+    execute: () =>
+      requestTeamMemberInviteNavigation({
+        projectId: selectedProjectId ?? undefined,
+      }),
+  });
 
   const handleCreateAgentSession = async (
     prompt: string,
@@ -2147,7 +2259,10 @@ function WorkspaceLayout() {
           </header>
 
           <main
+            ref={mainContentRef}
             id="app-main-content"
+            tabIndex={-1}
+            data-shortcut-focus="tab-main-content"
             className={`relative flex-1 min-h-0 rounded-lg border border-[var(--hairline)] bg-[var(--surface-2)] ${
               activeAppPage === "providers" ||
               activeAppPage === "build-stats" ||
@@ -2172,13 +2287,56 @@ function WorkspaceLayout() {
   );
 }
 
+let didLogShortcutPlatformFallback = false;
+
+function ShortcutProviderBridge({ children }: React.PropsWithChildren) {
+  const { config, environment, saveConfigPatch, showToast, t } = useWorkspace();
+  const runtime = React.useMemo(
+    () =>
+      detectShortcutRuntime({
+        osType: environment?.os_type,
+        userAgentDataPlatform: (
+          navigator as Navigator & { userAgentData?: { platform?: string } }
+        ).userAgentData?.platform,
+        navigatorPlatform: navigator.platform,
+        userAgent: navigator.userAgent,
+        hasTauriInvoke: getTauriInvoke() !== null,
+      }),
+    [environment?.os_type],
+  );
+  useEffect(() => {
+    if (
+      import.meta.env.DEV &&
+      runtime.source === "fallback" &&
+      !didLogShortcutPlatformFallback
+    ) {
+      didLogShortcutPlatformFallback = true;
+      console.debug("shortcut_platform_fallback");
+    }
+  }, [runtime.source]);
+  return (
+    <ShortcutProvider
+      runtime={runtime}
+      translate={t}
+      config={config}
+      saveConfigPatch={saveConfigPatch}
+      showToast={showToast}
+    >
+      {children}
+      <ShortcutOverlays />
+    </ShortcutProvider>
+  );
+}
+
 export default function App() {
   return (
     <>
       <div className="macos-titlebar-drag-region" data-tauri-drag-region />
       <AppScaleFrame>
         <WorkspaceProvider>
-          <WorkspaceLayout />
+          <ShortcutProviderBridge>
+            <WorkspaceLayout />
+          </ShortcutProviderBridge>
         </WorkspaceProvider>
       </AppScaleFrame>
     </>

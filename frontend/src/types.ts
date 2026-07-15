@@ -6,7 +6,10 @@
 // below; mapping is performed in `src/lib/mappers.ts`.
 // =============================================================================
 
-import type { MemberQueueSnapshot } from '../../shared/types';
+import type {
+  KeyboardShortcutsConfig,
+  MemberQueueSnapshot,
+} from '../../shared/types';
 
 export type {
   ChatActiveRun,
@@ -1413,6 +1416,7 @@ export interface WorkflowCardProjection {
   goal: string;
   state: WorkflowCardState;
   execution_status: string;
+  stopped_by_user: boolean;
   error_message: string | null;
   completed_step_count: number;
   total_step_count: number;
@@ -1719,11 +1723,12 @@ export interface Config {
     | 'px15'
     | 'px16'
     | 'px18';
+  keyboard_shortcuts: KeyboardShortcutsConfig;
   analytics_enabled: boolean;
   workspace_dir: string | null;
   worktree_sessions_dir: string | null;
   // The remaining backend fields are preserved verbatim for round-trip safety.
-  [key: string]: JsonValue | undefined;
+  [key: string]: JsonValue | KeyboardShortcutsConfig | undefined;
 }
 
 export interface Environment {

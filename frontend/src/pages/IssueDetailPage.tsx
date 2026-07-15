@@ -22,11 +22,14 @@ import {
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ChangeEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
+  type RefObject,
   type SVGProps,
 } from 'react';
 import { ProjectBreadcrumbAvatar } from '@/components/ProjectBreadcrumbAvatar';
@@ -44,6 +47,7 @@ import {
   type NotificationToastTone,
 } from '@/components/NotificationToast';
 import { useWorkspace } from '@/context/WorkspaceContext';
+import { useCommandHandler } from '@/shortcuts/ShortcutProvider';
 import {
   chatSessionsApi,
   projectApi,
@@ -390,6 +394,7 @@ export function IssueDetailPage({
     null,
   );
   const propertyMenuRef = useRef<HTMLDivElement | null>(null);
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
   const labelMenuRef = useRef<HTMLDivElement | null>(null);
   const sessionMenuRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -467,6 +472,11 @@ export function IssueDetailPage({
       detailRequestIdRef.current += 1;
     };
   }, [loadDetail]);
+
+  useLayoutEffect(() => {
+    headingRef.current?.focus();
+    headingRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [issue.id]);
 
   useEffect(() => {
     if (!openPropertyMenu) return;
@@ -1160,9 +1170,10 @@ export function IssueDetailPage({
     void handleSaveLabels(nextLabels);
   };
 
-  useEffect(() => {
+  const handlePropertyMenuKeyDown = (
+    event: ReactKeyboardEvent<HTMLElement>,
+  ) => {
     if (!openPropertyMenu) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setOpenPropertyMenu(null);
         setStatusQuery('');
@@ -1246,10 +1257,7 @@ export function IssueDetailPage({
         event.preventDefault();
         handleLabelMenuSelect(option.value);
       }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  });
+  };
 
   const linkSession = async (sessionId: string) => {
     const executionLink = await projectWorkItemsApi.linkExecution(
@@ -1381,6 +1389,66 @@ export function IssueDetailPage({
     }
   };
 
+  const statusShortcutEnabled = !openPropertyMenu && !action;
+  useCommandHandler('issue.detail.back', {
+    scope: 'page',
+    enabled: !openPropertyMenu && !titleEditing && !descriptionEditing,
+    execute: onBack,
+  });
+  useCommandHandler('issue.status.1', {
+    scope: 'page',
+    enabled: statusShortcutEnabled,
+    execute: () => handleStatusMenuSelect(statusMenuValues[0].value),
+  });
+  useCommandHandler('issue.status.2', {
+    scope: 'page',
+    enabled: statusShortcutEnabled,
+    execute: () => handleStatusMenuSelect(statusMenuValues[1].value),
+  });
+  useCommandHandler('issue.status.3', {
+    scope: 'page',
+    enabled: statusShortcutEnabled,
+    execute: () => handleStatusMenuSelect(statusMenuValues[2].value),
+  });
+  useCommandHandler('issue.status.4', {
+    scope: 'page',
+    enabled: statusShortcutEnabled,
+    execute: () => handleStatusMenuSelect(statusMenuValues[3].value),
+  });
+  useCommandHandler('issue.status.5', {
+    scope: 'page',
+    enabled: statusShortcutEnabled,
+    execute: () => handleStatusMenuSelect(statusMenuValues[4].value),
+  });
+  useCommandHandler('issue.status.6', {
+    scope: 'page',
+    enabled: statusShortcutEnabled,
+    execute: () => handleStatusMenuSelect(statusMenuValues[5].value),
+  });
+  useCommandHandler('issue.status.7', {
+    scope: 'page',
+    enabled: statusShortcutEnabled,
+    execute: () => handleStatusMenuSelect(statusMenuValues[6].value),
+  });
+  useCommandHandler('issue.status.8', {
+    scope: 'page',
+    enabled: statusShortcutEnabled,
+    execute: () => handleStatusMenuSelect(statusMenuValues[7].value),
+  });
+  useCommandHandler('issue.labels.open', {
+    scope: 'page',
+    enabled: !openPropertyMenu && canEditLabels,
+    execute: () => setOpenPropertyMenu('labels'),
+  });
+  useCommandHandler('issue.session.create', {
+    scope: 'page',
+    enabled:
+      linkedSessionLinks.length === 0 &&
+      action !== 'create-session' &&
+      !detailLoading,
+    execute: handleOpenCreateSessionDialog,
+  });
+
   const handleWorktreeSessionCreate = async (
     worktreeMode: ChatSessionWorktreeMode | null,
   ) => {
@@ -1440,6 +1508,7 @@ export function IssueDetailPage({
         />
       )}
       <IssueDetailHeader
+        headingRef={headingRef}
         issue={{ ...issue, title: issueTitle, status: issueStatus }}
         projectName={projectName}
         onBack={onBack}
@@ -1458,7 +1527,7 @@ export function IssueDetailPage({
         onCreateWorktreeSession={handleWorktreeSessionCreate}
       />
 
-      <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[var(--surface-2)] text-[var(--ink)]">
+      <main onKeyDown={handlePropertyMenuKeyDown} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[var(--surface-2)] text-[var(--ink)]">
         <div className="grid min-w-[820px] grid-cols-[minmax(0,1fr)_268px] gap-8 px-[15px] pb-14 pt-[6px]">
           <section className="min-w-0 pl-2 pr-1 pt-6">
             {titleEditing ? (
@@ -2002,6 +2071,7 @@ export function IssueDetailPage({
 }
 
 function IssueDetailHeader({
+  headingRef,
   issue,
   projectName,
   onBack,
@@ -2019,6 +2089,7 @@ function IssueDetailHeader({
   onCloseWorktreeSession,
   onCreateWorktreeSession,
 }: {
+  headingRef: RefObject<HTMLHeadingElement | null>;
   issue: IssueDetailItem;
   projectName: string;
   onBack: () => void;
@@ -2101,7 +2172,12 @@ function IssueDetailHeader({
           className="h-[15px] w-[15px] shrink-0 text-[#8f9298]"
           strokeWidth={2.4}
         />
-        <h1 className="flex min-w-0 items-baseline gap-1 text-[16px] font-semibold leading-none text-[var(--ink)]">
+        <h1
+          ref={headingRef}
+          tabIndex={-1}
+          data-shortcut-focus="issue-detail-heading"
+          className="flex min-w-0 items-baseline gap-1 text-[16px] font-semibold leading-none text-[var(--ink)] outline-none"
+        >
           <IssueDisplayId
             id={issue.id}
             maxWidthPx={105}

@@ -1,0 +1,92 @@
+import type {
+  CommandDefinition,
+  CommandRisk,
+  ShortcutContextId,
+  ShortcutSequence,
+} from './types';
+
+const sequence = (...strokes: string[]): ShortcutSequence => strokes;
+
+const same = (...bindings: ShortcutSequence[]) => ({
+  macos: bindings,
+  windows: bindings,
+  linux: bindings,
+});
+
+const split = (
+  macos: readonly ShortcutSequence[],
+  windowsLinux: readonly ShortcutSequence[],
+) => ({ macos, windows: windowsLinux, linux: windowsLinux });
+
+const command = (
+  id: string,
+  featureGroup: number | null,
+  category: string,
+  defaults: CommandDefinition['defaults'],
+  contexts: readonly ShortcutContextId[],
+  risk: CommandRisk,
+  focusResult: string,
+): CommandDefinition => ({
+  id,
+  featureGroup,
+  titleKey: `shortcuts.command.${id}`,
+  categoryKey: `shortcuts.category.${category}`,
+  defaults,
+  contexts,
+  risk,
+  focusResult,
+  customizable: true,
+});
+
+export const commandRegistry = [
+  command('commandPalette.open', null, 'general', split([sequence('meta+shift+p')], [sequence('ctrl+shift+p')]), ['global'], 'safe', 'command-search-input'),
+  command('shortcuts.help.open', null, 'general', same(sequence('shift+/')), ['global'], 'safe', 'shortcut-help-first-control'),
+  command('sidebar.right.toggle', null, 'navigation', split([sequence('meta+alt+b')], [sequence('ctrl+alt+b')]), ['session-workspace'], 'safe', 'preserve-right-sidebar-selection'),
+  command('shortcuts.settings.open', null, 'settings', same(), ['global'], 'safe', 'shortcut-settings-search'),
+  command('agent-runtime.sidebar.toggle', null, 'agents', split([sequence('meta+b')], [sequence('ctrl+b')]), ['agent-runtime'], 'safe', 'preserve-agent-selection'),
+  command('project.create', 1, 'create', same(sequence('c', 'p')), ['global'], 'safe', 'project-name-input'),
+  command('search.open', 2, 'general', split([sequence('meta+k')], [sequence('ctrl+k')]), ['global'], 'safe', 'global-search-input'),
+  command('session.create', 3, 'create', split([sequence('meta+n')], [sequence('ctrl+n')]), ['global'], 'safe', 'session-prompt-textarea'),
+  command('build-stats.open', 4, 'navigation', same(sequence('g', 'b')), ['global'], 'safe', 'build-stats-heading'),
+  command('session-tab.next', 5, 'navigation', same(sequence('ctrl+tab')), ['global'], 'safe', 'next-tab-content'),
+  command('session-tab.previous', 5, 'navigation', same(sequence('ctrl+shift+tab')), ['global'], 'safe', 'previous-tab-content'),
+  command('source-control.open', 6, 'sourceControl', same(sequence('ctrl+shift+g')), ['session-workspace'], 'safe', 'selected-or-first-source-file'),
+  command('source-control.selection.next', 6, 'sourceControl', same(sequence('j'), sequence('arrowdown')), ['source-control-list'], 'safe', 'next-source-file'),
+  command('source-control.selection.previous', 6, 'sourceControl', same(sequence('k'), sequence('arrowup')), ['source-control-list'], 'safe', 'previous-source-file'),
+  command('source-control.selection.toggle-stage', 6, 'sourceControl', same(sequence('space')), ['source-control-list'], 'guarded', 'same-source-file'),
+  command('source-control.selection.open-diff', 6, 'sourceControl', same(sequence('enter')), ['source-control-list'], 'safe', 'source-diff-tab'),
+  command('source-control.stage-all', 6, 'sourceControl', same(), ['source-control-list'], 'guarded', 'source-control-list'),
+  command('source-control.commit', 7, 'sourceControl', split([sequence('meta+enter')], [sequence('ctrl+enter')]), ['source-control-commit'], 'guarded', 'commit-message-input'),
+  command('worktree.merge', 8, 'sourceControl', same(), ['worktree'], 'confirmation_required', 'worktree-merge-confirmation'),
+  command('worktree.discard', 9, 'sourceControl', same(), ['worktree'], 'confirmation_required', 'worktree-discard-confirmation'),
+  command('issue.create', 10, 'issues', same(sequence('c', 'i')), ['global'], 'safe', 'issue-title-input'),
+  command('issue.open-list', 11, 'issues', same(sequence('g', 'i')), ['global'], 'safe', 'selected-or-first-issue-row'),
+  command('issue.selection.next', 11, 'issues', same(sequence('j'), sequence('arrowdown')), ['issue-list'], 'safe', 'next-issue-row'),
+  command('issue.selection.previous', 11, 'issues', same(sequence('k'), sequence('arrowup')), ['issue-list'], 'safe', 'previous-issue-row'),
+  command('issue.selection.open', 11, 'issues', same(sequence('enter')), ['issue-list'], 'safe', 'issue-detail-heading'),
+  command('issue.detail.back', 11, 'issues', same(sequence('escape')), ['issue-detail'], 'safe', 'origin-issue-row'),
+  command('issue.status.1', 12, 'issues', same(sequence('s', '1')), ['issue-detail'], 'guarded', 'issue-status-trigger'),
+  command('issue.status.2', 12, 'issues', same(sequence('s', '2')), ['issue-detail'], 'guarded', 'issue-status-trigger'),
+  command('issue.status.3', 12, 'issues', same(sequence('s', '3')), ['issue-detail'], 'guarded', 'issue-status-trigger'),
+  command('issue.status.4', 12, 'issues', same(sequence('s', '4')), ['issue-detail'], 'guarded', 'issue-status-trigger'),
+  command('issue.status.5', 12, 'issues', same(sequence('s', '5')), ['issue-detail'], 'guarded', 'issue-status-trigger'),
+  command('issue.status.6', 12, 'issues', same(sequence('s', '6')), ['issue-detail'], 'guarded', 'issue-status-trigger'),
+  command('issue.status.7', 12, 'issues', same(sequence('s', '7')), ['issue-detail'], 'guarded', 'issue-status-trigger'),
+  command('issue.status.8', 12, 'issues', same(sequence('s', '8')), ['issue-detail'], 'guarded', 'issue-status-trigger'),
+  command('issue.labels.open', 12, 'issues', same(sequence('l')), ['issue-detail'], 'safe', 'issue-label-search'),
+  command('issue.session.create', 13, 'issues', same(sequence('c', 's')), ['issue-detail'], 'safe', 'issue-session-first-option'),
+  command('team.member.add', 14, 'team', same(sequence('c', 'm')), ['global'], 'safe', 'team-add-member-action'),
+  command('workflow.open', 15, 'workflow', same(sequence('g', 'w')), ['workflow-session'], 'safe', 'current-or-first-workflow-node'),
+  command('workflow.node.up', 16, 'workflow', same(sequence('arrowup')), ['workflow-graph'], 'safe', 'nearest-workflow-node-up'),
+  command('workflow.node.down', 16, 'workflow', same(sequence('arrowdown')), ['workflow-graph'], 'safe', 'nearest-workflow-node-down'),
+  command('workflow.node.left', 16, 'workflow', same(sequence('arrowleft')), ['workflow-graph'], 'safe', 'nearest-workflow-node-left'),
+  command('workflow.node.right', 16, 'workflow', same(sequence('arrowright')), ['workflow-graph'], 'safe', 'nearest-workflow-node-right'),
+  command('workflow.node.open', 16, 'workflow', same(sequence('enter')), ['workflow-graph'], 'safe', 'workflow-node-inspector'),
+  command('workflow.start', 16, 'workflow', split([sequence('meta+enter')], [sequence('ctrl+enter')]), ['workflow-preview'], 'guarded', 'workflow-review-settings'),
+  command('workflow.node.stop', 16, 'workflow', same(), ['workflow-running'], 'confirmation_required', 'workflow-node-stop-confirmation'),
+  command('workflow.stop', 16, 'workflow', same(), ['workflow-running'], 'confirmation_required', 'workflow-stop-confirmation'),
+  command('workflow.review.select-approve', 17, 'workflow', same(sequence('a')), ['workflow-review'], 'confirmation_required', 'workflow-review-confirm-button'),
+  command('workflow.review.select-reject', 17, 'workflow', same(sequence('r')), ['workflow-review'], 'confirmation_required', 'workflow-review-confirm-button'),
+  command('workflow.review.confirm', 17, 'workflow', same(sequence('enter')), ['workflow-review'], 'confirmation_required', 'workflow-review-result'),
+  command('settings.open', 18, 'settings', split([sequence('meta+comma')], [sequence('ctrl+comma')]), ['global'], 'safe', 'settings-active-sidebar-item'),
+] satisfies readonly CommandDefinition[];

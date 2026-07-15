@@ -400,7 +400,6 @@ export function TeamPage() {
   );
   const [teamProtocolSuccess, setTeamProtocolSuccess] = useState(false);
   const [addMemberMenuRequestId, setAddMemberMenuRequestId] = useState(0);
-  const addMemberActionRef = useRef<HTMLDivElement | null>(null);
   const loadRequestIdRef = useRef(0);
   const memberAutoSaveTimerRef = useRef<number | null>(null);
   const mcpAutoSaveTimerRef = useRef<number | null>(null);
@@ -542,13 +541,7 @@ export function TeamPage() {
     if (target.projectId && target.projectId !== selectedProjectId) return;
 
     clearTeamMemberInviteTarget();
-    setAddMemberMenuRequestId((current) => current + 1);
-    window.requestAnimationFrame(() => {
-      addMemberActionRef.current?.scrollIntoView({
-        block: "nearest",
-        inline: "nearest",
-      });
-    });
+    setAddMemberMenuRequestId((value) => value + 1);
   }, [selectedProjectId, teamDataReady]);
 
   useEffect(() => {
@@ -1351,15 +1344,13 @@ export function TeamPage() {
         t={t}
         actions={
           teamDataReady ? (
-            <div ref={addMemberActionRef}>
-              <TeamAddMemberButton
-                openRequestKey={addMemberMenuRequestId}
-                runtimeOptions={addableRuntimeOptions}
-                saving={saving}
-                onCreateMember={createMemberFromRuntime}
-                t={t}
-              />
-            </div>
+            <TeamAddMemberButton
+              openRequestKey={addMemberMenuRequestId}
+              runtimeOptions={addableRuntimeOptions}
+              saving={saving}
+              onCreateMember={createMemberFromRuntime}
+              t={t}
+            />
           ) : null
         }
       />

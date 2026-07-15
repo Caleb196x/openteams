@@ -234,6 +234,19 @@ for (const locale of ['en', 'zh', 'ja', 'ko', 'fr', 'es']) {
   );
 }
 
+check(
+  'shortcuts settings delegates to the registry-backed editor',
+  settingsSource.includes(
+    "import { KeyboardShortcutSettings } from '@/shortcuts/KeyboardShortcutSettings'",
+  ) &&
+    settingsSource.includes("case 'shortcuts':") &&
+    settingsSource.includes('<KeyboardShortcutSettings translate={t} />') &&
+    !settingsSource.includes('⌘K') &&
+    !settingsSource.includes('⌘↵') &&
+    !settingsSource.includes('Press escape to close'),
+  settingsSource,
+);
+
 if (failures > 0) {
   process.exitCode = 1;
 }

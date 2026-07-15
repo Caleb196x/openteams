@@ -1,7 +1,6 @@
-export type IssueNavigationTarget = {
-  projectId?: string;
-  workItemId: string;
-};
+export type IssueNavigationTarget =
+  | { kind: 'list' | 'create'; projectId?: string }
+  | { kind?: 'detail'; projectId?: string; workItemId: string };
 
 export const ISSUE_NAVIGATION_EVENT = "openteams:navigate-issue";
 export const ISSUE_NAVIGATION_TARGET_CHANGED_EVENT =
@@ -14,7 +13,10 @@ function isIssueNavigationTarget(
 ): value is IssueNavigationTarget {
   if (!value || typeof value !== "object") return false;
 
-  const target = value as Partial<IssueNavigationTarget>;
+  const target = value as Partial<IssueNavigationTarget> & {
+    workItemId?: unknown;
+  };
+  if (target.kind === 'list' || target.kind === 'create') return true;
   return typeof target.workItemId === "string" && target.workItemId.length > 0;
 }
 
@@ -57,4 +59,14 @@ export function clearIssueNavigationTarget(): void {
   } catch {
     // Ignore storage cleanup failures.
   }
+}
+
+export function requestIssueNavigation(target: IssueNavigationTarget): void {
+  if (typeof window === 'undefined') return;
+  storeIssueNavigationTarget(target);
+  window.dispatchEvent(
+    new CustomEvent<IssueNavigationTarget>(ISSUE_NAVIGATION_EVENT, {
+      detail: target,
+    }),
+  );
 }

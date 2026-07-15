@@ -5,9 +5,11 @@
 // Exits non-zero if any assertion fails.
 
 import React from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderToStaticMarkup as renderReactToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { prioritizeSessions, ProjectSidebar } from "./ProjectSidebar";
+import { ShortcutProvider } from "@/shortcuts/ShortcutProvider";
+import type { Config } from "@/types";
 import { mockShellOptions, mockWorkspaceBootstrap } from "@/mockApiData";
 import {
   InboxItemSeverity,
@@ -28,6 +30,22 @@ const check = (label: string, cond: boolean, detail?: unknown) => {
 };
 
 console.log("ProjectSidebar");
+
+const shortcutConfig = {
+  keyboard_shortcuts: { schema_version: 1, platform_overrides: {} },
+} as unknown as Config;
+const renderToStaticMarkup = (element: React.ReactElement) =>
+  renderReactToStaticMarkup(
+    <ShortcutProvider
+      runtime={{ platform: "linux", isDesktopShell: false, source: "fallback" }}
+      translate={(key) => key}
+      config={shortcutConfig}
+      saveConfigPatch={async () => shortcutConfig}
+      showToast={() => undefined}
+    >
+      {element}
+    </ShortcutProvider>,
+  );
 
 const html = renderToStaticMarkup(
   <ProjectSidebar

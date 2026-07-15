@@ -42,7 +42,7 @@ check(
 check(
   "keeps shared-session warning copy on the badge",
   source.includes("Shared with another active session") &&
-    source.includes("file.shared ? \"text-amber-500\" : \"text-rose-500\""),
+    source.includes("file.shared ? \"text-[var(--ink-subtle)]\" : \"text-rose-500\""),
   source,
 );
 
@@ -50,6 +50,14 @@ check(
   "resolves file-row hover title to the workspace absolute path",
   source.includes("resolveLocalPathToAbsolutePath(file.path, viewModel.workspacePath)") &&
     source.includes("title={fullPath}"),
+  source,
+);
+
+check(
+  "exposes one roving focus target per source-control file",
+  source.includes("data-source-control-path={file.path}") &&
+    source.includes("tabIndex={selected ? 0 : -1}") &&
+    source.includes("onFocus={() => onSelect(file.path)}"),
   source,
 );
 

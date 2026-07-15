@@ -435,7 +435,11 @@ export function BuildStatsPage() {
     <div className="flex h-full w-full flex-col overflow-hidden bg-[var(--surface-2)] p-3 md:p-4">
       <div className="mb-3 flex shrink-0 flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
-          <h1 className="text-lg font-bold tracking-tight text-[var(--ink)]">
+          <h1
+            tabIndex={-1}
+            data-shortcut-focus="build-stats-heading"
+            className="text-lg font-bold tracking-tight text-[var(--ink)]"
+          >
             {t('buildStats.title')}
           </h1>
           <p className="mt-0.5 text-[13px] text-[var(--ink-subtle)]">

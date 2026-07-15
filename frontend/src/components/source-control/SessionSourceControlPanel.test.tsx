@@ -101,8 +101,9 @@ check(
 );
 
 check(
-  "wires worktree actions through handleWorktreeAction",
-  source.includes("handleWorktreeAction") &&
+  "wires worktree actions through the confirmed action path",
+  source.includes("handleConfirmedWorktreeAction") &&
+    source.includes("requestWorktreeAction") &&
     source.includes('"prepare"') &&
     source.includes('"merge"') &&
     source.includes('"discard"') &&
@@ -129,22 +130,16 @@ check(
     source.includes("await refreshWorktree();"),
 );
 
-{
-  const confirmIndex = source.indexOf(
-    'title: tr("worktree.confirm.deleteTitle", "Delete worktree?")',
-  );
-  const discardIndex = source.indexOf("await discardWorktree();");
-  check(
-    "confirms worktree delete before calling discard",
-    confirmIndex >= 0 &&
-      discardIndex > confirmIndex &&
-      source.includes(
-        '"worktree.confirm.deleteDescription"',
-      ) &&
-      source.includes('confirmLabel: tr("worktree.action.discard", "Delete")'),
-    { confirmIndex, discardIndex },
-  );
-}
+check(
+  "confirms worktree merge and delete before the shared action path",
+  source.includes('const confirmCopy: Record<') &&
+    source.includes('"merge" | "discard"') &&
+    source.includes('const confirmed = await requestConfirm(confirmCopy[action])') &&
+    source.includes('if (confirmed) await handleConfirmedWorktreeAction(action)') &&
+    source.includes('"worktree.confirm.deleteDescription"') &&
+    source.includes('confirmLabel: tr("worktree.action.discard", "Delete")'),
+  source,
+);
 
 check(
   "displays worktree action errors alongside source-control errors",

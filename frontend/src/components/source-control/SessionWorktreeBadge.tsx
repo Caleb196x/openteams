@@ -290,8 +290,8 @@ export const SessionWorktreeBadge: React.FC<SessionWorktreeBadgeProps> = ({
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
           {can('merge') && (
             <WorktreeActionButton
+              commandId="worktree.merge"
               label={tr('worktree.action.merge', 'Merge')}
-              title={mergeDisabledReason ?? tr('worktree.action.merge', 'Merge')}
               tone="primary"
               busy={busy}
               disabled={mergeDisabled}
@@ -311,6 +311,7 @@ export const SessionWorktreeBadge: React.FC<SessionWorktreeBadgeProps> = ({
           )}
           {can('discard') && (
             <WorktreeActionButton
+              commandId="worktree.discard"
               label={tr('worktree.action.discard', 'Delete')}
               tone="danger"
               busy={busy}

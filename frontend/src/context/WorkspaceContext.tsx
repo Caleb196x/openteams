@@ -25,6 +25,7 @@ import {
   Strategy,
   BackendChatSkill,
   Config,
+  Environment,
   MemberQueuesBySessionAgentId,
   MemberQueueSnapshot,
   QueuedMessageStatus,
@@ -86,6 +87,7 @@ import {
   isWorkflowSidebarRunning,
   resolveWorkflowSidebarState,
 } from '@/lib/workflowSidebarState';
+import { createConfigPatchQueue } from './configPatchQueue';
 
 type ListUpdater<T> = T[] | ((prev: T[]) => T[]);
 
@@ -1554,6 +1556,8 @@ export interface WorkspaceContextProps {
   config: Config | null;
   configAsync: AsyncResourceState<Config | null>;
   refreshConfig: () => Promise<void>;
+  saveConfigPatch: (patch: Partial<Config>) => Promise<Config>;
+  environment: Environment | null;
   inboxSummaryAsync: AsyncResourceState<InboxSummary>;
   inboxItemsAsync: AsyncResourceState<InboxItem[]>;
   refreshInbox: () => Promise<void>;
@@ -1647,8 +1651,35 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
   const [configAsync, setConfigAsync] = useState<
     AsyncResourceState<Config | null>
   >(() => initialAsync(null));
+  const [environment, setEnvironment] = useState<Environment | null>(null);
   const latestConfigRef = useRef<Config | null>(null);
-  const configSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const configPatchQueueRef = useRef<ReturnType<
+    typeof createConfigPatchQueue<Config>
+  > | null>(null);
+  const publishVisibleConfig = useCallback((visible: Config) => {
+    latestConfigRef.current = visible;
+    setConfigAsync(succeed(visible));
+  }, []);
+  const ensureConfigPatchQueue = useCallback(
+    (initial: Config) => {
+      if (!configPatchQueueRef.current) {
+        configPatchQueueRef.current = createConfigPatchQueue<Config>(
+          initial,
+          systemApi.saveConfig,
+          publishVisibleConfig,
+        );
+      } else {
+        configPatchQueueRef.current.replaceAcknowledged(initial);
+      }
+      return configPatchQueueRef.current;
+    },
+    [publishVisibleConfig],
+  );
+  const saveConfigPatch = useCallback((patch: Partial<Config>) => {
+    const queue = configPatchQueueRef.current;
+    if (!queue) return Promise.reject(new Error('Config is not loaded'));
+    return queue.enqueue(patch, { optimistic: false });
+  }, []);
   const [inboxSummaryAsync, setInboxSummaryAsync] = useState<
     AsyncResourceState<InboxSummary>
   >(() => initialAsync(EMPTY_INBOX_SUMMARY));
@@ -2027,37 +2058,15 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   const persistUiPreference = (patch: Partial<Config>) => {
-    const currentConfig = latestConfigRef.current;
-    if (!currentConfig) {
+    const queue = configPatchQueueRef.current;
+    if (!queue) {
       showToast('Settings are still loading. Please try again.', 'error');
       return;
     }
-
-    const nextConfig: Config = { ...currentConfig, ...patch };
-    latestConfigRef.current = nextConfig;
-    setConfigAsync((prev) => ({
-      ...prev,
-      data: nextConfig,
-      empty: false,
-      error: null,
-      source: 'api',
-    }));
-
-    configSaveQueueRef.current = configSaveQueueRef.current
-      .catch(() => undefined)
-      .then(async () => {
-        const configToSave = latestConfigRef.current;
-        if (!configToSave) return;
-        const savedConfig = await systemApi.saveConfig(configToSave);
-        if (latestConfigRef.current === configToSave) {
-          latestConfigRef.current = savedConfig;
-          setConfigAsync(succeed(savedConfig));
-        }
-      })
-      .catch((error) => {
-        console.error('Failed to save UI preferences', error);
-        showToast('Failed to save settings to config.json.', 'error');
-      });
+    void queue.enqueue(patch, { optimistic: true }).catch((error) => {
+      console.error('Failed to save UI preferences', error);
+      showToast('Failed to save settings to config.json.', 'error');
+    });
   };
 
   const setTheme = (t: ThemePreference) => {
@@ -3305,12 +3314,12 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
     setConfigAsync(beginLoad);
     try {
       const info = await systemApi.getInfo();
-      latestConfigRef.current = info.config;
-      setConfigAsync(succeed(info.config));
+      setEnvironment(info.environment);
+      ensureConfigPatchQueue(info.config);
     } catch (err) {
       setConfigAsync((prev) => fail(prev, err, null));
     }
-  }, []);
+  }, [ensureConfigPatchQueue]);
 
   useEffect(() => {
     const config = configAsync.data;
@@ -4604,6 +4613,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
         config: configAsync.data,
         configAsync,
         refreshConfig,
+        saveConfigPatch,
+        environment,
         inboxSummaryAsync,
         inboxItemsAsync,
         refreshInbox,
