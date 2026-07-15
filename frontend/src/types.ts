@@ -93,6 +93,9 @@ export interface Message {
   referenceMessageId?: string;
   attachments?: ChatAttachment[];
   isUser?: boolean;
+  isAgent?: boolean;
+  /** Agent message that triggered this agent response, when applicable. */
+  agentSourceMessage?: QuotedMessageReference;
   isThinking?: boolean;
   isAgentRunning?: boolean;
   runId?: string;

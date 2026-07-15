@@ -72,6 +72,7 @@ import {
   mapSessionAgentsToMembers,
   mapSessions,
 } from '@/lib/mappers';
+import { resolveMessageReferences } from '@/lib/messageReferences';
 import {
   AsyncResourceState,
   beginLoad,
@@ -1224,36 +1225,6 @@ const resolveProjectMainAgentName = (
   return displayName ? asAgentHandle(displayName) : null;
 };
 
-const summarizeQuotedContent = (content: string): string => {
-  const normalized = content.trim().replace(/\s+/g, ' ');
-  if (!normalized) return '';
-  return normalized.length > 140
-    ? `${normalized.slice(0, 137)}...`
-    : normalized;
-};
-
-const resolveQuotedMessageReferences = (messages: Message[]): Message[] => {
-  const messagesById = new Map(messages.map((message) => [message.id, message]));
-  return messages.map((message) => {
-    if (message.quotedMessage || !message.referenceMessageId) {
-      return message;
-    }
-
-    const referenced = messagesById.get(message.referenceMessageId);
-    if (!referenced) return message;
-
-    return {
-      ...message,
-      quotedMessage: {
-        id: referenced.id,
-        sender: referenced.isUser ? 'You' : referenced.sender,
-        content: referenced.text,
-        summary: summarizeQuotedContent(referenced.text),
-      },
-    };
-  });
-};
-
 const withSessionId = (sessionId: string, message: Message): Message =>
   message.sessionId === sessionId ? message : { ...message, sessionId };
 
@@ -1422,6 +1393,7 @@ const activeRunToMessage = (run: RuntimeActiveRun): Message => {
     time: 'just now',
     createdAt: run.created_at,
     text: '',
+    isAgent: true,
     isThinking: true,
     isAgentRunning: true,
     runId: run.run_id,
@@ -2194,7 +2166,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
         });
         setAllMessages((prev) => ({
           ...prev,
-          [sid]: resolveQuotedMessageReferences(mapped),
+          [sid]: resolveMessageReferences(mapped),
         }));
       }
     },
@@ -3013,7 +2985,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
         const currentWithoutAgentRuntime = current.filter(
           (message) => !message.isAgentRunning,
         );
-        const next = resolveQuotedMessageReferences(
+        const next = resolveMessageReferences(
           mergePersistedWithRunningPlaceholders(
             mapped,
             currentWithoutAgentRuntime,
@@ -3564,7 +3536,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
         );
         const next = [...withoutExistingSourceMessage];
         next.splice(runIndex >= 0 ? runIndex : next.length, 0, message);
-        return { ...prev, [sid]: resolveQuotedMessageReferences(next) };
+        return { ...prev, [sid]: resolveMessageReferences(next) };
       });
     },
     [],
@@ -3737,7 +3709,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
             : next;
         return {
           ...prev,
-          [sid]: resolveQuotedMessageReferences(
+          [sid]: resolveMessageReferences(
             orderMessagesForConversation(correlatedNext),
           ),
         };
@@ -4247,10 +4219,12 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
     ? activeRunMessagesForSession(activeRunsByRunId, activeSessionId)
     : [];
   const activeSessionMessageSnapshot = activeSessionId
-    ? orderMessagesForConversation([
-        ...activeSessionMessages.filter((message) => !message.isAgentRunning),
-        ...activeRunMessages,
-      ])
+    ? resolveMessageReferences(
+        orderMessagesForConversation([
+          ...activeSessionMessages.filter((message) => !message.isAgentRunning),
+          ...activeRunMessages,
+        ]),
+      )
     : [];
   const messages = activeSessionId
     ? filterQueuedUserMessagesFromSnapshot(

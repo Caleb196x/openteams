@@ -238,7 +238,7 @@ check(
     source.includes('quotedMessage: options.quotedMessage') &&
     source.includes('referenceMessageId: options.quotedMessage?.id') &&
     source.includes('meta.reference = { message_id: options.quotedMessage.id }') &&
-    source.includes('resolveQuotedMessageReferences') &&
+    source.includes('resolveMessageReferences') &&
     source.includes('content: text') &&
     !source.includes('reference_message_id: options.quotedMessage') &&
     !source.includes('meta.quoted_message') &&
