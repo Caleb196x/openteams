@@ -218,7 +218,7 @@ export function GlobalTooltip() {
       ref={tooltipRef}
       id={tooltipId}
       role="tooltip"
-      className={`app-tooltip fixed z-[10000] max-w-[min(320px,calc(100vw-16px))] px-2.5 py-1.5 ${
+      className={`app-tooltip pointer-events-none fixed z-[10000] max-w-[min(320px,calc(100vw-16px))] overflow-hidden rounded-md border border-[var(--hairline-strong)] bg-[var(--surface-1)] px-2.5 py-1.5 text-[11px] leading-4 text-[var(--ink)] shadow-lg ${
         active.anchor.hasAttribute('data-tooltip-nowrap')
           ? 'whitespace-nowrap'
           : active.anchor.hasAttribute('data-tooltip-break-all')

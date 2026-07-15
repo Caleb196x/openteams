@@ -71,6 +71,10 @@ await act(async () => {
 const tooltip = document.querySelector<HTMLElement>('[role="tooltip"]');
 assert.equal(tooltip?.textContent, 'Search (Shortcut: ⌘K)');
 assert.ok(tooltip?.classList.contains('app-tooltip'));
+assert.ok(tooltip?.classList.contains('border-[var(--hairline-strong)]'));
+assert.ok(tooltip?.classList.contains('bg-[var(--surface-1)]'));
+assert.ok(tooltip?.classList.contains('text-[11px]'));
+assert.ok(tooltip?.classList.contains('text-[var(--ink)]'));
 assert.ok(tooltip?.classList.contains('whitespace-nowrap'));
 assert.ok(trigger.getAttribute('aria-describedby')?.includes(tooltip?.id ?? ''));
 
