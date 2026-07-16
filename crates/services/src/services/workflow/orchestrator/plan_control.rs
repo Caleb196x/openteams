@@ -31,6 +31,8 @@ use super::{
         },
     },
     BootstrapResult, OrchestratorError, WorkflowOrchestrator, load_agents_for_session,
+    workflow_agent_id_map, workflow_agent_name_lookup, workflow_plan_agent_id,
+    workflow_valid_agent_ids,
 };
 
 impl WorkflowOrchestrator {
@@ -164,27 +166,17 @@ impl WorkflowOrchestrator {
 
         // Build preview projection
         let session_agents = ChatSessionAgent::find_all_for_session(pool, session.id).await?;
-        let agents = load_agents_for_session(pool, &session_agents).await?;
         let agent_views: Vec<WorkflowCardAgent> = session_agents
             .iter()
-            .filter_map(|sa| {
-                let agent = agents.iter().find(|a| a.id == sa.agent_id)?;
-                Some(WorkflowCardAgent {
-                    session_agent_id: sa.id.to_string(),
-                    workflow_agent_session_id: None,
-                    agent_id: agent.id.to_string(),
-                    name: agent.name.clone(),
-                })
+            .map(|sa| WorkflowCardAgent {
+                session_agent_id: sa.id.to_string(),
+                workflow_agent_session_id: None,
+                agent_id: workflow_plan_agent_id(sa),
+                name: sa.member_name.clone(),
             })
             .collect();
-        let agent_name_by_id: HashMap<String, String> = agent_views
-            .iter()
-            .map(|agent| (agent.agent_id.clone(), agent.name.clone()))
-            .collect();
-        let valid_agent_ids = agents
-            .iter()
-            .map(|agent| agent.id.to_string())
-            .collect::<Vec<_>>();
+        let agent_name_by_id = workflow_agent_name_lookup(&session_agents);
+        let valid_agent_ids = workflow_valid_agent_ids(&session_agents);
         let compiled_preview = WorkflowCompiler::compile_from_json(plan_json, &valid_agent_ids)?;
         let loop_key_by_step_key = compiled_preview
             .steps
@@ -562,11 +554,8 @@ impl WorkflowOrchestrator {
             .created_by_session_agent_id
             .or_else(|| session_agents.first().map(|sa| sa.id));
 
-        let valid_agent_ids: Vec<String> = agents.iter().map(|a| a.id.to_string()).collect();
-        let agent_id_map: HashMap<String, Uuid> = session_agents
-            .iter()
-            .map(|sa| (sa.agent_id.to_string(), sa.id))
-            .collect();
+        let valid_agent_ids = workflow_valid_agent_ids(&session_agents);
+        let agent_id_map = workflow_agent_id_map(&session_agents);
 
         let bootstrap = Self::bootstrap_execution(
             pool,
@@ -898,6 +887,7 @@ mod tests {
                 session_id BLOB NOT NULL,
                 sender_type TEXT NOT NULL CHECK (sender_type IN ('user','agent','system')),
                 sender_id BLOB,
+                sender_session_agent_id BLOB,
                 content TEXT NOT NULL,
                 mentions TEXT NOT NULL DEFAULT '[]',
                 meta TEXT NOT NULL DEFAULT '{}',

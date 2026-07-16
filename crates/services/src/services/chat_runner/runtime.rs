@@ -2192,6 +2192,7 @@ impl ChatRunner {
                                         session_id,
                                         sender_type: ChatSenderType::System,
                                         sender_id: None,
+                                        sender_session_agent_id: None,
                                         content: retry_content,
                                         mentions: sqlx::types::Json(vec![agent_name.clone()]),
                                         meta: retry_meta,
@@ -2392,9 +2393,19 @@ impl ChatRunner {
                                 mention_status = ?mention_status,
                                 "mention status: "
                             );
+                            let project_member_id = ChatSessionAgent::find_by_id(
+                                &db.pool,
+                                session_agent_id,
+                            )
+                            .await
+                            .ok()
+                            .flatten()
+                            .and_then(|member| member.project_member_id);
                             let _ = sender.send(ChatStreamEvent::MentionAcknowledged {
                                 session_id,
                                 message_id: source_message_id,
+                                session_agent_id: Some(session_agent_id),
+                                project_member_id,
                                 mentioned_agent: agent_name.clone(),
                                 agent_id,
                                 status: mention_status.clone(),
@@ -2424,6 +2435,23 @@ impl ChatRunner {
                                         .insert(agent_name.clone(), serde_json::json!(status_str));
                                     meta["mention_statuses"] =
                                         serde_json::Value::Object(new_statuses);
+                                }
+                                if let Some(meta_object) = meta.as_object_mut() {
+                                    let targets = meta_object
+                                        .entry("mention_targets")
+                                        .or_insert_with(|| serde_json::json!({}));
+                                    if let Some(targets) = targets.as_object_mut() {
+                                        targets.insert(
+                                            session_agent_id.to_string(),
+                                            serde_json::json!({
+                                                "agent_id": agent_id,
+                                                "project_member_id": project_member_id,
+                                                "member_name": agent_name,
+                                                "status": status_str,
+                                                "error": null,
+                                            }),
+                                        );
+                                    }
                                 }
 
                                 let _ = ChatMessage::update_meta(&db.pool, source_message_id, meta)
@@ -2490,15 +2518,45 @@ impl ChatRunner {
                                     agent_name = %retry_agent_name,
                                     "dispatching protocol retry after current run reached idle"
                                 );
-                                if let Err(err) = runner
-                                    .run_agent_for_mention_internal(
-                                        session_id,
-                                        &retry_agent_name,
-                                        &retry_message,
-                                        retry_track_source,
-                                    )
-                                    .await
-                                {
+                                let retry_member = runner
+                                    .resolve_session_agent_by_id(session_id, session_agent_id)
+                                    .await;
+                                let retry_result = match retry_member {
+                                    Ok(Some(member)) => {
+                                        let target_result = db::models::chat_message_target::ChatMessageTarget::record_protocol_retry(
+                                            &runner.db.pool,
+                                            &db::models::chat_message_target::CreateChatMessageTarget {
+                                                message_id: retry_message.id,
+                                                ordinal: 0,
+                                                session_id,
+                                                session_agent_id: Some(member.session_agent_id),
+                                                project_member_id: member.project_member_id,
+                                                agent_id: member.agent_id,
+                                                member_name_snapshot: member.member_name.clone(),
+                                                route_kind: db::models::chat_message_target::ChatMessageTargetRouteKind::ProtocolRetry,
+                                                resolution_status: db::models::chat_message_target::ChatMessageTargetResolutionStatus::Resolved,
+                                            },
+                                        )
+                                        .await;
+                                        match target_result {
+                                            Ok(_) => runner.run_agent_internal(
+                                            AgentRunTarget {
+                                                member,
+                                                claimed_queue_id: None,
+                                            },
+                                            &retry_message,
+                                            retry_track_source,
+                                        )
+                                        .await,
+                                            Err(err) => Err(ChatRunnerError::Database(err)),
+                                        }
+                                    }
+                                    Ok(None) => Err(ChatRunnerError::AgentNotFound(
+                                        session_agent_id.to_string(),
+                                    )),
+                                    Err(err) => Err(err),
+                                };
+                                if let Err(err) = retry_result {
                                     tracing::warn!(
                                         session_id = %session_id,
                                         agent_name = %retry_agent_name,
