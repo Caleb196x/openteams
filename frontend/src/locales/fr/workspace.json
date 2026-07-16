@@ -290,6 +290,8 @@
   "worktree.action.forceRemove": "Forcer suppression",
   "worktree.confirm.deleteDescription": "Supprimer ce worktree de session ? Les changements non fusionnés dans le workspace isolé seront supprimés. Cette action est irréversible.",
   "worktree.confirm.deleteTitle": "Supprimer le worktree ?",
+  "worktree.confirm.mergeDescription": "Fusionner ce worktree de session dans le workspace de base ?",
+  "worktree.confirm.mergeTitle": "Fusionner le worktree ?",
   "worktree.badge.archived": "Archivé",
   "worktree.badge.archivedHint": "Ce worktree est archivé",
   "worktree.badge.cleaning": "Nettoyage...",

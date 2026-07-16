@@ -290,6 +290,8 @@
   "worktree.action.forceRemove": "強制削除",
   "worktree.confirm.deleteDescription": "このセッション worktree を削除しますか？分離 workspace 内の未マージの変更は削除されます。この操作は元に戻せません。",
   "worktree.confirm.deleteTitle": "worktree を削除しますか？",
+  "worktree.confirm.mergeDescription": "このセッション worktree をベース workspace にマージしますか？",
+  "worktree.confirm.mergeTitle": "worktree をマージしますか？",
   "worktree.badge.archived": "アーカイブ済み",
   "worktree.badge.archivedHint": "この worktree はアーカイブ済みです",
   "worktree.badge.cleaning": "クリーンアップ中...",

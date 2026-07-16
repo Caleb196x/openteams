@@ -480,6 +480,8 @@
   "worktree.action.forceRemove": "强制删除",
   "worktree.confirm.deleteDescription": "删除此会话工作区？隔离工作区中尚未合并的变更将被移除，此操作无法撤销。",
   "worktree.confirm.deleteTitle": "删除工作区？",
+  "worktree.confirm.mergeDescription": "将此会话工作区合并到基础工作区？",
+  "worktree.confirm.mergeTitle": "合并工作区？",
   "worktree.badge.archived": "已删除",
   "worktree.badge.archivedHint": "此工作区已删除",
   "worktree.badge.cleaning": "清理中...",

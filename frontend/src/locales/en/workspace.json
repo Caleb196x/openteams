@@ -440,6 +440,8 @@
   "worktree.action.forceRemove": "Force delete",
   "worktree.confirm.deleteDescription": "Delete this session worktree? Unmerged changes in the isolated workspace will be removed. This cannot be undone.",
   "worktree.confirm.deleteTitle": "Delete worktree?",
+  "worktree.confirm.mergeDescription": "Merge this session worktree into the base workspace?",
+  "worktree.confirm.mergeTitle": "Merge worktree?",
   "worktree.badge.archived": "Archived",
   "worktree.badge.archivedHint": "This worktree is archived",
   "worktree.badge.cleaning": "Cleaning up...",
