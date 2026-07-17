@@ -462,6 +462,7 @@ function WorkspaceLayout() {
   const {
     t,
     theme,
+    themePreference,
     locale,
     setTheme,
     setLocale,
@@ -2181,6 +2182,7 @@ function WorkspaceLayout() {
           initialState={onboardingOverlay.state ?? onboardingState}
           locale={locale}
           theme={theme}
+          themePreference={themePreference}
           t={t}
           teamPresets={teamPresets}
           onCreateProjectFromOnboarding={handleCreateOnboardingProject}
