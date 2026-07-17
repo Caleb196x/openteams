@@ -1840,7 +1840,6 @@ pub async fn create_session_agent(
         Uuid::new_v4(),
     )
     .await?;
-    let user_id_hash = hash_user_id(deployment.user_id());
     workflow_analytics::track_agent_added(
         workflow_analytics::analytics_if_enabled(
             deployment.analytics().as_ref(),
