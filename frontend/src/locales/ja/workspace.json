@@ -333,6 +333,7 @@
   "worktree.merge.acceptBoth": "両方を採用",
   "worktree.merge.acceptCurrent": "現在の変更を採用",
   "worktree.merge.acceptSource": "マージ側の変更を採用",
+  "worktree.merge.ignore": "無視",
   "worktree.merge.acceptAllBoth": "すべて両方の変更を採用",
   "worktree.merge.acceptAllCurrent": "現在の変更をすべて採用",
   "worktree.merge.acceptAllSource": "マージ側の変更をすべて採用",

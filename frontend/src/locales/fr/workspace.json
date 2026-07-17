@@ -333,6 +333,7 @@
   "worktree.merge.acceptBoth": "Accepter les deux",
   "worktree.merge.acceptCurrent": "Accepter la modification actuelle",
   "worktree.merge.acceptSource": "Accepter la modification entrante",
+  "worktree.merge.ignore": "Ignorer",
   "worktree.merge.acceptAllBoth": "Tout accepter des deux côtés",
   "worktree.merge.acceptAllCurrent": "Accepter toutes les modifications actuelles",
   "worktree.merge.acceptAllSource": "Accepter toutes les modifications entrantes",

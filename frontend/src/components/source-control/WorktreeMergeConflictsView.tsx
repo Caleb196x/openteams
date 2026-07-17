@@ -652,6 +652,13 @@ export const WorktreeMergeConflictsView: React.FC<
 
       <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center px-4">
         <div className="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-1.5 rounded-2xl border border-[var(--hairline)] bg-[color-mix(in_srgb,var(--surface-1)_94%,transparent)] p-1.5 shadow-[0_12px_38px_rgba(0,0,0,0.2)] backdrop-blur-md">
+          <WorktreeConflictActionButton
+            onClick={() => void handleAbort()}
+            disabled={Boolean(pendingAction)}
+            icon={<X className="h-3 w-3" aria-hidden />}
+          >
+            {tr('worktree.merge.abort', 'Abort merge')}
+          </WorktreeConflictActionButton>
           <input
             type="text"
             value={commitMessage}
@@ -662,13 +669,6 @@ export const WorktreeMergeConflictsView: React.FC<
             )}
             className="h-8 w-[min(280px,45vw)] rounded-xl border border-[var(--hairline)] bg-transparent px-2.5 text-[12px] text-[var(--ink)] outline-none placeholder:text-[var(--ink-tertiary)] focus:border-[var(--ink-tertiary)]"
           />
-          <WorktreeConflictActionButton
-            onClick={() => void handleAbort()}
-            disabled={Boolean(pendingAction)}
-            icon={<X className="h-3 w-3" aria-hidden />}
-          >
-            {tr('worktree.merge.abort', 'Abort merge')}
-          </WorktreeConflictActionButton>
           <WorktreeConflictActionButton
             onClick={() => void handleMarkResolved()}
             disabled={

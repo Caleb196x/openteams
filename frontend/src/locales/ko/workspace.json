@@ -333,6 +333,7 @@
   "worktree.merge.acceptBoth": "둘 다 적용",
   "worktree.merge.acceptCurrent": "현재 변경 수락",
   "worktree.merge.acceptSource": "병합 변경 수락",
+  "worktree.merge.ignore": "무시",
   "worktree.merge.acceptAllBoth": "모두 양쪽 변경 수락",
   "worktree.merge.acceptAllCurrent": "모든 현재 변경 수락",
   "worktree.merge.acceptAllSource": "모든 병합 변경 수락",

@@ -315,11 +315,11 @@ export const CodeMirrorConflictEditor: React.FC<
             content={currentPane.content}
             conflicts={currentPane.regions}
             selectedConflictId={selectedHunk?.id ?? null}
-            actionLabels={{
-              current: tr('worktree.merge.acceptCurrent', 'Accept current'),
-              incoming: tr('worktree.merge.acceptSource', 'Accept incoming'),
-              both: tr('worktree.merge.acceptBoth', 'Accept both'),
-            }}
+            actions={getConflictPaneActions('current', {
+              own: tr('worktree.merge.acceptCurrent', 'Accept current change'),
+              both: tr('worktree.merge.acceptBoth', 'Accept both changes'),
+              ignore: tr('worktree.merge.ignore', 'Ignore'),
+            })}
             onChooseConflict={(hunkId, choice) => {
               const hunkIndex = parsed.hunks.findIndex(
                 (hunk) => hunk.id === hunkId,
@@ -346,11 +346,11 @@ export const CodeMirrorConflictEditor: React.FC<
             content={incomingPane.content}
             conflicts={incomingPane.regions}
             selectedConflictId={selectedHunk?.id ?? null}
-            actionLabels={{
-              current: tr('worktree.merge.acceptCurrent', 'Accept current'),
-              incoming: tr('worktree.merge.acceptSource', 'Accept incoming'),
-              both: tr('worktree.merge.acceptBoth', 'Accept both'),
-            }}
+            actions={getConflictPaneActions('incoming', {
+              own: tr('worktree.merge.acceptSource', 'Accept incoming change'),
+              both: tr('worktree.merge.acceptBoth', 'Accept both changes'),
+              ignore: tr('worktree.merge.ignore', 'Ignore'),
+            })}
             onChooseConflict={(hunkId, choice) => {
               const hunkIndex = parsed.hunks.findIndex(
                 (hunk) => hunk.id === hunkId,
@@ -426,17 +426,38 @@ interface ConflictPaneModel {
   regions: ConflictRegion[];
 }
 
-interface ConflictActionLabels {
-  current: string;
-  incoming: string;
-  both: string;
+interface ConflictAction {
+  label: string;
+  choice: ConflictHunkChoice;
 }
+
+interface ConflictPaneActionLabels {
+  own: string;
+  both: string;
+  ignore: string;
+}
+
+export const getConflictPaneActions = (
+  pane: 'current' | 'incoming',
+  labels: ConflictPaneActionLabels,
+): ConflictAction[] =>
+  pane === 'current'
+    ? [
+        { label: labels.own, choice: 'current' },
+        { label: labels.both, choice: 'both' },
+        { label: labels.ignore, choice: 'session' },
+      ]
+    : [
+        { label: labels.own, choice: 'session' },
+        { label: labels.both, choice: 'both' },
+        { label: labels.ignore, choice: 'current' },
+      ];
 
 class ConflictActionsWidget extends WidgetType {
   constructor(
     readonly region: ConflictRegion,
     readonly selected: boolean,
-    readonly labels: ConflictActionLabels,
+    readonly actions: ConflictAction[],
     readonly onChoose: (hunkId: string, choice: ConflictHunkChoice) => void,
   ) {
     super();
@@ -447,9 +468,12 @@ class ConflictActionsWidget extends WidgetType {
       other.region.id === this.region.id &&
       other.region.choice === this.region.choice &&
       other.selected === this.selected &&
-      other.labels.current === this.labels.current &&
-      other.labels.incoming === this.labels.incoming &&
-      other.labels.both === this.labels.both
+      other.actions.length === this.actions.length &&
+      other.actions.every(
+        (action, index) =>
+          action.choice === this.actions[index]?.choice &&
+          action.label === this.actions[index]?.label,
+      )
     );
   }
 
@@ -458,15 +482,7 @@ class ConflictActionsWidget extends WidgetType {
     container.className = `cm-conflict-codelens${this.selected ? ' is-selected' : ''}`;
     container.dataset.conflictId = this.region.id;
 
-    const actions: Array<{
-      label: string;
-      choice: ConflictHunkChoice;
-    }> = [
-      { label: this.labels.current, choice: 'current' },
-      { label: this.labels.incoming, choice: 'session' },
-      { label: this.labels.both, choice: 'both' },
-    ];
-    actions.forEach((action, index) => {
+    this.actions.forEach((action, index) => {
       if (index > 0) {
         const separator = document.createElement('span');
         separator.className = 'cm-conflict-codelens-separator';
@@ -652,7 +668,7 @@ const conflictDecorations = (
   content: string,
   conflicts: ConflictRegion[],
   selectedConflictId: string | null,
-  labels: ConflictActionLabels,
+  actions: ConflictAction[],
   onChoose: (hunkId: string, choice: ConflictHunkChoice) => void,
 ): Extension[] => {
   const ranges: Range<Decoration>[] = [];
@@ -663,7 +679,7 @@ const conflictDecorations = (
       const selected = region.id === selectedConflictId;
       ranges.push(
         Decoration.widget({
-          widget: new ConflictActionsWidget(region, selected, labels, onChoose),
+          widget: new ConflictActionsWidget(region, selected, actions, onChoose),
           block: true,
           side: -3,
         }).range(position),
@@ -702,7 +718,7 @@ const conflictDecorations = (
 
     ranges.push(
       Decoration.widget({
-        widget: new ConflictActionsWidget(region, selected, labels, onChoose),
+        widget: new ConflictActionsWidget(region, selected, actions, onChoose),
         block: true,
         side: -3,
       }).range(lineStarts[0] ?? start),
@@ -780,7 +796,7 @@ const SyntaxCodeEditor: React.FC<{
   editable: boolean;
   conflicts?: ConflictRegion[];
   selectedConflictId?: string | null;
-  actionLabels?: ConflictActionLabels;
+  actions?: ConflictAction[];
   onChooseConflict?: (
     hunkId: string,
     choice: ConflictHunkChoice,
@@ -793,7 +809,7 @@ const SyntaxCodeEditor: React.FC<{
   editable,
   conflicts = [],
   selectedConflictId = null,
-  actionLabels,
+  actions,
   onChooseConflict,
   onEditorReady,
   onChange,
@@ -801,17 +817,17 @@ const SyntaxCodeEditor: React.FC<{
   const languageExtensions = useCodeLanguage(path);
   const focusExtensions = useMemo(
     () =>
-      actionLabels && onChooseConflict
+      actions && onChooseConflict
         ? conflictDecorations(
             content,
             conflicts,
             selectedConflictId,
-            actionLabels,
+            actions,
             onChooseConflict,
           )
         : [],
     [
-      actionLabels,
+      actions,
       conflicts,
       content,
       onChooseConflict,
@@ -850,7 +866,7 @@ const CodeEditorPane: React.FC<{
   content: string;
   conflicts: ConflictRegion[];
   selectedConflictId: string | null;
-  actionLabels: ConflictActionLabels;
+  actions: ConflictAction[];
   onChooseConflict: (
     hunkId: string,
     choice: ConflictHunkChoice,
@@ -865,7 +881,7 @@ const CodeEditorPane: React.FC<{
   content,
   conflicts,
   selectedConflictId,
-  actionLabels,
+  actions,
   onChooseConflict,
   onEditorReady,
   tone,
@@ -892,7 +908,7 @@ const CodeEditorPane: React.FC<{
         editable={false}
         conflicts={conflicts}
         selectedConflictId={selectedConflictId}
-        actionLabels={actionLabels}
+        actions={actions}
         onChooseConflict={onChooseConflict}
         onEditorReady={onEditorReady}
       />

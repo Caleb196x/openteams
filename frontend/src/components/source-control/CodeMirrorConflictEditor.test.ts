@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 
 import {
   buildConflictPaneModel,
+  getConflictPaneActions,
   getConflictSpacerLineCounts,
 } from './CodeMirrorConflictEditor';
 import { parseConflictText } from './WorktreeMergeConflictsView';
@@ -47,6 +48,31 @@ assert.deepEqual(
     to: currentPane.regions[0]?.to,
   },
   { from: 7, to: 14 },
+);
+
+assert.deepEqual(
+  getConflictPaneActions('current', {
+    own: 'current',
+    both: 'both',
+    ignore: 'ignore',
+  }),
+  [
+    { label: 'current', choice: 'current' },
+    { label: 'both', choice: 'both' },
+    { label: 'ignore', choice: 'session' },
+  ],
+);
+assert.deepEqual(
+  getConflictPaneActions('incoming', {
+    own: 'incoming',
+    both: 'both',
+    ignore: 'ignore',
+  }),
+  [
+    { label: 'incoming', choice: 'session' },
+    { label: 'both', choice: 'both' },
+    { label: 'ignore', choice: 'current' },
+  ],
 );
 
 console.log('CodeMirrorConflictEditor alignment: PASS');
