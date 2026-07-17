@@ -388,11 +388,11 @@ fn build_workspace_scoped_workflow_prompt(
     prompt: &str,
     workspace_path: &std::path::Path,
 ) -> String {
-    format!(
+    crate::services::mark_openteams_prompt(&format!(
         "## Workspace\n- Active workspace path: `{}`.\n- Treat this active workspace path as the project repository for this turn. Run file reads, writes, and shell commands there unless the user explicitly asks for another path.\n\n{}",
         workspace_path.display(),
         prompt
-    )
+    ))
 }
 
 fn resolve_workflow_resume<'a>(

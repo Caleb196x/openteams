@@ -10,7 +10,7 @@ Return only the summary body. Do not ask follow-up questions. Do not run any too
         prompt.push_str(&format!("{}: {}\n", msg.sender, msg.content));
     }
 
-    prompt
+    crate::services::mark_openteams_prompt(&prompt)
 }
 
 fn limit_summary_input_messages(

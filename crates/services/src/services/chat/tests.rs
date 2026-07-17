@@ -15,8 +15,9 @@ mod tests {
 
     use super::{
         CompressionType, SimplifiedMessage, all_agents_running, build_message_analytics_metrics,
-        compress_messages_if_needed, create_message, create_session_with_project_members,
-        effective_agent_name, is_protocol_notice_history_message, is_workflow_chat_input_mode,
+        build_summarization_prompt, compress_messages_if_needed, create_message,
+        create_session_with_project_members, effective_agent_name,
+        is_protocol_notice_history_message, is_workflow_chat_input_mode,
         limit_summary_input_messages, member_name_overrides_for_session, normalized_member_name,
         parse_agent_send_mentions, parse_mentions, parse_user_message_mentions,
         prioritize_summary_agents, select_messages_to_compress_by_token,
@@ -847,6 +848,18 @@ mod tests {
         let (limited, before, after) = limit_summary_input_messages(&messages, u32::MAX);
         assert_eq!(limited.len(), messages.len());
         assert_eq!(before, after);
+    }
+
+    #[test]
+    fn summarization_prompt_identifies_openteams_as_source() {
+        let prompt = build_summarization_prompt(&[SimplifiedMessage {
+            sender: "user:alice".to_string(),
+            content: "Summarize this message.".to_string(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        }]);
+
+        assert!(prompt.starts_with("[OPENTEAMS_SOURCE=openteams]\n\n"));
+        assert_eq!(prompt.matches("[OPENTEAMS_SOURCE=openteams]").count(), 1);
     }
 
     #[test]

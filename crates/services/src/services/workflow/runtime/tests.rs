@@ -883,6 +883,8 @@ mod tests {
         let prompt =
             build_workspace_scoped_workflow_prompt("Run the workflow step.", workspace_path);
 
+        assert!(prompt.starts_with("[OPENTEAMS_SOURCE=openteams]\n\n"));
+        assert_eq!(prompt.matches("[OPENTEAMS_SOURCE=openteams]").count(), 1);
         assert!(prompt.contains("## Workspace"));
         assert!(prompt.contains("Active workspace path"));
         assert!(prompt.contains("Treat this active workspace path as the project repository"));

@@ -3113,6 +3113,8 @@ fn build_exact_markdown_prompt_matches_expected_input_template() {
     );
 
     // Verify key sections exist instead of exact string match
+    assert!(prompt.starts_with("[OPENTEAMS_SOURCE=openteams]\n\n"));
+    assert_eq!(prompt.matches("[OPENTEAMS_SOURCE=openteams]").count(), 1);
     assert!(prompt.contains("# Chat Message"));
     assert!(prompt.contains("## Input Message"));
     assert!(prompt.contains("- sender: you"));

@@ -1159,7 +1159,7 @@ impl ChatRunner {
         markdown.push_str(&message.created_at.to_string());
         markdown.push('\n');
 
-        markdown
+        crate::services::mark_openteams_prompt(&markdown)
     }
 
     pub(super) fn resolve_prompt_language(
