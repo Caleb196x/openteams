@@ -54,6 +54,23 @@ const buildResult = (
 const newlineCount = (content: string) =>
   content.match(/\n/g)?.length ?? 0;
 
+const renderedLineCount = (content: string) => {
+  if (!content) return 0;
+  return newlineCount(content) + (content.endsWith('\n') ? 0 : 1);
+};
+
+export const getConflictSpacerLineCounts = (
+  current: string,
+  incoming: string,
+) => {
+  const currentLines = renderedLineCount(current);
+  const incomingLines = renderedLineCount(incoming);
+  return {
+    current: Math.max(0, incomingLines - currentLines),
+    incoming: Math.max(0, currentLines - incomingLines),
+  };
+};
+
 const buildConflictRegions = (
   parsed: ParsedConflictText,
   side: 'current' | 'session',
@@ -68,10 +85,16 @@ const buildConflictRegions = (
       return;
     }
     const text = segment.hunk[side];
+    const spacerLines = getConflictSpacerLineCounts(
+      segment.hunk.current,
+      segment.hunk.session,
+    );
     regions.push({
       id: segment.hunk.id,
       text,
       lineHint: line,
+      spacerLines:
+        side === 'current' ? spacerLines.current : spacerLines.incoming,
       emptyLabel,
       choice: choices[segment.hunk.id],
     });
@@ -354,6 +377,7 @@ interface ConflictRegion {
   id: string;
   text: string;
   lineHint: number;
+  spacerLines: number;
   emptyLabel: string;
   choice?: ConflictHunkChoice;
 }
@@ -425,18 +449,20 @@ class ConflictActionsWidget extends WidgetType {
   }
 }
 
-class EmptyConflictWidget extends WidgetType {
+class ConflictSpacerWidget extends WidgetType {
   constructor(
     readonly regionId: string,
+    readonly lineCount: number,
     readonly label: string,
     readonly selected: boolean,
   ) {
     super();
   }
 
-  eq(other: EmptyConflictWidget) {
+  eq(other: ConflictSpacerWidget) {
     return (
       other.regionId === this.regionId &&
+      other.lineCount === this.lineCount &&
       other.label === this.label &&
       other.selected === this.selected
     );
@@ -444,12 +470,10 @@ class EmptyConflictWidget extends WidgetType {
 
   toDOM() {
     const placeholder = document.createElement('div');
-    placeholder.className = `cm-conflict-empty${this.selected ? ' is-selected' : ''}`;
+    placeholder.className = `cm-conflict-spacer${this.selected ? ' is-selected' : ''}`;
     placeholder.setAttribute('role', 'note');
     placeholder.setAttribute('aria-label', this.label);
-    const label = document.createElement('span');
-    label.textContent = this.label;
-    placeholder.append(label);
+    placeholder.style.height = `calc(${Math.max(1, this.lineCount) * 1.55}em + 3px)`;
     return placeholder;
   }
 
@@ -491,12 +515,10 @@ const conflictEditorTheme = EditorView.theme({
     paddingLeft: '8px',
   },
   '.cm-conflict-block-start': {
-    borderTop: '3px solid rgb(190, 126, 28)',
-    paddingTop: '3px',
+    paddingTop: '0',
   },
   '.cm-conflict-block-end': {
     borderBottom: '3px solid rgb(190, 126, 28)',
-    paddingBottom: '3px',
   },
   '.cm-conflict-block-selected': {
     backgroundColor:
@@ -532,24 +554,19 @@ const conflictEditorTheme = EditorView.theme({
   '.cm-conflict-codelens-separator': {
     color: 'var(--hairline)',
   },
-  '.cm-conflict-empty': {
+  '.cm-conflict-spacer': {
     boxSizing: 'border-box',
-    minHeight: '38px',
-    display: 'flex',
-    alignItems: 'center',
-    padding: '6px 11px',
     borderLeft: '3px solid rgb(190, 126, 28)',
     borderRight: '3px solid rgb(190, 126, 28)',
     borderBottom: '3px solid rgb(190, 126, 28)',
     background:
-      'repeating-linear-gradient(-45deg, color-mix(in srgb, rgb(170, 216, 174) 20%, transparent) 0 7px, transparent 7px 14px)',
-    color: 'var(--ink-tertiary)',
-    fontFamily: 'ui-sans-serif, system-ui, sans-serif',
-    fontSize: '10px',
+      'repeating-linear-gradient(-45deg, color-mix(in srgb, var(--ink) 18%, transparent) 0 1px, transparent 1px 5px)',
+    fontSize: '13px',
+    lineHeight: '1.55',
   },
-  '.cm-conflict-empty.is-selected': {
+  '.cm-conflict-spacer.is-selected': {
     background:
-      'repeating-linear-gradient(-45deg, color-mix(in srgb, rgb(150, 210, 160) 30%, transparent) 0 7px, transparent 7px 14px)',
+      'repeating-linear-gradient(-45deg, color-mix(in srgb, var(--ink) 25%, transparent) 0 1px, transparent 1px 5px)',
   },
 });
 
@@ -604,16 +621,17 @@ const conflictDecorations = (
         Decoration.widget({
           widget: new ConflictActionsWidget(region, selected, labels, onChoose),
           block: true,
-          side: -2,
+          side: -3,
         }).range(position),
         Decoration.widget({
-          widget: new EmptyConflictWidget(
+          widget: new ConflictSpacerWidget(
             region.id,
+            Math.max(1, region.spacerLines),
             region.emptyLabel,
             selected,
           ),
           block: true,
-          side: -1,
+          side: -2,
         }).range(position),
       );
       return;
@@ -638,25 +656,53 @@ const conflictDecorations = (
       Decoration.widget({
         widget: new ConflictActionsWidget(region, selected, labels, onChoose),
         block: true,
-        side: -1,
+        side: -3,
       }).range(lineStarts[0] ?? start),
     );
     lineStarts.forEach((position, index) => {
       const classes = [
         'cm-conflict-block',
         index === 0 ? 'cm-conflict-block-start' : '',
-        index === lineStarts.length - 1 ? 'cm-conflict-block-end' : '',
+        index === lineStarts.length - 1 && region.spacerLines === 0
+          ? 'cm-conflict-block-end'
+          : '',
         selected ? 'cm-conflict-block-selected' : '',
       ]
         .filter(Boolean)
         .join(' ');
       ranges.push(Decoration.line({ class: classes }).range(position));
     });
+    if (region.spacerLines > 0) {
+      ranges.push(
+        Decoration.widget({
+          widget: new ConflictSpacerWidget(
+            region.id,
+            region.spacerLines,
+            region.emptyLabel,
+            selected,
+          ),
+          block: true,
+          side: -4,
+        }).range(positionAfterText(content, start + region.text.length)),
+      );
+    }
   });
 
   return ranges.length > 0
     ? [EditorView.decorations.of(Decoration.set(ranges, true))]
     : [];
+};
+
+const positionAfterText = (content: string, position: number): number => {
+  if (
+    position >= content.length ||
+    position === 0 ||
+    content[position - 1] === '\n'
+  ) {
+    return Math.min(position, content.length);
+  }
+  const nextBreak = content.indexOf('\n', position);
+  return nextBreak < 0 ? content.length : nextBreak + 1;
 };
 
 const positionForLine = (content: string, lineNumber: number): number => {
