@@ -1005,7 +1005,7 @@ async fn ensure_for_session_uses_current_workspace_branch_over_origin_head() {
 }
 
 #[tokio::test]
-async fn perform_merge_preserves_session_branch_commit_in_base_history() {
+async fn cherry_pick_merge_preserves_session_commit_without_merge_commit() {
     let pool = setup_pool().await;
     let service = SessionWorktreeService::new(pool.clone());
     let session_id = Uuid::new_v4();
@@ -1031,24 +1031,24 @@ async fn perform_merge_preserves_session_branch_commit_in_base_history() {
     service
         .perform_merge(
             session_id,
-            SessionWorktreeMergeOperation::Merge,
+            SessionWorktreeMergeOperation::CherryPick,
             None,
-            Some("Merge session branch".to_string()),
+            None,
         )
         .await
         .expect("merge worktree");
 
-    let session_commit = git(&base, &["rev-parse", &worktree.branch_name]);
-    git(
-        &base,
-        &["merge-base", "--is-ancestor", &session_commit, "main"],
-    );
     let head_parents = git(&base, &["rev-list", "--parents", "-n", "1", "HEAD"]);
     assert_eq!(
         head_parents.split_whitespace().count(),
-        3,
-        "merge should create a two-parent commit preserving the session branch commit"
+        2,
+        "integration should create a normal one-parent commit"
     );
+    assert_eq!(
+        git(&base, &["log", "-1", "--format=%s"]),
+        "session branch commit"
+    );
+    assert!(!git(&base, &["log", "--format=%s"]).contains("Merge OpenTeams session changes"));
 
     std::fs::write(worktree_path.join("second.txt"), "second session commit\n")
         .expect("write second worktree change");
@@ -1066,21 +1066,15 @@ async fn perform_merge_preserves_session_branch_commit_in_base_history() {
     service
         .perform_merge(
             session_id,
-            SessionWorktreeMergeOperation::Merge,
+            SessionWorktreeMergeOperation::CherryPick,
             None,
-            Some("Merge second session commit".to_string()),
+            None,
         )
         .await
         .expect("merge worktree again");
-    let second_session_commit = git(&base, &["rev-parse", &worktree.branch_name]);
-    git(
-        &base,
-        &[
-            "merge-base",
-            "--is-ancestor",
-            &second_session_commit,
-            "main",
-        ],
+    assert_eq!(
+        git(&base, &["log", "-1", "--format=%s"]),
+        "second session commit"
     );
 
     service
@@ -1091,6 +1085,62 @@ async fn perform_merge_preserves_session_branch_commit_in_base_history() {
         git_fails(&base, &["rev-parse", "--verify", &worktree.branch_name]),
         "discard should delete the session worktree branch"
     );
+}
+
+#[tokio::test]
+async fn cherry_pick_conflict_resolution_does_not_create_merge_commit() {
+    let pool = setup_pool().await;
+    let service = SessionWorktreeService::new(pool.clone());
+    let session_id = Uuid::new_v4();
+    let tmp = tempfile::TempDir::new().expect("temp dir");
+    let base = tmp.path().join("base");
+    init_git_repo(&base);
+
+    let (worktree, _cleanup) = ensure_test_worktree(&service, session_id, base.clone()).await;
+    let worktree_path = PathBuf::from(&worktree.worktree_path);
+    std::fs::write(worktree_path.join("README.md"), "from session\n")
+        .expect("write session conflict");
+    git(&worktree_path, &["add", "README.md"]);
+    git(&worktree_path, &["commit", "-m", "session conflict change"]);
+
+    std::fs::write(base.join("README.md"), "from base\n").expect("write base conflict");
+    git(&base, &["add", "README.md"]);
+    git(&base, &["commit", "-m", "base conflict change"]);
+
+    let result = service
+        .perform_merge(
+            session_id,
+            SessionWorktreeMergeOperation::CherryPick,
+            None,
+            None,
+        )
+        .await
+        .expect("start cherry-pick");
+    assert!(result.has_conflicts);
+
+    service
+        .resolve_conflict_file(
+            session_id,
+            "README.md",
+            Some("resolved content\n"),
+            None,
+            false,
+        )
+        .await
+        .expect("resolve conflict");
+    let merged = service
+        .continue_merge(session_id, None)
+        .await
+        .expect("continue cherry-pick");
+
+    assert_eq!(merged.status, SessionWorktreeStatus::Merged);
+    assert_eq!(
+        git(&base, &["log", "-1", "--format=%s"]),
+        "session conflict change"
+    );
+    let head_parents = git(&base, &["rev-list", "--parents", "-n", "1", "HEAD"]);
+    assert_eq!(head_parents.split_whitespace().count(), 2);
+    assert!(!git(&base, &["log", "--format=%s"]).contains("Merge OpenTeams session changes"));
 }
 
 #[tokio::test]

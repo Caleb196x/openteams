@@ -566,9 +566,9 @@ impl SessionWorktree {
         .await
     }
 
-    /// Record the base commit (HEAD of `base_branch` at worktree creation)
-    /// for later diff baseline computation. Best-effort: callers may pass
-    /// `None` if the commit could not be resolved.
+    /// Record the integration cursor. It starts as the HEAD of `base_branch`
+    /// when the worktree is created and advances to the latest integrated
+    /// session commit after a cherry-pick merge.
     pub async fn record_base_commit(
         pool: &SqlitePool,
         id: Uuid,

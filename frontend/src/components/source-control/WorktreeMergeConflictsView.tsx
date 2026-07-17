@@ -457,10 +457,17 @@ export const WorktreeMergeConflictsView: React.FC<
           // error is the most informative.
         }
       }
-      await chatSessionWorktreeApi.continueMerge(sessionId, {
+      const worktree = await chatSessionWorktreeApi.continueMerge(sessionId, {
         commit_message: commitMessage.trim() || null,
       });
-      onCompleted();
+      if (worktree.status === 'needs_conflict_resolution') {
+        // A later commit in the cherry-pick sequence can surface another
+        // conflict. Keep the resolver open and load that next conflict set.
+        setResolved(new Map());
+        await refreshList();
+      } else {
+        onCompleted();
+      }
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
       await refreshList().catch(() => undefined);
