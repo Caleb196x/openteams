@@ -890,8 +890,7 @@ impl PresetLoader {
                             .get(&localized_path)
                             .map(|raw| (localized_path, raw))
                     })
-                    .into_iter()
-                    .map(|(path, raw)| format!("{path}\n{}\n", normalize_newlines(&raw)))
+                    .map(|(path, raw)| format!("{path}\n{}\n", normalize_newlines(raw)))
                     .collect::<String>();
                 Ok(BuiltinTeamTemplateCatalogEntry {
                     template_id: parsed.id,

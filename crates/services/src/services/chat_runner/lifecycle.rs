@@ -432,23 +432,23 @@ impl ChatRunner {
             new_statuses.insert(agent_name.to_string(), serde_json::json!(status));
             meta["mention_statuses"] = serde_json::Value::Object(new_statuses);
         }
-        if let Some(session_agent) = session_agent {
-            if let Some(meta_object) = meta.as_object_mut() {
-                let targets = meta_object
-                    .entry("mention_targets")
-                    .or_insert_with(|| serde_json::json!({}));
-                if let Some(targets) = targets.as_object_mut() {
-                    targets.insert(
-                        session_agent.id.to_string(),
-                        serde_json::json!({
-                            "agent_id": session_agent.agent_id,
-                            "project_member_id": session_agent.project_member_id,
-                            "member_name": session_agent.member_name,
-                            "status": status,
-                            "error": null,
-                        }),
-                    );
-                }
+        if let Some(session_agent) = session_agent
+            && let Some(meta_object) = meta.as_object_mut()
+        {
+            let targets = meta_object
+                .entry("mention_targets")
+                .or_insert_with(|| serde_json::json!({}));
+            if let Some(targets) = targets.as_object_mut() {
+                targets.insert(
+                    session_agent.id.to_string(),
+                    serde_json::json!({
+                        "agent_id": session_agent.agent_id,
+                        "project_member_id": session_agent.project_member_id,
+                        "member_name": session_agent.member_name,
+                        "status": status,
+                        "error": null,
+                    }),
+                );
             }
         }
 
@@ -776,7 +776,7 @@ impl ChatRunner {
         );
         match resolve_lead_agent(session, &session_agents, &agents) {
             Ok((_lead_agent, lead_session_agent)) => {
-                return Ok(Some(Self::resolved_session_member(lead_session_agent)));
+                Ok(Some(Self::resolved_session_member(lead_session_agent)))
             }
             Err(_) => Ok(None),
         }

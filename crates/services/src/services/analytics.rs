@@ -195,7 +195,7 @@ impl AnalyticsService {
                 interval.tick().await;
                 service.enqueue_due().await;
                 ticks = ticks.wrapping_add(1);
-                if ticks % 10 == 0 {
+                if ticks.is_multiple_of(10) {
                     let now = chrono::Utc::now();
                     if let Err(error) = AnalyticsEventRecord::delete_expired(
                         &persistence.pool,

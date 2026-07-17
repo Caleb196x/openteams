@@ -1070,15 +1070,15 @@ impl SourceControlService {
                 }
             }
 
-            if entry.is_untracked || entry.unstaged != ' ' {
-                if session_path_set.contains(&entry.path) {
-                    changes.push(source_file_from_status(
-                        &context.workspace_path,
-                        &entry,
-                        GitArea::Changes,
-                        &shared_paths,
-                    ));
-                }
+            if (entry.is_untracked || entry.unstaged != ' ')
+                && session_path_set.contains(&entry.path)
+            {
+                changes.push(source_file_from_status(
+                    &context.workspace_path,
+                    &entry,
+                    GitArea::Changes,
+                    &shared_paths,
+                ));
             }
         }
 
@@ -2077,6 +2077,7 @@ fn bump_source_control_cache_epoch() {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod cache_tests {
     use super::*;
 
@@ -2605,7 +2606,7 @@ fn file_flags(path: &Path) -> (bool, bool) {
     let mut buffer = [0_u8; BINARY_SNIFF_BYTES];
     let is_binary = fs::File::open(path)
         .and_then(|mut file| file.read(&mut buffer))
-        .map(|bytes_read| buffer[..bytes_read].iter().any(|byte| *byte == 0))
+        .map(|bytes_read| buffer[..bytes_read].contains(&0))
         .unwrap_or(false);
     (is_too_large, is_binary)
 }

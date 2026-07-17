@@ -146,7 +146,7 @@ async fn list_session_workspace_rows(
 fn same_workspace_path(left: &str, right: &str) -> bool {
     !left.trim().is_empty()
         && !right.trim().is_empty()
-        && (left == right || PathBuf::from(left) == PathBuf::from(right))
+        && (left == right || Path::new(left) == Path::new(right))
 }
 
 fn synthetic_workspace_row(workspace_path: String) -> SessionWorkspaceRow {
@@ -345,4 +345,3 @@ pub async fn get_session_workspace_changes(
 
     Ok(ResponseJson(ApiResponse::success(response)))
 }
-

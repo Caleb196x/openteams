@@ -89,7 +89,7 @@ async fn start_workflow_runtime_run_record(
     db: &DBService,
     session: &ChatSession,
     session_agent: &ChatSessionAgent,
-    workspace_path: &PathBuf,
+    workspace_path: &std::path::Path,
     prompt: &str,
     stream_context: Option<&WorkflowRuntimeStreamContext>,
 ) -> Result<Option<WorkflowRuntimeRunRecord>, WorkflowRuntimeError> {
@@ -150,7 +150,7 @@ async fn finish_workflow_runtime_run_record(
     session: &ChatSession,
     agent: &ChatAgent,
     session_agent: &ChatSessionAgent,
-    workspace_path: &PathBuf,
+    workspace_path: &std::path::Path,
     record: Option<&WorkflowRuntimeRunRecord>,
     io_log: &WorkflowNodeIoLogContext,
     assistant_output: &str,
@@ -924,10 +924,10 @@ async fn run_workflow_agent_prompt_inner(
             Some(&message),
         )
         .await?;
-        return Err(error.into());
+        return Err(error);
     }
-    if let Some(context) = stream_context.as_ref() {
-        if let Err(error) = persist_missing_workflow_runtime_activity_transcripts(
+    if let Some(context) = stream_context.as_ref()
+        && let Err(error) = persist_missing_workflow_runtime_activity_transcripts(
             &context.pool,
             context.execution_id,
             context.workflow_agent_session_id,
@@ -935,25 +935,24 @@ async fn run_workflow_agent_prompt_inner(
             &history,
         )
         .await
-        {
-            let message = error.to_string();
-            let latest_assistant =
-                extract_latest_assistant_from_history(&history).unwrap_or_default();
-            finish_workflow_runtime_run_record(
-                db,
-                session,
-                agent,
-                session_agent,
-                &workspace_path,
-                runtime_run_record.as_ref(),
-                &io_log,
-                &latest_assistant,
-                None,
-                Some(&message),
-            )
-            .await?;
-            return Err(error.into());
-        }
+    {
+        let message = error.to_string();
+        let latest_assistant =
+            extract_latest_assistant_from_history(&history).unwrap_or_default();
+        finish_workflow_runtime_run_record(
+            db,
+            session,
+            agent,
+            session_agent,
+            &workspace_path,
+            runtime_run_record.as_ref(),
+            &io_log,
+            &latest_assistant,
+            None,
+            Some(&message),
+        )
+        .await?;
+        return Err(error);
     }
     let Some(latest_assistant) = extract_latest_assistant_from_history(&history) else {
         let message = workflow_executor_failure_message(

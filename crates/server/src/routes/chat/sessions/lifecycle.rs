@@ -46,7 +46,7 @@ pub async fn update_session(
     if let Some(Some(lead_session_agent_id)) = &payload.lead_session_agent_id {
         let session_agent =
             ChatSessionAgent::find_by_id(&deployment.db().pool, *lead_session_agent_id).await?;
-        if !session_agent.is_some_and(|session_agent| session_agent.session_id == session.id) {
+        if session_agent.is_none_or(|session_agent| session_agent.session_id != session.id) {
             return Err(ApiError::BadRequest(
                 "Session agent is not a member of this session".to_string(),
             ));

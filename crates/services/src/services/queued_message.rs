@@ -288,11 +288,9 @@ impl QueuedMessageService {
         id: Uuid,
         run_id: Uuid,
     ) -> Result<QueuedMessage, sqlx::Error> {
-        Ok(
-            ChatMessageQueue::start_or_create_running(pool, &Self::create_data(data), id, run_id)
-                .await
-                .map(Self::from_row)?,
-        )
+        ChatMessageQueue::start_or_create_running(pool, &Self::create_data(data), id, run_id)
+            .await
+            .map(Self::from_row)
     }
 
     pub async fn find_by_run_id(

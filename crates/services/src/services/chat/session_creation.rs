@@ -300,7 +300,7 @@ mod session_creation_tests {
             Some("/agent/workspace")
         );
         assert_eq!(session_agents[0].allowed_skill_ids.0, vec!["shell"]);
-        assert_eq!(session_agents[0].project_member_id.is_some(), true);
+        assert!(session_agents[0].project_member_id.is_some());
         assert_eq!(
             session_agents[0].execution_config.0.model_name.as_deref(),
             Some("gpt-5.2-codex")

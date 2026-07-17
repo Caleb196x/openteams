@@ -151,7 +151,7 @@ impl TeamTemplateCatalogService {
         config: &Config,
     ) -> Result<TeamTemplateCatalogSyncResult, TeamTemplateCatalogError> {
         let builtin_rows = self.builtin_rows()?;
-        let custom_rows = self.custom_rows_from_config(&config, builtin_rows.len() as i64);
+        let custom_rows = self.custom_rows_from_config(config, builtin_rows.len() as i64);
         let mut retained_template_ids = builtin_rows
             .iter()
             .map(|row| row.template_id.clone())
