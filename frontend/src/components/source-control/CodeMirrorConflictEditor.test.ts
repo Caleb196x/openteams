@@ -46,9 +46,27 @@ assert.deepEqual(
   {
     from: currentPane.regions[0]?.from,
     to: currentPane.regions[0]?.to,
+    resolutionState: currentPane.regions[0]?.resolutionState,
   },
-  { from: 7, to: 14 },
+  { from: 7, to: 14, resolutionState: 'unresolved' },
 );
+
+const acceptedCurrentPane = buildConflictPaneModel(
+  repeatedTextConflict,
+  'current',
+  { 'hunk-1': 'both' },
+  'empty',
+  { 'hunk-1': 'current' },
+);
+const suppressedIncomingPane = buildConflictPaneModel(
+  repeatedTextConflict,
+  'session',
+  { 'hunk-1': 'both' },
+  'empty',
+  { 'hunk-1': 'current' },
+);
+assert.equal(acceptedCurrentPane.regions[0]?.resolutionState, 'accepted');
+assert.equal(suppressedIncomingPane.regions[0]?.resolutionState, 'suppressed');
 
 assert.deepEqual(
   getConflictPaneActions('current', {

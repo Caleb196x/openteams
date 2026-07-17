@@ -5,6 +5,7 @@ import { Decoration, EditorView, WidgetType } from '@codemirror/view';
 import CodeMirror from '@uiw/react-codemirror';
 import { ArrowDown, ArrowUp } from 'lucide-react';
 
+import { useWorkspace } from '@/context/WorkspaceContext';
 import {
   useCommandHandler,
   useShortcutScope,
@@ -74,6 +75,7 @@ export const buildConflictPaneModel = (
   side: 'current' | 'session',
   choices: Record<string, ConflictHunkChoice>,
   emptyLabel: string,
+  receivers: Record<string, ConflictReceiver> = {},
 ): ConflictPaneModel => {
   let content = '';
   const regions: ConflictRegion[] = [];
@@ -96,6 +98,12 @@ export const buildConflictPaneModel = (
         side === 'current' ? spacerLines.current : spacerLines.incoming,
       emptyLabel,
       choice: choices[segment.hunk.id],
+      resolutionState: !choices[segment.hunk.id]
+        ? 'unresolved'
+        : receivers[segment.hunk.id] ===
+            (side === 'current' ? 'current' : 'incoming')
+          ? 'accepted'
+          : 'suppressed',
     });
     content += text;
   });
@@ -124,6 +132,9 @@ export const CodeMirrorConflictEditor: React.FC<
   const [choices, setChoices] = useState<Record<string, ConflictHunkChoice>>(
     {},
   );
+  const [receivers, setReceivers] = useState<Record<string, ConflictReceiver>>(
+    {},
+  );
   const selectedHunk = parsed.hunks[selectedHunkIndex] ?? null;
   const unresolvedCount = parsed.hunks.filter(
     (hunk) => !choices[hunk.id],
@@ -135,8 +146,9 @@ export const CodeMirrorConflictEditor: React.FC<
         'current',
         choices,
         tr('worktree.merge.emptyCurrent', 'No current-side content'),
+        receivers,
       ),
-    [choices, parsed, tr],
+    [choices, parsed, receivers, tr],
   );
   const incomingPane = useMemo(
     () =>
@@ -145,27 +157,35 @@ export const CodeMirrorConflictEditor: React.FC<
         'session',
         choices,
         tr('worktree.merge.emptySession', 'No incoming-side content'),
+        receivers,
       ),
-    [choices, parsed, tr],
+    [choices, parsed, receivers, tr],
   );
 
   useEffect(() => {
     setSelectedHunkIndex(0);
     setChoices({});
+    setReceivers({});
   }, [path]);
 
+  const selectedHunkId = selectedHunk?.id ?? null;
+  const selectedCurrentFrom = currentPane.regions[selectedHunkIndex]?.from;
+  const selectedIncomingFrom = incomingPane.regions[selectedHunkIndex]?.from;
+
   useEffect(() => {
-    if (!selectedHunk) return;
-    const currentRegion = currentPane.regions[selectedHunkIndex];
-    const incomingRegion = incomingPane.regions[selectedHunkIndex];
-    if (currentEditorRef.current && currentRegion) {
+    if (!selectedHunkId) return;
+    if (currentEditorRef.current && selectedCurrentFrom !== undefined) {
       currentEditorRef.current.dispatch({
-        effects: EditorView.scrollIntoView(currentRegion.from, { y: 'center' }),
+        effects: EditorView.scrollIntoView(selectedCurrentFrom, {
+          y: 'center',
+        }),
       });
     }
-    if (incomingEditorRef.current && incomingRegion) {
+    if (incomingEditorRef.current && selectedIncomingFrom !== undefined) {
       incomingEditorRef.current.dispatch({
-        effects: EditorView.scrollIntoView(incomingRegion.from, { y: 'center' }),
+        effects: EditorView.scrollIntoView(selectedIncomingFrom, {
+          y: 'center',
+        }),
       });
     }
     let secondFrame = 0;
@@ -174,7 +194,7 @@ export const CodeMirrorConflictEditor: React.FC<
         alignConflictBlocks(
           currentEditorRef.current,
           incomingEditorRef.current,
-          selectedHunk.id,
+          selectedHunkId,
         );
       });
     });
@@ -183,17 +203,39 @@ export const CodeMirrorConflictEditor: React.FC<
       cancelAnimationFrame(secondFrame);
     };
   }, [
-    currentPane.regions,
     editorMountVersion,
-    incomingPane.regions,
-    selectedHunk,
-    selectedHunkIndex,
+    selectedCurrentFrom,
+    selectedHunkId,
+    selectedIncomingFrom,
   ]);
 
-  const chooseHunk = (choice: ConflictHunkChoice) => {
+  const chooseHunk = (
+    choice: ConflictHunkChoice,
+    origin: ConflictReceiver = choice === 'session' ? 'incoming' : 'current',
+  ) => {
     if (!selectedHunk) return;
     const nextChoices = { ...choices, [selectedHunk.id]: choice };
     setChoices(nextChoices);
+    setReceivers((current) => ({
+      ...current,
+      [selectedHunk.id]: receiverForChoice(choice, origin),
+    }));
+    onChange(buildResult(parsed, nextChoices));
+  };
+
+  const choosePaneHunk = (
+    hunkId: string,
+    choice: ConflictHunkChoice,
+    origin: ConflictReceiver,
+  ) => {
+    const hunkIndex = parsed.hunks.findIndex((hunk) => hunk.id === hunkId);
+    if (hunkIndex >= 0) setSelectedHunkIndex(hunkIndex);
+    const nextChoices = { ...choices, [hunkId]: choice };
+    setChoices(nextChoices);
+    setReceivers((current) => ({
+      ...current,
+      [hunkId]: receiverForChoice(choice, origin),
+    }));
     onChange(buildResult(parsed, nextChoices));
   };
 
@@ -320,15 +362,9 @@ export const CodeMirrorConflictEditor: React.FC<
               both: tr('worktree.merge.acceptBoth', 'Accept both changes'),
               ignore: tr('worktree.merge.ignore', 'Ignore'),
             })}
-            onChooseConflict={(hunkId, choice) => {
-              const hunkIndex = parsed.hunks.findIndex(
-                (hunk) => hunk.id === hunkId,
-              );
-              if (hunkIndex >= 0) setSelectedHunkIndex(hunkIndex);
-              const nextChoices = { ...choices, [hunkId]: choice };
-              setChoices(nextChoices);
-              onChange(buildResult(parsed, nextChoices));
-            }}
+            onChooseConflict={(hunkId, choice) =>
+              choosePaneHunk(hunkId, choice, 'current')
+            }
             onEditorReady={(view) => {
               currentEditorRef.current = view;
               setEditorMountVersion((version) => version + 1);
@@ -351,15 +387,9 @@ export const CodeMirrorConflictEditor: React.FC<
               both: tr('worktree.merge.acceptBoth', 'Accept both changes'),
               ignore: tr('worktree.merge.ignore', 'Ignore'),
             })}
-            onChooseConflict={(hunkId, choice) => {
-              const hunkIndex = parsed.hunks.findIndex(
-                (hunk) => hunk.id === hunkId,
-              );
-              if (hunkIndex >= 0) setSelectedHunkIndex(hunkIndex);
-              const nextChoices = { ...choices, [hunkId]: choice };
-              setChoices(nextChoices);
-              onChange(buildResult(parsed, nextChoices));
-            }}
+            onChooseConflict={(hunkId, choice) =>
+              choosePaneHunk(hunkId, choice, 'incoming')
+            }
             onEditorReady={(view) => {
               incomingEditorRef.current = view;
               setEditorMountVersion((version) => version + 1);
@@ -419,7 +449,20 @@ interface ConflictRegion {
   spacerLines: number;
   emptyLabel: string;
   choice?: ConflictHunkChoice;
+  resolutionState: ConflictResolutionState;
 }
+
+type ConflictReceiver = 'current' | 'incoming';
+type ConflictResolutionState = 'unresolved' | 'accepted' | 'suppressed';
+
+const receiverForChoice = (
+  choice: ConflictHunkChoice,
+  origin: ConflictReceiver,
+): ConflictReceiver => {
+  if (choice === 'current') return 'current';
+  if (choice === 'session') return 'incoming';
+  return origin;
+};
 
 interface ConflictPaneModel {
   content: string;
@@ -467,6 +510,7 @@ class ConflictActionsWidget extends WidgetType {
     return (
       other.region.id === this.region.id &&
       other.region.choice === this.region.choice &&
+      other.region.resolutionState === this.region.resolutionState &&
       other.selected === this.selected &&
       other.actions.length === this.actions.length &&
       other.actions.every(
@@ -479,7 +523,7 @@ class ConflictActionsWidget extends WidgetType {
 
   toDOM() {
     const container = document.createElement('div');
-    container.className = `cm-conflict-codelens${this.selected ? ' is-selected' : ''}`;
+    container.className = `cm-conflict-codelens is-${this.region.resolutionState}${this.selected ? ' is-selected' : ''}`;
     container.dataset.conflictId = this.region.id;
 
     this.actions.forEach((action, index) => {
@@ -516,6 +560,7 @@ class ConflictSpacerWidget extends WidgetType {
     readonly lineCount: number,
     readonly label: string,
     readonly selected: boolean,
+    readonly resolutionState: ConflictResolutionState,
   ) {
     super();
   }
@@ -525,13 +570,14 @@ class ConflictSpacerWidget extends WidgetType {
       other.regionId === this.regionId &&
       other.lineCount === this.lineCount &&
       other.label === this.label &&
-      other.selected === this.selected
+      other.selected === this.selected &&
+      other.resolutionState === this.resolutionState
     );
   }
 
   toDOM() {
     const placeholder = document.createElement('div');
-    placeholder.className = `cm-conflict-spacer${this.selected ? ' is-selected' : ''}`;
+    placeholder.className = `cm-conflict-spacer is-${this.resolutionState}${this.selected ? ' is-selected' : ''}`;
     placeholder.setAttribute('role', 'note');
     placeholder.setAttribute('aria-label', this.label);
     placeholder.style.height = `calc(${Math.max(1, this.lineCount) * 1.55}em + 3px)`;
@@ -569,8 +615,7 @@ const conflictEditorTheme = EditorView.theme({
   },
   '.cm-cursor': { borderLeftColor: 'var(--ink)' },
   '.cm-conflict-block': {
-    backgroundColor:
-      'color-mix(in srgb, rgb(170, 216, 174) 22%, transparent)',
+    backgroundColor: 'var(--merge-conflict-highlight)',
     borderLeft: '3px solid rgb(190, 126, 28)',
     borderRight: '3px solid rgb(190, 126, 28)',
     paddingLeft: '8px',
@@ -582,8 +627,20 @@ const conflictEditorTheme = EditorView.theme({
     borderBottom: '3px solid rgb(190, 126, 28)',
   },
   '.cm-conflict-block-selected': {
-    backgroundColor:
-      'color-mix(in srgb, rgb(150, 210, 160) 30%, transparent)',
+    backgroundColor: 'var(--merge-conflict-highlight-selected)',
+  },
+  '.cm-conflict-block-resolved': {
+    borderColor: 'transparent',
+    backgroundColor: 'transparent',
+  },
+  '.cm-conflict-block-accepted': {
+    backgroundColor: 'var(--merge-conflict-accepted-bg)',
+    boxShadow:
+      'inset 1px 0 var(--merge-conflict-accepted-border), inset -1px 0 var(--merge-conflict-accepted-border)',
+  },
+  '.cm-conflict-block-end.cm-conflict-block-accepted': {
+    boxShadow:
+      'inset 1px 0 var(--merge-conflict-accepted-border), inset -1px 0 var(--merge-conflict-accepted-border), inset 0 -1px var(--merge-conflict-accepted-border)',
   },
   '.cm-conflict-codelens': {
     boxSizing: 'border-box',
@@ -598,6 +655,13 @@ const conflictEditorTheme = EditorView.theme({
     color: 'var(--ink-tertiary)',
     fontFamily: 'ui-sans-serif, system-ui, sans-serif',
     fontSize: '10px',
+  },
+  '.cm-conflict-codelens.is-accepted, .cm-conflict-codelens.is-suppressed': {
+    borderColor: 'transparent',
+  },
+  '.cm-conflict-codelens.is-accepted': {
+    boxShadow:
+      'inset 1px 0 var(--merge-conflict-accepted-border), inset -1px 0 var(--merge-conflict-accepted-border), inset 0 1px var(--merge-conflict-accepted-border)',
   },
   '.cm-conflict-codelens-action': {
     border: '0',
@@ -620,14 +684,21 @@ const conflictEditorTheme = EditorView.theme({
     borderLeft: '3px solid rgb(190, 126, 28)',
     borderRight: '3px solid rgb(190, 126, 28)',
     borderBottom: '3px solid rgb(190, 126, 28)',
-    background:
-      'repeating-linear-gradient(-45deg, color-mix(in srgb, var(--ink) 18%, transparent) 0 1px, transparent 1px 5px)',
+    background: 'var(--merge-conflict-spacer)',
     fontSize: '13px',
     lineHeight: '1.55',
   },
   '.cm-conflict-spacer.is-selected': {
-    background:
-      'repeating-linear-gradient(-45deg, color-mix(in srgb, var(--ink) 25%, transparent) 0 1px, transparent 1px 5px)',
+    background: 'var(--merge-conflict-spacer-selected)',
+  },
+  '.cm-conflict-spacer.is-accepted, .cm-conflict-spacer.is-suppressed': {
+    borderColor: 'transparent',
+    background: 'transparent',
+  },
+  '.cm-conflict-spacer.is-accepted': {
+    background: 'var(--merge-conflict-accepted-bg)',
+    boxShadow:
+      'inset 1px 0 var(--merge-conflict-accepted-border), inset -1px 0 var(--merge-conflict-accepted-border), inset 0 -1px var(--merge-conflict-accepted-border)',
   },
 });
 
@@ -689,6 +760,7 @@ const conflictDecorations = (
             Math.max(1, region.spacerLines),
             region.emptyLabel,
             selected,
+            region.resolutionState,
           ),
           block: true,
           side: -2,
@@ -731,6 +803,12 @@ const conflictDecorations = (
           ? 'cm-conflict-block-end'
           : '',
         selected ? 'cm-conflict-block-selected' : '',
+        region.resolutionState !== 'unresolved'
+          ? 'cm-conflict-block-resolved'
+          : '',
+        region.resolutionState === 'accepted'
+          ? 'cm-conflict-block-accepted'
+          : '',
       ]
         .filter(Boolean)
         .join(' ');
@@ -744,6 +822,7 @@ const conflictDecorations = (
             region.spacerLines,
             region.emptyLabel,
             selected,
+            region.resolutionState,
           ),
           block: true,
           side: -4,
@@ -814,6 +893,7 @@ const SyntaxCodeEditor: React.FC<{
   onEditorReady,
   onChange,
 }) => {
+  const { theme } = useWorkspace();
   const languageExtensions = useCodeLanguage(path);
   const focusExtensions = useMemo(
     () =>
@@ -841,8 +921,12 @@ const SyntaxCodeEditor: React.FC<{
       height="100%"
       readOnly={!editable}
       editable={editable}
-      theme={conflictEditorTheme}
-      extensions={[...languageExtensions, ...focusExtensions]}
+      theme={theme}
+      extensions={[
+        conflictEditorTheme,
+        ...languageExtensions,
+        ...focusExtensions,
+      ]}
       basicSetup={{
         lineNumbers: true,
         foldGutter: false,

@@ -655,6 +655,7 @@ export const WorktreeMergeConflictsView: React.FC<
           <WorktreeConflictActionButton
             onClick={() => void handleAbort()}
             disabled={Boolean(pendingAction)}
+            borderless
             icon={<X className="h-3 w-3" aria-hidden />}
           >
             {tr('worktree.merge.abort', 'Abort merge')}
@@ -671,6 +672,7 @@ export const WorktreeMergeConflictsView: React.FC<
           />
           <WorktreeConflictActionButton
             onClick={() => void handleMarkResolved()}
+            borderless
             disabled={
               !selectedPath ||
               !currentResolution ||
