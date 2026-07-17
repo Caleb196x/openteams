@@ -452,7 +452,14 @@ pub async fn detect_branch_head(repo_path: &Path, branch: &str) -> Option<String
 /// the `merge-conflicts/{path}` route.
 fn validate_conflict_path(path: &str) -> Result<(), SessionWorktreeError> {
     let p = Path::new(path);
+    let bytes = path.as_bytes();
+    let has_windows_drive_prefix = bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'/' | b'\\');
     if p.is_absolute()
+        || has_windows_drive_prefix
+        || path.starts_with("\\\\")
         || p.components().any(|c| {
             matches!(
                 c,
@@ -781,6 +788,8 @@ impl SessionWorktreeService {
         )
         .await?;
         SessionWorktree::record_merged_at(&self.pool, updated.id).await?;
+        self.sync_session_agent_workspace_paths(session_id, &updated.base_workspace_path)
+            .await?;
         Ok(updated)
     }
 

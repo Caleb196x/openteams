@@ -535,21 +535,14 @@ fn is_safe_for_auto_cleanup_blocks_unmerged_runtime_states() {
 fn is_active_for_workspace_excludes_cleanup_and_terminal_states() {
     use SessionWorktreeStatus::*;
     // These statuses use the worktree path as the active workspace.
-    for active in [
-        Creating,
-        Active,
-        Dirty,
-        Merging,
-        NeedsConflictResolution,
-        Merged,
-    ] {
+    for active in [Creating, Active, Dirty, Merging, NeedsConflictResolution] {
         assert!(
             active.is_active_for_workspace(),
             "{active:?} should be active for workspace selection"
         );
     }
     // Cleanup and terminal/audit statuses switch back to base_workspace_path.
-    for inactive in [CleanupPending, Archived, CleanupFailed] {
+    for inactive in [Merged, CleanupPending, Archived, CleanupFailed] {
         assert!(
             !inactive.is_active_for_workspace(),
             "{inactive:?} should NOT be active for workspace selection"
@@ -578,7 +571,7 @@ async fn find_active_by_session_excludes_terminal_rows() {
     let active_lookup = SessionWorktree::find_active_by_session(&pool, session_id)
         .await
         .unwrap()
-        .expect("merged worktree remains active workspace");
+        .expect("merged row remains available for lifecycle operations");
     assert_eq!(active_lookup.id, merged.id);
 
     let archived_session_id = Uuid::new_v4();
@@ -966,6 +959,42 @@ async fn service_merge_records_intent_only_in_skeleton() {
 }
 
 #[tokio::test]
+async fn service_mark_merged_restores_session_agent_workspace_paths() {
+    let pool = setup_pool().await;
+    let service = SessionWorktreeService::new(pool.clone());
+    let session_id = Uuid::new_v4();
+    let merging = seed_row(&pool, session_id, SessionWorktreeStatus::Merging).await;
+    let session_agent_id = Uuid::new_v4();
+
+    sqlx::query(
+        r#"
+        INSERT INTO chat_session_agents (
+            id, session_id, agent_id, state, workspace_path
+        )
+        VALUES (?1, ?2, ?3, 'idle', ?4)
+        "#,
+    )
+    .bind(session_agent_id)
+    .bind(session_id)
+    .bind(Uuid::new_v4())
+    .bind(&merging.worktree_path)
+    .execute(&pool)
+    .await
+    .expect("insert session agent");
+
+    let merged = service.mark_merged(session_id).await.expect("mark merged");
+    assert_eq!(merged.status, SessionWorktreeStatus::Merged);
+
+    let workspace_path: String =
+        sqlx::query_scalar("SELECT workspace_path FROM chat_session_agents WHERE id = ?1")
+            .bind(session_agent_id)
+            .fetch_one(&pool)
+            .await
+            .expect("read restored workspace path");
+    assert_eq!(workspace_path, merging.base_workspace_path);
+}
+
+#[tokio::test]
 async fn ensure_for_session_uses_current_workspace_branch_over_origin_head() {
     let pool = setup_pool().await;
     let service = SessionWorktreeService::new(pool.clone());
@@ -1060,22 +1089,8 @@ async fn cherry_pick_merge_preserves_session_commit_without_merge_commit() {
         .await
         .expect("refresh merged worktree")
         .expect("worktree row");
-    assert_eq!(refreshed.status, SessionWorktreeStatus::Dirty);
-    assert!(refreshed.has_unmerged_commits);
-
-    service
-        .perform_merge(
-            session_id,
-            SessionWorktreeMergeOperation::CherryPick,
-            None,
-            None,
-        )
-        .await
-        .expect("merge worktree again");
-    assert_eq!(
-        git(&base, &["log", "-1", "--format=%s"]),
-        "second session commit"
-    );
+    assert_eq!(refreshed.status, SessionWorktreeStatus::Merged);
+    assert!(!refreshed.has_unmerged_commits);
 
     service
         .discard_worktree(session_id)

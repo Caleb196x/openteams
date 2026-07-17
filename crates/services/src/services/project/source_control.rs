@@ -1438,8 +1438,7 @@ async fn resolve_workspace_context(
             })?;
         if let Some(wt) = latest {
             // Source-control follows the same workspace routing as runners:
-            // merged worktrees stay selected so follow-up commits can be made
-            // and merged again from the same session workspace.
+            // merged worktrees switch back to the recorded base workspace.
             if wt.status.is_active_for_workspace() {
                 let workspace_path = PathBuf::from(&wt.worktree_path);
                 ensure_workspace_accessible(&workspace_path)?;

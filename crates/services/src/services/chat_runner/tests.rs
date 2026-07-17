@@ -1403,7 +1403,7 @@ fn select_workspace_path_falls_back_to_session_default_before_generated_path() {
 }
 
 #[tokio::test]
-async fn resolve_workspace_path_for_merged_isolated_session_returns_worktree_workspace() {
+async fn resolve_workspace_path_for_merged_isolated_session_returns_base_workspace() {
     let db = setup_chat_runner_db().await;
     let runner = ChatRunner::new(db.clone());
     let session_id = Uuid::new_v4();
@@ -1453,7 +1453,7 @@ async fn resolve_workspace_path_for_merged_isolated_session_returns_worktree_wor
         .await
         .expect("resolve workspace");
 
-    assert_eq!(resolved, worktree_workspace);
+    assert_eq!(resolved, base_workspace);
 
     let active_rows: i64 = sqlx::query_scalar(
         r#"

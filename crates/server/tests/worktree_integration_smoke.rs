@@ -267,7 +267,7 @@ async fn session_worktree_routes_cover_main_merge_conflict_and_cleanup_flows() -
     let (status, cleanup_response) = api(
         &app,
         Method::POST,
-        format!("/api/chat/sessions/{clean_id}/worktree/cleanup"),
+        format!("/api/chat/sessions/{clean_id}/worktree/discard"),
         Some(json!({})),
     )
     .await?;
