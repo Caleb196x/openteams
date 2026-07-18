@@ -1422,6 +1422,26 @@ jobs:
                 mv "$dmg" "${dmg%.dmg}-unsigned.dmg"
               fi
             done
+
+            case "${{ runner.arch }}" in
+              ARM64) updater_arch="aarch64" ;;
+              X64) updater_arch="x86_64" ;;
+              *)
+                echo "::error::Unsupported macOS runner architecture: ${{ runner.arch }}"
+                exit 1
+                ;;
+            esac
+
+            unsigned_updaters=(src-tauri/target/release/bundle/macos/*.app.tar.gz)
+            if [ "${#unsigned_updaters[@]}" -ne 1 ]; then
+              echo "::error::Expected exactly one unsigned macOS updater bundle, found ${#unsigned_updaters[@]}"
+              exit 1
+            fi
+            updater_bundle="${unsigned_updaters[0]}"
+            normalized_updater="$(dirname "$updater_bundle")/openteams-${{ needs.bump-version.outputs.new_tag }}-${updater_arch}.app.tar.gz"
+            mv "$updater_bundle" "$normalized_updater"
+            mv "$updater_bundle.sig" "$normalized_updater.sig"
+
             artifacts=(
               src-tauri/target/release/bundle/dmg/*.dmg
               src-tauri/target/release/bundle/macos/*.app.tar.gz
