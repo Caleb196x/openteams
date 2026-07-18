@@ -45,46 +45,39 @@
   </video>
 </div>
 
-## What is openteams
+## Wait — what is openteams?
 
-**openteams** is an open-source multi-agent collaboration workspace. It brings multiple AI coding agents — such as Claude Code, Codex, Gemini CLI, and others — into one shared session where they can communicate, share context, and work together as a team. You can collaborate with agents through lightweight free-chat mode, or orchestrate complex tasks through structured workflows with visible plans, step-level control, and traceable review. Optional isolated workspaces give each session its own Git worktree, allowing agents to execute independent tasks without interfering with one another. Beyond agent execution, openteams helps you manage the full journey from idea to delivery: project issues make progress and priorities visible, sync work from GitHub, and link each issue to the sessions where it is carried out. As work is completed, build statistics connect delivery results with token usage and costs across sessions, models, and tasks, giving you a clear view of both output and efficiency. Everything runs locally in your own workspace.
+You already use Claude Code, Codex, Gemini CLI, or another coding agent, and each can handle planning, coding, reviewing, and testing on its own. The challenge begins when a task spans multiple agents: **you become the message bus** — copying context between terminals, reconciling overlapping changes, checking what actually finished, and deciding what should happen next.
+
+openteams is the coordination layer around those agents: **one shared place to work, a visible workflow for complex tasks, and project controls that stay in the developer's hands.**
+
+| openteams **is** | openteams is **not** |
+| --- | --- |
+| a local-first workspace for the coding agents you already use | another model or a replacement for Claude Code, Codex, or Gemini CLI |
+| a shared session where agents can talk, hand off work, and keep the same context | a pile of separate chat windows that you have to coordinate yourself |
+| a workflow you can inspect, review, interrupt, and retry one step at a time | one large prompt that disappears into a black box until it finishes |
+| developer-owned issues, isolated worktrees, and build statistics | an agent-controlled roadmap or an opaque token counter |
+
+**Concretely, installing it gives you:** Direct Chat for lightweight collaboration, Plan mode for planned execution, ready-to-use team workflow templates, developer-controlled Issues that link work to sessions, optional Git worktrees that isolate concurrent tasks, and build statistics that put delivered work next to token usage and cost.
+
+```text
+your coding agents            openteams
+
+Claude Code ─┐               ┌─ shared context
+Codex ───────┼──────────────►├─ visible workflow ── review ── merge
+Gemini CLI ──┘               ├─ isolated worktrees
+                             └─ issues + build statistics
+```
 
 ## Why openteams
 
-AI agents are getting stronger at planning, coding, reviewing, and testing. But more agent output does not automatically become shipped work.
+AI coding agents can produce plenty of code. The harder part is keeping their work organized: sharing context, seeing what is happening, stopping parallel tasks from overwriting each other, deciding what comes next, and knowing what the work cost.
 
-**Managing multiple agents is exhausting.** You switch between terminals, re-explain context to every new agent, copy outputs from one prompt into the next, and reconcile conflicting diffs — your attention is drained by the chaos of juggling multiple agents.
+openteams keeps agents and their conversations in one session. For larger tasks, Workflow mode shows the steps and dependencies before and during execution, so you can review or retry one step without starting everything again. If several sessions are working at once, each can use its own Git worktree, keeping unfinished changes separate until you choose to merge or discard them.
 
-**Agent execution is invisible and uncontrollable.** You command claude code to "build the feature." It runs for 15 minutes. You have no idea which subtasks it attempted, which passed, and which it silently gave up on. Most coding agents today treat a complex task as one monolithic run — there is no visible plan before execution, no way to approve or reject individual steps mid-flight, no way to retry just the step that failed. When something goes wrong, you start over.
+The project direction stays with the developer. Issues hold the work you have chosen and link it to the sessions where agents carry it out; agents do the work, but they do not rewrite the plan. Build statistics then show what was delivered alongside the tokens and cost used to deliver it.
 
-**Independent tasks can collide in a shared workspace.** When different sessions modify the same files at the same time, unfinished changes leak across tasks, agents interfere with one another, and it becomes difficult to review or merge each result on its own.
-
-**Agent-driven development can make you lose sight of the project.** Once an agent finishes one feature, the next step may exist only in your head or across scattered prompts. When every piece of work starts as another chat, it becomes difficult to see the full roadmap, set priorities, and know whether the project is moving toward a coherent release.
-
-**Token usage is easy to count, but hard to connect to value.** Tokens are consumed across agents, sessions, and models, yet a usage total alone cannot tell you how many bugs were fixed or how many features were delivered. Without connecting cost to output, you cannot tell whether agent-driven development is actually becoming more efficient.
-
-**openteams** brings clarity and control to the entire development process. All agents share a single context within the same session—no more juggling between agents or repeating yourself. Complex tasks become **visible, controllable workflows** — you refine the plan before it runs, watch each step execute, and intervene at any node: approve, reject, retry, or redirect.
-
-Isolated workspaces give each session a separate Git worktree, so agents can execute independent tasks without sharing unfinished changes. You can review each session's result in isolation, then merge or discard it on your terms.
-
-Project issues put the roadmap back in the developer's hands. Record the work that needs to be done, prioritize it, and create or link a lightweight execution session directly from each issue. Issues remain developer-controlled rather than being autonomously changed by agents, so you always own the source of truth for what comes next and how the project is progressing.
-
-Build statistics close the feedback loop between effort and results. They show how many bugs were fixed, how many features were delivered, and how many tokens were consumed over the week, with breakdowns across sessions and models. You can see not only what you spent, but what that spend produced.
-
-> The real productivity leverage is not more agents. It is staying in control of what they work on, how they execute, and whether the results justify the cost.
-
-## Common Use Cases
-
-You type: "Add GitHub issue sync to the workspace."
-
-1. **Lead agent clarifies requirements:** It asks about sync direction (one-way or two-way?), conflict handling (skip, overwrite, or log?), and which issue fields to map. You confirm: one-way pull, log conflicts, map title/body/labels/status.
-2. **Lead agent designs the approach and builds the execution plan:** The plan shows 5 steps — `Backend: OAuth + GitHub API` → `Backend: Sync Engine` → `Frontend: Sync Status UI` → `Integration Tests` → `Final Review`. Each step has a clear scope, assigned agent, and acceptance criteria.
-3. **You review and approve the plan:** You can adjust steps, reorder dependencies, or reassign agents before any code runs.
-4. **Agents execute — you observe progress in real time:** `Backend: OAuth` runs first. Once complete, `Sync Engine` and `Frontend: Sync Status UI` start in parallel. Every step shows its status, diff, and logs on the workflow graph.
-5. **You review and approve each completed step:** `Backend: OAuth` finishes. You inspect the diff, see the token refresh logic, and approve. The next steps proceed.
-6. **A step fails — you retry just that step:** `Integration Tests` fails because the sync engine returns raw timestamps instead of ISO format. You review the error log, and retry only `Integration Tests` step. The rest of the workflow stays intact.
-7. **Final review and acceptance:** All steps pass. You review the full diff, artifacts, and test results, then accept.
-8. **Follow-up via Free Chat:** Two days later, a user reports the sync status badge flickers. You open Free Chat: `@Frontend Agent the sync status badge flickers when polling — debounce the state update`. Fixed in one turn, no workflow needed.
+openteams is not trying to give you more agents. It is trying to make sure you always know what is being built, where the changes are, what comes next, and what it cost.
 
 ## Quick Start
 ### Install
