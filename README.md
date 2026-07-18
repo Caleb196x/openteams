@@ -1,9 +1,9 @@
 <div align="center">
-  <img src="frontend/public/logos/logo_blue.svg" alt="openteams" width="100">
+  <img src="readmes/images/openteams-logo.png" alt="openteams" width="100">
 </div>
 
 <div align="center">
-  <img src="frontend/public/openteams-brand-logo.png" alt="openteams" width="200" style="margin-top: 10px; margin-bottom: 10px;">
+  <img src="readmes/images/characters_black.png" alt="openteams" width="200" style="margin-top: 10px; margin-bottom: 10px;">
 
   <h5>Plan, Build, and Ship — with a team of AI agents instead of one</h5>
 
@@ -40,33 +40,36 @@
 ---
 
 <div align="center">
-  <video src="https://github.com/user-attachments/assets/f918d5c7-68ff-4a8b-b2b4-f4f0ab31c17d" controls width="100%">
-    <a href="https://github.com/user-attachments/assets/f918d5c7-68ff-4a8b-b2b4-f4f0ab31c17d">Watch the hero video</a>
+  <video src="./readmes/images/Hero2.webm" controls width="100%">
+    <a href="./readmes/images/Hero2.webm">Watch the hero video</a>
   </video>
 </div>
 
-## Wait — what is openteams?
+## Wait, what is openteams?
 
-You already use Claude Code, Codex, Gemini CLI, or another coding agent, and each can handle planning, coding, reviewing, and testing on its own. The challenge begins when a task spans multiple agents: **you become the message bus** — copying context between terminals, reconciling overlapping changes, checking what actually finished, and deciding what should happen next.
+You already run Claude Code, Codex, Gemini CLI, or another coding agent. Each one works well on its own. Then you open a second terminal, and a third. You repeat the same context, carry results from one window to another, and keep track of who is changing what. A few days later, the code is scattered across sessions, the backlog lives somewhere else, and there is no simple answer to what the agents built for the tokens you spent.
 
-openteams is the coordination layer around those agents: **one shared place to work, a visible workflow for complex tasks, and project controls that stay in the developer's hands.**
+openteams is what is missing around those agents: **one shared room where they can talk and hand off work, a plan you can see and control, and a lightweight local record that connects project work to agent output without giving agents control of the roadmap.**
 
 | openteams **is** | openteams is **not** |
 | --- | --- |
 | a local-first workspace for the coding agents you already use | another model or a replacement for Claude Code, Codex, or Gemini CLI |
 | a shared session where agents can talk, hand off work, and keep the same context | a pile of separate chat windows that you have to coordinate yourself |
-| a workflow you can inspect, review, interrupt, and retry one step at a time | one large prompt that disappears into a black box until it finishes |
-| developer-owned issues, isolated worktrees, and build statistics | an agent-controlled roadmap or an opaque token counter |
+| a developer-owned issue list linked to agent sessions | a full project-management suite or a roadmap that agents rewrite themselves |
+| a workflow you can inspect, review, interrupt, and retry step by step | one large prompt that disappears into a black box until it finishes |
+| isolated worktrees you can review, merge, or discard separately | multiple agents changing the same workspace and interfering with each other |
+| build statistics that show what agents delivered, used, and cost | a token counter with no record of what was built |
 
-**Concretely, installing it gives you:** Direct Chat for lightweight collaboration, Plan mode for planned execution, ready-to-use team workflow templates, developer-controlled Issues that link work to sessions, optional Git worktrees that isolate concurrent tasks, and build statistics that put delivered work next to token usage and cost.
+**Concretely, installing it gives you:** chat sessions for lightweight collaboration and planned execution, ready-to-use team workflow templates, developer-controlled Issues that link work to sessions, independent workspaces for isolating parallel tasks, and complete build statistics.
 
 ```text
-your coding agents            openteams
+without openteams                  with openteams
 
-Claude Code ─┐               ┌─ shared context
-Codex ───────┼──────────────►├─ visible workflow ── review ── merge
-Gemini CLI ──┘               ├─ isolated worktrees
-                             └─ issues + build statistics
+Claude ─ terminal A ─┐             Claude ─┐
+Codex ── terminal B ─┼─ you relay  Codex ──┼─ shared session
+Gemini ─ terminal C ─┘             Gemini ─┘
+
+plan: somewhere else               issues ── sessions ── build results
 ```
 
 ## Why openteams
@@ -81,22 +84,22 @@ openteams is not trying to give you more agents. It is trying to make sure you a
 
 ## Quick Start
 ### Install
-#### npx
-
-```bash
-npx openteams-web
-```
-
-#### Desktop App
+#### Desktop App (Recommended)
 
 Download the latest release for your platform from GitHub Releases.
 
 [![Download for Windows](https://img.shields.io/badge/Download-Windows-0078D6?style=for-the-badge&logo=windows)](https://github.com/openteams-lab/openteams/releases/latest)
 [![Download for Linux](https://img.shields.io/badge/Download-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/openteams-lab/openteams/releases/latest)
 
+#### npx
+
+```bash
+npx openteams-web
+```
+
 ### Configure Providers
 
-**openteams** includes a built-in openteams CLI agent. Configure your model providers in the app under `menu->setting->provider config->add provider`.
+**openteams** includes a built-in openteams CLI agent. Configure your model providers in the app under `setting->provider config->add provider`.
 
 ⚙️ [Provider config](https://doc.openteams-lab.com/advanced-usage/custom-provider)
 
@@ -111,42 +114,6 @@ You can also connect supported coding agents such as:
 | OpenCode | `npm i -g opencode-ai` |
 
 📚 [More agent installation guides](https://doc.openteams-lab.com/getting-started)
-
-
-### Get Started in 30 Seconds
-**Prerequisites: Configure an API service provider or install any supported Code Agent.**
-
-*step 1.* Create a group chat session. Add one or more members and assign each a model and a role.
-
-*step 2.* In Free Chat mode, `@` any member to send a message or assign a task.
-
-*step 3.* Switch to Workflow mode. Discuss requirements with the lead agent, refine the solution, and generate an execution plan.
-
-*step 4.* Start the execution and review the result of each task node as it completes.
-
-## Work mode
-
-**openteams** supports two collaboration modes, because not every task demands the same level of structure. Think of it like **Claude Code's Plan and Build modes** — but for multi-agent teams: choose free collaboration when you want agents to explore and discuss openly, and structured workflows when you need reliable, predictable execution.
-
-### Free Chat
-
-In free chat mode, you `@` any agent to send it a task, and agents can freely pass messages to each other. Collaboration is governed by a team protocol you define — who does what, how they hand off, and what standards to follow.
-
-**free chat mode** is best for small fixes, quick reviews, and exploratory discussions where a full workflow would be overkill.
-
-![](./readmes/images/free_chat.png)
-
-### Workflow
-
-Workflow mode is designed for complex tasks that need to be broken down into subtasks with observable progress and controllable execution at every step.
-
-A lead agent drives the planning phase — clarifying requirements, designing the approach, defining the execution plan, and assigning tasks to the right agents. The result is a visible workflow with steps, dependencies, reviews, retries, and acceptance points.
-
-![](./readmes/images/openteams-workflow.png)
-
-Instead of asking agents to run in a loose chain, **openteams** turns the work into a stateful execution graph.
-
-**Note: Workflow mode uses more tokens. Please make sure your token balance is sufficient.**
 
 ## Major updates
 - **2026.05.20 (v0.4.4)**
@@ -258,7 +225,7 @@ bun run ./scripts/build-openteams-cli.ts
 
 ## Contributing
 
-Contributions are welcome. Here is how to get started:
+Contributions are welcome, including reusable AI team workflows that others can learn from and adapt. Here is how to get started:
 
 1. **Find an issue** — Check [Good First Issues](https://github.com/openteams-lab/openteams/labels/good%20first%20issue) for beginner-friendly tasks, or browse open issues.
 2. **Discuss before building** — Before opening a large pull request, please open an issue or discussion so the direction can be aligned.
