@@ -39,8 +39,8 @@
 
 ---
 <div align="center">
-  <video src="./images/Hero2.webm" controls width="100%">
-    <a href="./images/Hero2.webm">Ver el video del producto</a>
+  <video src="https://github.com/user-attachments/assets/fdf0ef91-5b02-4302-bdec-087c1995a590" controls width="100%">
+    <a href="https://github.com/user-attachments/assets/fdf0ef91-5b02-4302-bdec-087c1995a590">Ver el video del producto</a>
   </video>
 </div>
 
