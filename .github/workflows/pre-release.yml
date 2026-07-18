@@ -1227,7 +1227,12 @@ jobs:
         env:
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
         run: |
-          $msiFiles = Get-ChildItem -Path "src-tauri/target/release/bundle/msi" -Filter *.msi -File
+          $bundleDir = "src-tauri/target/release/bundle/msi"
+          Get-ChildItem -Path $bundleDir -File | Where-Object {
+            $_.Name -like '*.msi.zip' -or $_.Name -like '*.msi.zip.sig'
+          } | Remove-Item -Force
+
+          $msiFiles = Get-ChildItem -Path $bundleDir -Filter *.msi -File
           if ($msiFiles.Count -eq 0) {
             throw "No MSI files found to package for updater."
           }
