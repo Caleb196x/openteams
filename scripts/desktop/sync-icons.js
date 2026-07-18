@@ -326,6 +326,18 @@ function generatedIconFilesForPlatform() {
   return ['icon.png'];
 }
 
+function iconSquareSourceForPlatform(sourcePng, generatedDir) {
+  // librsvg may optimize an opaque PNG to RGB on Linux, while Tauri requires
+  // configured PNG icons to be RGBA. Tauri's generated icon.png is the same
+  // rendered artwork normalized to RGBA. Keep the macOS and Windows icon
+  // sources unchanged so their platform-specific generation is unaffected.
+  if (process.platform === 'linux') {
+    return path.join(generatedDir, 'icon.png');
+  }
+
+  return sourcePng;
+}
+
 function syncIcons() {
   if (!fs.existsSync(sourceSvg)) {
     throw new Error(`Missing desktop icon source: ${sourceSvg}`);
@@ -360,7 +372,10 @@ function syncIcons() {
       );
     }
     if (process.platform === 'linux' || process.platform === 'win32') {
-      fs.copyFileSync(sourcePng, iconSquarePng);
+      fs.copyFileSync(
+        iconSquareSourceForPlatform(sourcePng, generatedDir),
+        iconSquarePng
+      );
     }
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
