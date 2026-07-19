@@ -10,13 +10,8 @@ import { useWorkspace } from "@/context/WorkspaceContext";
 import { useAppScale } from "@/context/AppScaleContext";
 import {
   Plus,
-  ArrowUp,
-  Mic,
-  AtSign,
   Check,
-  ChevronDown,
   GitBranch,
-  Lock,
   PanelRightClose,
   PanelRightOpen,
   ChevronsLeft,
@@ -25,7 +20,6 @@ import {
   Quote,
   Square,
   X,
-  Paperclip,
   Image as ImageIcon,
   FileText,
   RefreshCw,
@@ -40,8 +34,6 @@ import {
   useCommandHandler,
   useShortcutScope,
 } from "@/shortcuts/ShortcutProvider";
-import { CommandTooltip } from "@/shortcuts/CommandTooltip";
-import { preventTabFocusChange } from "@/shortcuts/textInputFocus";
 import {
   chatMessagesApi,
   chatRunsApi,
@@ -52,12 +44,6 @@ import {
   flattenRunFileChanges,
   type AgentFileRow,
 } from "@/lib/agentFileRows";
-import {
-  CHAT_INPUT_PREFILL_EVENT,
-  clearChatInputPrefill,
-  readChatInputPrefill,
-  type ChatInputPrefillDetail,
-} from "@/lib/chatInputPrefill";
 import {
   ISSUE_NAVIGATION_EVENT,
   type IssueNavigationTarget,
@@ -83,8 +69,16 @@ import {
 import { openFileInVSCode } from "@/vscode/bridge";
 import { normalizeArtifactPath } from "@/lib/parseStructuredReply";
 import { PriorityMenuIcon } from "@/pages/IssueDetailPage";
+import {
+  ChatComposer,
+  type ChatComposerSubmit,
+  type ChatComposerSubmitResult,
+} from "@/components/chat/ChatComposer";
+import {
+  formatFileSize,
+  isImageChatAttachment,
+} from "@/components/chat/chatAttachmentUtils";
 import type {
-  ChatAttachment,
   Member,
   Message,
   ProjectWorkItem,
@@ -129,120 +123,6 @@ const hasLineStat = (value?: number) => typeof value === "number" && value > 0;
 const isOpenteamsPath = (path: string): boolean => {
   const normalized = path.trim().replace(/\\/g, "/").replace(/^\.?\//, "");
   return normalized.toLowerCase().split("/")[0] === ".openteams";
-};
-
-const allowedTextAttachmentExtensions = [
-  ".txt",
-  ".csv",
-  ".md",
-  ".json",
-  ".xml",
-  ".yaml",
-  ".yml",
-  ".html",
-  ".htm",
-  ".css",
-  ".js",
-  ".ts",
-  ".jsx",
-  ".tsx",
-  ".py",
-  ".java",
-  ".c",
-  ".cpp",
-  ".h",
-  ".hpp",
-  ".rb",
-  ".php",
-  ".go",
-  ".rs",
-  ".sql",
-  ".sh",
-  ".bash",
-  ".svg",
-];
-
-const allowedImageAttachmentExtensions = [
-  ".png",
-  ".jpg",
-  ".jpeg",
-  ".gif",
-  ".webp",
-  ".bmp",
-];
-
-const allowedAttachmentExtensions = [
-  ...allowedTextAttachmentExtensions,
-  ...allowedImageAttachmentExtensions,
-];
-
-const CHAT_ATTACHMENT_ACCEPT = [
-  "text/*",
-  "image/*",
-  ...allowedAttachmentExtensions,
-].join(",");
-
-const isImageAttachment = (file: File) =>
-  file.type.startsWith("image/") ||
-  allowedImageAttachmentExtensions.some((ext) =>
-    file.name.toLowerCase().endsWith(ext),
-  );
-
-const isTextAttachment = (file: File) =>
-  file.type.startsWith("text/") ||
-  allowedTextAttachmentExtensions.some((ext) =>
-    file.name.toLowerCase().endsWith(ext),
-  );
-
-const isAllowedAttachment = (file: File) =>
-  isImageAttachment(file) || isTextAttachment(file);
-
-const isImageChatAttachment = (attachment: ChatAttachment) =>
-  attachment.kind === "image" ||
-  attachment.mime_type?.startsWith("image/") ||
-  allowedImageAttachmentExtensions.some((ext) =>
-    attachment.name.toLowerCase().endsWith(ext),
-  );
-
-const fallbackClipboardFileName = (file: File, index: number) => {
-  if (file.name.trim()) return file.name;
-
-  const extension = file.type.startsWith("image/")
-    ? (file.type.split("/")[1] ?? "png")
-    : file.type === "text/plain"
-      ? "txt"
-      : "dat";
-
-  return `pasted-attachment-${Date.now()}-${index + 1}.${extension}`;
-};
-
-const normalizeClipboardFile = (file: File, index: number) =>
-  file.name.trim()
-    ? file
-    : new File([file], fallbackClipboardFileName(file, index), {
-        type: file.type,
-        lastModified: file.lastModified || Date.now(),
-      });
-
-const getClipboardFiles = (clipboardData: DataTransfer) => {
-  const itemFiles = Array.from(clipboardData.items)
-    .filter((item) => item.kind === "file")
-    .map((item) => item.getAsFile())
-    .filter((file): file is File => Boolean(file));
-
-  const files =
-    itemFiles.length > 0 ? itemFiles : Array.from(clipboardData.files);
-
-  return files.map(normalizeClipboardFile);
-};
-
-const attachmentIdentity = (file: File) =>
-  `${file.name}:${file.size}:${file.lastModified}`;
-
-const formatFileSize = (size: number) => {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 };
 
 interface TruncatedFileNameProps {
@@ -295,30 +175,6 @@ const RELATED_FILES_MIN_CENTER_WIDTH = 540;
 const RELATED_FILES_SEPARATOR_WIDTH = 6;
 const SIDEBAR_MEMBER_AVATAR_WIDTH = 28;
 const SIDEBAR_MEMBER_GAP = 6;
-
-const CHAT_INPUT_SHELL_MIN_HEIGHT = 95;
-const CHAT_INPUT_MIN_HEIGHT = 30;
-const CHAT_INPUT_SHELL_MAX_HEIGHT = Math.round(
-  CHAT_INPUT_SHELL_MIN_HEIGHT * 2.5,
-);
-const CHAT_INPUT_STATIC_CHROME_HEIGHT =
-  CHAT_INPUT_SHELL_MIN_HEIGHT - CHAT_INPUT_MIN_HEIGHT;
-const CHAT_INPUT_MAX_HEIGHT =
-  CHAT_INPUT_SHELL_MAX_HEIGHT - CHAT_INPUT_STATIC_CHROME_HEIGHT;
-
-const resizeChatTextarea = (textarea: HTMLTextAreaElement | null) => {
-  if (!textarea) return;
-  textarea.style.height = `${CHAT_INPUT_MIN_HEIGHT}px`;
-  const target = Math.min(
-    Math.max(textarea.scrollHeight, CHAT_INPUT_MIN_HEIGHT),
-    CHAT_INPUT_MAX_HEIGHT,
-  );
-  textarea.style.height = `${target}px`;
-};
-
-// Module-level cache that preserves unsent composer text per session,
-// surviving FreeChatWorkspace unmount/remount when switching tabs.
-const sessionDraftCache = new Map<string, string>();
 
 const getVisibleSidebarMemberCount = (
   memberCount: number,
@@ -812,22 +668,6 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
     selectedProjectId,
   } = useWorkspace();
 
-  const [inputText, setInputText] = useState("");
-  const setInputTextDraft = useCallback(
-    (nextText: string) => {
-      setInputText(nextText);
-      if (!activeSessionId) return;
-      if (nextText.length > 0) {
-        sessionDraftCache.set(activeSessionId, nextText);
-      } else {
-        sessionDraftCache.delete(activeSessionId);
-      }
-    },
-    [activeSessionId],
-  );
-  const [isMemberPickerOpen, setIsMemberPickerOpen] = useState(false);
-  const [activeMemberPickerIndex, setActiveMemberPickerIndex] = useState(0);
-  const memberPickerRef = useRef<HTMLDivElement | null>(null);
   const [isRelatedFilesOpen, setIsRelatedFilesOpen] = useState(true);
   const [wasRelatedFilesAutoCollapsed, setWasRelatedFilesAutoCollapsed] =
     useState(false);
@@ -843,8 +683,7 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
   >({});
   const [quotedMessage, setQuotedMessage] =
     useState<QuotedMessageReference | null>(null);
-  const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
-  const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
+  const [composerFocusRequestKey, setComposerFocusRequestKey] = useState(0);
   const [attachmentImagePreview, setAttachmentImagePreview] =
     useState<AttachmentImagePreview | null>(null);
   const [relatedFilesWidth, setRelatedFilesWidth] = useState(
@@ -873,8 +712,6 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
   const workspaceRootRef = useRef<HTMLDivElement>(null);
   const chatMessagesScrollRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const memberRailRef = useRef<HTMLDivElement>(null);
   const copiedResetTimerRef = useRef<number | null>(null);
   const linkedWorkItemsRequestIdRef = useRef(0);
@@ -1145,24 +982,9 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
     setIsRelatedFilesOpen(false);
   };
 
-  const handleTogglePlanMode = useCallback(() => {
-    setChatInputMode(chatInputMode === "workflow" ? "free" : "workflow");
-  }, [chatInputMode, setChatInputMode]);
-
   useShortcutScope('session-workspace', {
     active: Boolean(activeSessionId),
     rootRef: workspaceRootRef,
-  });
-  useShortcutScope('chat-composer', {
-    active: Boolean(activeSessionId),
-    rootRef: inputRef,
-  });
-  useCommandHandler('session.plan-mode.toggle', {
-    scope: 'focused-component',
-    enabled: Boolean(activeSessionId),
-    allowInEditable: true,
-    ownsEventTarget: (target) => target === inputRef.current,
-    execute: handleTogglePlanMode,
   });
   useCommandHandler('sidebar.right.toggle', {
     scope: "page",
@@ -1348,37 +1170,6 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
     }
   }, [selectedSidebarMemberId, sidebarMembers]);
 
-  useEffect(() => {
-    if (chatInputMode === "workflow") {
-      setIsMemberPickerOpen(false);
-    }
-  }, [chatInputMode]);
-
-  useEffect(() => {
-    if (!isMemberPickerOpen) return;
-
-    const handlePointerDownOutside = (event: PointerEvent) => {
-      const target = event.target;
-      if (
-        target instanceof Node &&
-        !memberPickerRef.current?.contains(target)
-      ) {
-        setIsMemberPickerOpen(false);
-      }
-    };
-
-    document.addEventListener("pointerdown", handlePointerDownOutside);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDownOutside);
-    };
-  }, [isMemberPickerOpen]);
-
-  useEffect(() => {
-    if (activeMemberPickerIndex >= members.length) {
-      setActiveMemberPickerIndex(Math.max(0, members.length - 1));
-    }
-  }, [activeMemberPickerIndex, members.length]);
-
   const isChatScrolledToBottom = useCallback(() => {
     const element = chatMessagesScrollRef.current;
     if (!element) return true;
@@ -1441,21 +1232,8 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
   useEffect(() => {
     setCopiedMessageId(null);
     setQuotedMessage(null);
-    setAttachedFiles([]);
     setSelectedSidebarMemberId(null);
     setStoppingSessionAgentIds({});
-  }, [activeSessionId]);
-
-  // Preserve unsent composer text per session across tab switches and
-  // component unmount/remount. The change handlers keep the cache hot, so this
-  // effect only restores the cached draft for the newly active session.
-  useEffect(() => {
-    const cachedDraft = activeSessionId
-      ? sessionDraftCache.get(activeSessionId)
-      : undefined;
-    setInputText(cachedDraft ?? "");
-    setIsMemberPickerOpen(false);
-    setActiveMemberPickerIndex(0);
   }, [activeSessionId]);
 
   const reloadRelatedFiles = useCallback(() => {
@@ -1545,72 +1323,6 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
   useEffect(() => {
     reloadLinkedWorkItems();
   }, [reloadLinkedWorkItems]);
-
-  const applyChatInputPrefill = useCallback(
-    (detail: ChatInputPrefillDetail) => {
-      if (!detail || detail.sessionId !== activeSessionId) return false;
-
-      if (detail.text.length > 0) {
-        sessionDraftCache.set(detail.sessionId, detail.text);
-      } else {
-        sessionDraftCache.delete(detail.sessionId);
-      }
-      setInputText(detail.text);
-      setQuotedMessage(null);
-      setAttachedFiles([]);
-      setIsMemberPickerOpen(false);
-      setActiveMemberPickerIndex(0);
-
-      const focusComposer = () => {
-        if (detail.mode) {
-          setChatInputMode(detail.mode);
-        }
-        inputRef.current?.focus();
-        inputRef.current?.setSelectionRange(
-          detail.text.length,
-          detail.text.length,
-        );
-        resizeChatTextarea(inputRef.current);
-        clearChatInputPrefill(detail.sessionId);
-      };
-
-      if (typeof window.requestAnimationFrame === "function") {
-        window.requestAnimationFrame(focusComposer);
-      } else {
-        focusComposer();
-      }
-
-      return true;
-    },
-    [activeSessionId, setChatInputMode],
-  );
-
-  useEffect(() => {
-    const pending = readChatInputPrefill(activeSessionId);
-    if (pending) {
-      applyChatInputPrefill(pending);
-    }
-  }, [activeSessionId, applyChatInputPrefill]);
-
-  useEffect(() => {
-    const handleChatInputPrefill = (event: Event) => {
-      applyChatInputPrefill(
-        (event as CustomEvent<ChatInputPrefillDetail>).detail,
-      );
-    };
-
-    window.addEventListener(CHAT_INPUT_PREFILL_EVENT, handleChatInputPrefill);
-    return () => {
-      window.removeEventListener(
-        CHAT_INPUT_PREFILL_EVENT,
-        handleChatInputPrefill,
-      );
-    };
-  }, [applyChatInputPrefill]);
-
-  useEffect(() => {
-    resizeChatTextarea(inputRef.current);
-  }, [inputText]);
 
   useEffect(() => {
     if (!activeSessionId || !selectedProjectId) return;
@@ -1885,7 +1597,7 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
       content: text,
       summary: summarizeMessage(text),
     });
-    inputRef.current?.focus();
+    setComposerFocusRequestKey((key) => key + 1);
   };
 
   const handleStopAgentMessage = async (
@@ -1919,228 +1631,77 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
     }
   };
 
-  const addAttachedFiles = (files: FileList | File[]) => {
-    if (sessionsAsync.source !== "api") {
-      showToast(t("attachment.requiresApi"));
-      return;
-    }
+  const handleComposerSubmit = useCallback(
+    async (
+      payload: ChatComposerSubmit,
+    ): Promise<ChatComposerSubmitResult> => {
+      if (payload.sessionId !== activeSessionId) return "rejected";
+      chatAutoFollowRef.current = true;
 
-    const list = Array.from(files);
-    if (list.length === 0) return;
-
-    const allowedFiles = list.filter((file) => isAllowedAttachment(file));
-    const rejectedCount = list.length - allowedFiles.length;
-
-    if (rejectedCount > 0) {
-      showToast(t("attachment.unsupported", { count: rejectedCount }));
-    }
-
-    if (allowedFiles.length === 0) return;
-
-    setAttachedFiles((current) => {
-      const existing = new Set(current.map(attachmentIdentity));
-      const next = [...current];
-      for (const file of allowedFiles) {
-        const identity = attachmentIdentity(file);
-        if (!existing.has(identity)) {
-          existing.add(identity);
-          next.push(file);
-        }
+      if (payload.files.length === 0) {
+        if (payload.quotedMessageId !== quotedMessage?.id) return "rejected";
+        sendMessage(payload.text, {
+          chatInputMode: payload.inputMode,
+          ...(quotedMessage ? { quotedMessage } : {}),
+        });
+        return "accepted";
       }
-      return next;
-    });
-  };
 
-  const handleAttachmentInputChange = (
-    event: React.ChangeEvent<HTMLInputElement>,
-  ) => {
-    if (event.target.files) {
-      addAttachedFiles(event.target.files);
-    }
-    event.target.value = "";
-  };
-
-  const handlePaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = getClipboardFiles(event.clipboardData);
-    if (files.length === 0) return;
-
-    event.preventDefault();
-    addAttachedFiles(files);
-  };
-
-  const removeAttachedFile = (fileIndex: number) => {
-    setAttachedFiles((current) =>
-      current.filter((_, index) => index !== fileIndex),
-    );
-  };
-
-  const openAttachmentPicker = () => {
-    if (sessionsAsync.source !== "api") {
-      showToast(t("attachment.requiresApi"));
-      return;
-    }
-    fileInputRef.current?.click();
-  };
-
-  const handleSend = async () => {
-    const messageText = inputText;
-    const trimmedInput = messageText.trim();
-    if (!trimmedInput && attachedFiles.length === 0) return;
-    if (isUploadingAttachments) return;
-
-    chatAutoFollowRef.current = true;
-
-    if (attachedFiles.length > 0) {
       if (sessionsAsync.source !== "api") {
         showToast(t("attachment.requiresApi"));
-        return;
+        return "rejected";
       }
 
-      setIsUploadingAttachments(true);
       try {
-        if (chatInputMode === "workflow") {
+        if (payload.inputMode === "workflow") {
           await ensureWorkflowRouteToMainAgent();
         }
-        const explicitAttachmentMentions = routeMentionsForText(messageText);
-        const mainAgentRouteMention = mainAgentName
+        const explicitMentions = routeMentionsForText(payload.text);
+        const mainRoute = mainAgentName
           ? mainAgentName.trim().replace(/^@/, "")
           : null;
-        const attachmentRouteMentions =
-          explicitAttachmentMentions.length > 0
-            ? explicitAttachmentMentions
-            : chatInputMode !== "workflow" && mainAgentRouteMention
-              ? [mainAgentRouteMention]
-              : undefined;
-        await chatMessagesApi.uploadAttachment(activeSessionId, attachedFiles, {
-          chatInputMode,
-          content: trimmedInput ? messageText : undefined,
-          appLanguage: locale,
-          referenceMessageId: quotedMessage?.id,
-          mentions: attachmentRouteMentions,
-        });
-        setInputTextDraft("");
-        setQuotedMessage(null);
-        setAttachedFiles([]);
+        await chatMessagesApi.uploadAttachment(
+          activeSessionId,
+          payload.files,
+          {
+            chatInputMode: payload.inputMode,
+            content: payload.text.trim() ? payload.text : undefined,
+            appLanguage: locale,
+            referenceMessageId: payload.quotedMessageId,
+            mentions:
+              explicitMentions.length > 0
+                ? explicitMentions
+                : payload.inputMode !== "workflow" && mainRoute
+                  ? [mainRoute]
+                  : undefined,
+          },
+        );
         await refreshMessages();
+        return "accepted";
       } catch {
         showToast(t("attachment.uploadFailed"));
-      } finally {
-        setIsUploadingAttachments(false);
+        return "rejected";
       }
-      return;
-    }
+    },
+    [
+      activeSessionId,
+      ensureWorkflowRouteToMainAgent,
+      locale,
+      mainAgentName,
+      quotedMessage,
+      refreshMessages,
+      sendMessage,
+      sessionsAsync.source,
+      showToast,
+      t,
+    ],
+  );
 
-    sendMessage(messageText, {
-      chatInputMode,
-      ...(quotedMessage ? { quotedMessage } : {}),
-    });
-    setInputTextDraft("");
-    setQuotedMessage(null);
-  };
-
-  const handleInputChange = (
-    event: React.ChangeEvent<HTMLTextAreaElement>,
-  ) => {
-    const nextValue = event.target.value;
-    const cursor = event.target.selectionStart ?? nextValue.length;
-    setInputTextDraft(nextValue);
-    resizeChatTextarea(event.target);
-
-    if (cursor > 0 && nextValue[cursor - 1] === "@") {
-      setIsMemberPickerOpen(true);
-      setActiveMemberPickerIndex(0);
-    }
-  };
-
-  const insertMemberMention = (member: Member) => {
-    const handle = member.name.startsWith("@") ? member.name : `@${member.name}`;
-    const input = inputRef.current;
-    const currentValue = input?.value ?? inputText;
-    const cursorStart = input?.selectionStart ?? currentValue.length;
-    const cursorEnd = input?.selectionEnd ?? cursorStart;
-    const beforeCursor = currentValue.slice(0, cursorStart);
-    const tokenMatch = beforeCursor.match(/@[\p{L}\p{N}_-]*$/u);
-    const replaceStart = tokenMatch
-      ? cursorStart - tokenMatch[0].length
-      : cursorStart;
-    const prefix = currentValue.slice(0, replaceStart);
-    const suffix = currentValue.slice(cursorEnd);
-    const leadingSpace =
-      replaceStart === 0 || /\s$/.test(prefix) ? "" : " ";
-    const trailingSpace =
-      suffix.length === 0 || /^\s/.test(suffix) ? " " : " ";
-    const inserted = `${leadingSpace}${handle}${trailingSpace}`;
-    const nextValue = `${prefix}${inserted}${suffix}`;
-    const nextCursor = prefix.length + inserted.length;
-
-    setInputTextDraft(nextValue);
-    setIsMemberPickerOpen(false);
-    setActiveMemberPickerIndex(0);
-
-    const restoreCursor = () => {
-      inputRef.current?.focus();
-      inputRef.current?.setSelectionRange(nextCursor, nextCursor);
-    };
-    if (typeof window.requestAnimationFrame === "function") {
-      window.requestAnimationFrame(restoreCursor);
-    } else {
-      restoreCursor();
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // Let the shortcut provider consume Shift+Tab for plan mode while keeping
-    // plain Tab from moving focus out of the composer.
-    if (e.key === "Tab" && e.shiftKey) return;
-    if (preventTabFocusChange(e)) return;
-
-    if (isMemberPickerOpen) {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setActiveMemberPickerIndex((current) =>
-          members.length === 0 ? 0 : (current + 1) % members.length,
-        );
-        return;
-      }
-
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setActiveMemberPickerIndex((current) =>
-          members.length === 0
-            ? 0
-            : (current - 1 + members.length) % members.length,
-        );
-        return;
-      }
-
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        const member = members[activeMemberPickerIndex] ?? members[0];
-        if (member) {
-          insertMemberMention(member);
-        } else {
-          setIsMemberPickerOpen(false);
-        }
-        return;
-      }
-
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setIsMemberPickerOpen(false);
-        return;
-      }
-    }
-
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      void handleSend();
-    }
-  };
-
-  // Quick summon clicks
-  const handleQuickAddClick = (member: Member) => {
-    insertMemberMention(member);
-  };
+  const handleCancelQuote = useCallback(() => setQuotedMessage(null), []);
+  const handleRetryComposerMembers = useCallback(
+    () => void refreshMembers(),
+    [refreshMembers],
+  );
 
   const handleRelatedFileClick = (file: RelatedFileChange) => {
     if (hasRelatedFileDiff(file) && onOpenDiffTab) {
@@ -2272,15 +1833,6 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
   };
-
-  const isPlanMode = chatInputMode === "workflow";
-  const planModeMainAgentName = mainAgentHandle;
-  const freeModePlaceholder = t("discussPlaceholder", {
-    agent: mainAgentHandle,
-  });
-  const canSend =
-    (Boolean(inputText.trim()) || attachedFiles.length > 0) &&
-    !isUploadingAttachments;
 
   const formatMessageTime = (time: string) => {
     if (time === "just now") return t("justNow");
@@ -2828,276 +2380,23 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
           </ScrollArea>
           </div>
 
-          {/* Chat discussion input styled in GPT-4 style with space */}
-          <div className="shrink-0 pt-4 pb-0">
-            {quotedMessage && (
-              <div className="mb-2 flex items-start gap-2 rounded-md border border-[var(--hairline)] bg-[var(--surface-1)] px-3 py-2 text-[11px] text-[var(--ink-muted)]">
-                <Quote className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--ink-tertiary)]" />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate font-semibold text-[var(--ink)]">
-                    {t("message.quotePrefix", {
-                      sender: quotedMessage.sender,
-                    })}
-                  </div>
-                  <div className="truncate font-mono text-[10px] text-[var(--ink-tertiary)]">
-                    {quotedMessage.summary}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setQuotedMessage(null)}
-                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[var(--ink-tertiary)] transition hover:bg-[var(--surface-3)] hover:text-[var(--ink)]"
-                  title={t("message.dismissQuote")}
-                  aria-label={t("message.dismissQuote")}
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            )}
-            {attachedFiles.length > 0 && (
-              <div className="mb-2 flex flex-wrap gap-2">
-                {attachedFiles.map((file, index) => {
-                  const AttachmentIcon = isImageAttachment(file)
-                    ? ImageIcon
-                    : FileText;
-                  return (
-                    <div
-                      key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
-                      className="flex max-w-full items-center gap-2 rounded-md border border-[var(--hairline)] bg-[var(--surface-1)] px-3 py-2 text-[11px] text-[var(--ink-muted)]"
-                    >
-                      <AttachmentIcon className="h-3.5 w-3.5 shrink-0 text-[var(--ink-tertiary)]" />
-                      <span
-                        className="max-w-[180px] truncate font-medium text-[var(--ink)]"
-                        title={file.name}
-                      >
-                        {file.name}
-                      </span>
-                      <span className="shrink-0 font-mono text-[10px] text-[var(--ink-tertiary)]">
-                        {formatFileSize(file.size)}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => removeAttachedFile(index)}
-                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[var(--ink-tertiary)] transition hover:bg-[var(--surface-3)] hover:text-[var(--ink)]"
-                        title={t("attachment.remove")}
-                        aria-label={t("attachment.remove")}
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-            <div
-              onClick={() => inputRef.current?.focus()}
-              className={`relative rounded-md border border-[var(--hairline-strong)] bg-[var(--surface-1)] focus-within:border-[var(--primary)] p-3.5 transition-all flex flex-col gap-3 min-h-[95px] ${
-                isPlanMode ? "plan-mode-input-active" : ""
-              }`}
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                className="hidden"
-                accept={CHAT_ATTACHMENT_ACCEPT}
-                onChange={handleAttachmentInputChange}
-              />
-              {/* Text Area */}
-              <textarea
-                ref={inputRef}
-                tabIndex={-1}
-                rows={1}
-                className="w-full bg-transparent resize-none border-none text-[16px] leading-6 text-[var(--ink)] outline-none placeholder:text-[var(--ink-tertiary)] select-text overflow-y-auto md:text-[13px] md:leading-normal"
-                style={{
-                  minHeight: CHAT_INPUT_MIN_HEIGHT,
-                  maxHeight: CHAT_INPUT_MAX_HEIGHT,
-                }}
-                value={inputText}
-                onChange={handleInputChange}
-                onKeyDown={handleKeyDown}
-                onPaste={handlePaste}
-                onClick={(e) => e.stopPropagation()}
-                placeholder={
-                  isPlanMode
-                    ? t("planModePlaceholder", {
-                        agent: planModeMainAgentName,
-                      })
-                    : freeModePlaceholder
-                }
-              />
-
-              {/* Bottom control row inside input slot */}
-              <div className="flex flex-wrap items-center justify-between pt-1 shrink-0 gap-2 select-none">
-                {/* Switch to workflow/Turn into workflow on the left */}
-                <div className="flex items-center gap-1.5">
-                  {/* Plus symbol */}
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      openAttachmentPicker();
-                    }}
-                    disabled={isUploadingAttachments}
-                    className="p-1 rounded-full hover:bg-[var(--surface-3)] text-[var(--ink-subtle)] hover:text-[var(--ink)] transition-colors cursor-pointer"
-                    title={t("uploadFile")}
-                    aria-label={t("uploadFile")}
-                  >
-                    {attachedFiles.length > 0 ? (
-                      <Paperclip className="h-4 w-4" />
-                    ) : (
-                      <Plus className="h-4 w-4" />
-                    )}
-                  </button>
-
-                  <CommandTooltip commandId="session.plan-mode.toggle">
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        handleTogglePlanMode();
-                      }}
-                      className={`plan-mode-toggle flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-medium transition cursor-pointer ${
-                        isPlanMode
-                          ? "plan-mode-toggle-active border-[var(--primary)] bg-[var(--primary-tint)] text-[var(--primary)]"
-                          : "border-[var(--hairline)] bg-[var(--surface-2)] text-[var(--ink-muted)] hover:bg-[var(--surface-3)]"
-                      }`}
-                      aria-pressed={isPlanMode}
-                      aria-label={
-                        isPlanMode
-                          ? t("switchToChatMode")
-                          : t("switchToPlanMode")
-                      }
-                    >
-                      <GitBranch className="h-3 w-3" />
-                      <span>{t("planMode")}</span>
-                    </button>
-                  </CommandTooltip>
-                </div>
-
-                {/* Right controls: session members, voice icon, and send action */}
-                <div className="flex items-center gap-2">
-                  {isPlanMode ? (
-                    <div
-                      className="flex max-w-[180px] items-center gap-1.5 rounded-md border border-[var(--hairline)] bg-[var(--surface-2)] px-2 py-1 font-mono text-[11px] font-medium text-[var(--ink-muted)]"
-                      title={t("fixedMainAgentMention", {
-                        agent: planModeMainAgentName,
-                      })}
-                      aria-label={t("fixedMainAgentMention", {
-                        agent: planModeMainAgentName,
-                      })}
-                    >
-                      <span className="truncate">{planModeMainAgentName}</span>
-                      <Lock className="h-3 w-3 shrink-0 opacity-70" />
-                    </div>
-                  ) : (
-                    <div ref={memberPickerRef} className="relative">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setIsMemberPickerOpen((prev) => !prev);
-                      }}
-                      className="flex items-center gap-1.5 bg-[var(--surface-2)] border border-[var(--hairline)] px-2 py-1 rounded-md text-[11px] text-[var(--ink-muted)] font-mono hover:bg-[var(--surface-3)] cursor-pointer"
-                      title={t("inThisSession")}
-                    >
-                      <AtSign className="h-3.5 w-3.5 text-[var(--ink-tertiary)]" />
-                      <ChevronDown
-                        aria-hidden="true"
-                        className="h-3 w-3 text-[var(--ink-tertiary)]"
-                      />
-                    </button>
-
-                    {isMemberPickerOpen && (
-                      <div className="absolute bottom-full right-0 mb-2 w-56 rounded-lg border border-[var(--hairline-strong)] bg-[var(--surface-3)] p-1 z-20">
-                        <div className="px-2 py-1.5 text-[9px] font-semibold uppercase tracking-wider text-[var(--ink-tertiary)]">
-                          {t("inThisSession")}
-                        </div>
-                        <ResourceStateNotice
-                          resource={membersAsync}
-                          labels={{
-                            loading: t("resource.members.loading"),
-                            empty: t("resource.members.empty"),
-                            error: t("resource.members.error"),
-                            fallback: t("resource.members.fallback"),
-                          }}
-                          onRetry={() => void refreshMembers()}
-                          compact
-                          className="mb-1"
-                        />
-                        {members.length === 0 ? (
-                          <div className="px-2 py-2 text-[10px] text-[var(--ink-tertiary)]">
-                            {t("noSessionMembers")}
-                          </div>
-                        ) : (
-                          members.map((member, index) => (
-                            <button
-                              key={member.id}
-                              type="button"
-                              aria-selected={index === activeMemberPickerIndex}
-                              onMouseEnter={() =>
-                                setActiveMemberPickerIndex(index)
-                              }
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleQuickAddClick(member);
-                              }}
-                              className={`w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-left cursor-pointer ${
-                                index === activeMemberPickerIndex
-                                  ? "bg-[color-mix(in_srgb,var(--primary)_24%,var(--surface-3))] ring-1 ring-inset ring-[color-mix(in_srgb,var(--primary)_48%,transparent)]"
-                                  : "hover:bg-[color-mix(in_srgb,var(--primary)_12%,var(--surface-3))]"
-                              }`}
-                            >
-                              <span className="h-5 w-5 rounded-full bg-[var(--mono-bg)] border border-[var(--mono-border)] flex items-center justify-center text-[8px] font-mono font-semibold text-[var(--ink-muted)]">
-                                {member.avatar}
-                              </span>
-                              <span className="min-w-0 flex-1">
-                                <span className="block truncate text-[11px] font-semibold text-[var(--ink)]">
-                                  {member.name}
-                                </span>
-                                <span className="block truncate text-[9px] font-mono text-[var(--ink-tertiary)]">
-                                  {member.roleDetail}
-                                </span>
-                              </span>
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={() => showToast(t("toast.voiceReady"))}
-                    className="p-1 rounded-full hover:bg-[var(--surface-2)] text-[var(--ink-subtle)] hover:text-[var(--ink)] transition-colors cursor-pointer"
-                    title={t("voiceInput")}
-                  >
-                    <Mic className="h-4 w-4" />
-                  </button>
-
-                  {/* Send action on the right */}
-                  <button
-                    type="button"
-                    onClick={() => void handleSend()}
-                    disabled={!canSend}
-                    className={`p-1.5 rounded-full transition-all flex items-center justify-center shrink-0 ${
-                      canSend
-                        ? "bg-[var(--primary)] text-white hover:opacity-95 cursor-pointer hover:scale-105"
-                        : "bg-[var(--surface-3)] text-[var(--ink-tertiary)] cursor-not-allowed"
-                    }`}
-                    title={
-                      isUploadingAttachments
-                        ? t("attachment.uploading")
-                        : undefined
-                    }
-                  >
-                    <ArrowUp className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+          <ChatComposer
+            key={activeSessionId}
+            sessionId={activeSessionId}
+            members={members}
+            membersAsync={membersAsync}
+            quotedMessage={quotedMessage}
+            inputMode={chatInputMode}
+            mainAgentName={mainAgentHandle}
+            apiAvailable={sessionsAsync.source === "api"}
+            focusRequestKey={composerFocusRequestKey}
+            t={t}
+            onRetryMembers={handleRetryComposerMembers}
+            onInputModeChange={setChatInputMode}
+            onCancelQuote={handleCancelQuote}
+            onShowToast={showToast}
+            onSubmit={handleComposerSubmit}
+          />
         </main>
 
         {isRelatedFilesOpen && (
