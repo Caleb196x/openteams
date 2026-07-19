@@ -23,6 +23,14 @@ const source = readFileSync(
   new URL("./FreeChatWorkspace.tsx", import.meta.url),
   "utf8",
 );
+const composerSource = readFileSync(
+  new URL("./chat/ChatComposer.tsx", import.meta.url),
+  "utf8",
+);
+const attachmentUtilsSource = readFileSync(
+  new URL("./chat/chatAttachmentUtils.ts", import.meta.url),
+  "utf8",
+);
 const runStatusSource = readFileSync(
   new URL("./AgentRunStatusPill.tsx", import.meta.url),
   "utf8",
@@ -77,11 +85,11 @@ const toolChevronCss =
   activityPanelCssSource.match(/\.wf-log-task-chevron \{([\s\S]*?)\}/)?.[1] ?? "";
 const errorChevronCss =
   activityPanelCssSource.match(/\.wf-log-error-chevron \{([\s\S]*?)\}/)?.[1] ?? "";
-const composerQuoteIndex = source.indexOf("{quotedMessage && (");
-const composerAttachmentIndex = source.indexOf(
+const composerQuoteIndex = composerSource.indexOf("{quotedMessage && (");
+const composerAttachmentIndex = composerSource.indexOf(
   'className="mb-2 flex flex-wrap gap-2"',
 );
-const composerInputIndex = source.indexOf(
+const composerInputIndex = composerSource.indexOf(
   'className={`relative rounded-md border border-[var(--hairline-strong)]',
 );
 const memberRailIndex = source.indexOf("ref={memberRailRef}");
@@ -142,33 +150,33 @@ check(
 );
 check(
   "consumes pending chat input prefill events for newly opened sessions",
-  source.includes("CHAT_INPUT_PREFILL_EVENT") &&
-    source.includes("readChatInputPrefill(activeSessionId)") &&
-    source.includes("clearChatInputPrefill(detail.sessionId)") &&
-    source.includes("sessionDraftCache.set(detail.sessionId, detail.text)") &&
-    source.includes("applyChatInputPrefill") &&
-    source.includes("setChatInputMode(detail.mode)") &&
-    source.includes("setInputText(detail.text)") &&
+  composerSource.includes("CHAT_INPUT_PREFILL_EVENT") &&
+    composerSource.includes("readChatInputPrefill(sessionId)") &&
+    composerSource.includes("clearChatInputPrefill(detail.sessionId)") &&
+    composerSource.includes("applyChatInputPrefill") &&
+    composerSource.includes("onInputModeChange(detail.mode)") &&
+    composerSource.includes("setDraft(detail.text)") &&
     chatInputPrefillSource.includes("window.sessionStorage.setItem") &&
     chatInputPrefillSource.includes("openteams:chat-input-prefill"),
-  { source, chatInputPrefillSource },
+  { composerSource, chatInputPrefillSource },
 );
 check(
   "caches composer drafts per session as input changes",
-  source.includes("const setInputTextDraft = useCallback") &&
-    source.includes("sessionDraftCache.set(activeSessionId, nextText)") &&
-    source.includes("sessionDraftCache.delete(activeSessionId)") &&
-    source.includes("setInputTextDraft(nextValue)") &&
-    source.includes('setInputTextDraft("")') &&
-    !source.includes("inputTextRef"),
-  source,
+  composerSource.includes("const setDraft = useCallback") &&
+    composerSource.includes("sessionDraftCache.set(sessionId, nextText)") &&
+    composerSource.includes("sessionDraftCache.delete(sessionId)") &&
+    composerSource.includes("setDraft(nextValue)") &&
+    composerSource.includes("setDraft('')") &&
+    !source.includes("const [inputText, setInputText]") &&
+    !composerSource.includes("inputTextRef"),
+  { source, composerSource },
 );
 check(
   "uses the main agent mention in the free-mode placeholder",
-  source.includes('const freeModePlaceholder = t("discussPlaceholder", {') &&
-    source.includes("agent: mainAgentHandle") &&
-    source.includes(": freeModePlaceholder"),
-  source,
+  composerSource.includes("const freeModePlaceholder = t('discussPlaceholder', {") &&
+    composerSource.includes("agent: mainAgentName") &&
+    composerSource.includes(": freeModePlaceholder"),
+  composerSource,
 );
 check(
   "opens files when a related file has no inline diff",
@@ -445,17 +453,17 @@ check(
 check(
   "quoted agent message summary is shown above the composer and jumps to its source",
   source.includes("quotedMessage") &&
-    source.includes("message.quotePrefix") &&
-    source.includes("message.dismissQuote") &&
+    composerSource.includes("message.quotePrefix") &&
+    composerSource.includes("message.dismissQuote") &&
     source.includes("summarizeMessage") &&
     source.includes("content: text") &&
-    source.includes("sendMessage(messageText, {") &&
-    source.includes("chatInputMode,") &&
+    source.includes("sendMessage(payload.text, {") &&
+    source.includes("chatInputMode: payload.inputMode") &&
     source.includes("...(quotedMessage ? { quotedMessage } : {})") &&
     source.includes("msg.quotedMessage") &&
     source.includes("handleJumpToMessage(msg.quotedMessage!.id)") &&
     !source.includes("> ${quotedMessage.sender}:"),
-  source,
+  { source, composerSource },
 );
 check(
   "agent replies show a compact source-agent message above the response",
@@ -470,17 +478,15 @@ check(
 );
 check(
   "composer supports text/image attachments and clipboard image paste",
-  source.includes("CHAT_ATTACHMENT_ACCEPT") &&
-    source.includes("allowedAttachmentExtensions") &&
-    source.includes("getClipboardFiles(event.clipboardData)") &&
-    source.includes("onPaste={handlePaste}") &&
-    source.includes("fileInputRef") &&
-    source.includes("attachedFiles") &&
-    source.includes("ImageIcon") &&
-    source.includes("FileText") &&
-    source.includes("removeAttachedFile(index)") &&
-    source.includes("attachedFiles.length > 0"),
-  source,
+  composerSource.includes("CHAT_ATTACHMENT_ACCEPT") &&
+    attachmentUtilsSource.includes("allowedAttachmentExtensions") &&
+    composerSource.includes("getClipboardFiles(event.clipboardData)") &&
+    composerSource.includes("fileInputRef") &&
+    composerSource.includes("isImageAttachment(file)") &&
+    composerSource.includes("ImageIcon") &&
+    composerSource.includes("FileText") &&
+    composerSource.includes("files.length > 0"),
+  { composerSource, attachmentUtilsSource },
 );
 check(
   "composer attachments render above the input with quote previews",
@@ -513,60 +519,58 @@ check(
     source.includes("max-h-24") &&
     source.includes("handleDeleteQueuedMessage") &&
     source.includes("handleContinueMemberQueue") &&
-    source.indexOf("renderInlineQueueGroup(") < composerInputIndex &&
+    source.indexOf("renderInlineQueueGroup(") <
+      source.indexOf("\n          <ChatComposer") &&
     !source.includes("{visibleQueueGroups.length > 0") &&
     !source.includes("false && visibleQueueGroups.length > 0"),
   { composerInputIndex, source },
 );
 check(
   "composer textarea auto-grows up to 2.5x the current input shell height",
-  source.includes("const CHAT_INPUT_SHELL_MIN_HEIGHT = 95") &&
-    source.includes("CHAT_INPUT_SHELL_MIN_HEIGHT * 2.5") &&
-    source.includes("const resizeChatTextarea = (") &&
-    source.includes("resizeChatTextarea(inputRef.current)") &&
-    source.includes("resizeChatTextarea(event.target)") &&
-    source.includes("maxHeight: CHAT_INPUT_MAX_HEIGHT"),
-  source,
+  composerSource.includes("const CHAT_INPUT_SHELL_MIN_HEIGHT = 95") &&
+    composerSource.includes("CHAT_INPUT_SHELL_MIN_HEIGHT * 2.5") &&
+    composerSource.includes("const resizeChatTextarea = (") &&
+    composerSource.includes("resizeChatTextarea(textareaRef.current)") &&
+    composerSource.includes("resizeChatTextarea(event.target)") &&
+    composerSource.includes("maxHeight: CHAT_INPUT_MAX_HEIGHT"),
+  composerSource,
 );
 check(
   "composer mention picker opens on @ and captures keyboard selection",
-  source.includes("activeMemberPickerIndex") &&
-    source.includes("const handleInputChange = (") &&
-    source.includes('nextValue[cursor - 1] === "@"') &&
-    source.includes("setIsMemberPickerOpen(true)") &&
-    source.includes('e.key === "ArrowDown"') &&
-    source.includes('e.key === "ArrowUp"') &&
-    source.includes('e.key === "Enter" && !e.shiftKey') &&
-    source.includes("insertMemberMention(member)") &&
-    source.includes("aria-selected={index === activeMemberPickerIndex}") &&
-    source.includes("onChange={handleInputChange}") &&
-    !source.includes("if (!isPlanMode && isMemberPickerOpen)") &&
-    !source.includes("if (!isPlanMode && cursor") &&
-    source.indexOf("insertMemberMention(member)") <
-      source.indexOf("void handleSend()"),
-  source,
+  composerSource.includes("activeMemberPickerIndex") &&
+    composerSource.includes("nextValue[cursor - 1] === '@'") &&
+    composerSource.includes("setIsMemberPickerOpen(true)") &&
+    composerSource.includes("event.key === 'ArrowDown'") &&
+    composerSource.includes("event.key === 'ArrowUp'") &&
+    composerSource.includes("event.key === 'Enter' && !event.shiftKey") &&
+    composerSource.includes("insertMemberMention(member)") &&
+    composerSource.includes("aria-selected={index === activeMemberPickerIndex}") &&
+    !composerSource.includes("if (!isPlanMode && isMemberPickerOpen)") &&
+    composerSource.indexOf("insertMemberMention(member)") <
+      composerSource.indexOf("void submit()"),
+  composerSource,
 );
 check(
   "composer member picker closes when clicking outside",
-  source.includes("const memberPickerRef = useRef<HTMLDivElement | null>(null)") &&
-    source.includes('document.addEventListener("pointerdown", handlePointerDownOutside)') &&
-    source.includes("!memberPickerRef.current?.contains(target)") &&
-    source.includes('document.removeEventListener("pointerdown", handlePointerDownOutside)') &&
-    source.includes("<div ref={memberPickerRef} className=\"relative\">") &&
-    source.includes("setIsMemberPickerOpen(false)"),
-  source,
+  composerSource.includes("const memberPickerRef = useRef<HTMLDivElement>(null)") &&
+    composerSource.includes("document.addEventListener('pointerdown', handlePointerDownOutside)") &&
+    composerSource.includes("!memberPickerRef.current?.contains(target)") &&
+    composerSource.includes("document.removeEventListener('pointerdown', handlePointerDownOutside)") &&
+    composerSource.includes("<div ref={memberPickerRef} className=\"relative\">") &&
+    composerSource.includes("setIsMemberPickerOpen(false)"),
+  composerSource,
 );
 check(
   "composer member picker trigger does not duplicate mentioned members",
-  !source.includes("const mentionedMemberNames = new Set(") &&
-    !source.includes("mentionedMembers.length") &&
-    source.includes('<AtSign className="h-3.5 w-3.5') &&
-    source.includes("insertMemberMention(member)"),
-  source,
+  !composerSource.includes("const mentionedMemberNames = new Set(") &&
+    !composerSource.includes("mentionedMembers.length") &&
+    composerSource.includes('<AtSign className="h-3.5 w-3.5') &&
+    composerSource.includes("insertMemberMention(member)"),
+  composerSource,
 );
 check(
   "user message rendering shows routed mention without mutating text",
-  source.includes("sendMessage(messageText, {") &&
+  source.includes("sendMessage(payload.text, {") &&
     source.includes("displayMentionForUserMessage(msg)") &&
     source.includes("message.mentions?.[0]") &&
     source.includes("implicit-route-mention") &&
@@ -577,8 +581,7 @@ check(
 );
 check(
   "user message rendering preserves input whitespace and markdown symbols",
-  source.includes("const messageText = inputText") &&
-    source.includes("content: trimmedInput ? messageText : undefined") &&
+  source.includes("content: payload.text.trim() ? payload.text : undefined") &&
     source.includes("whitespace-pre-wrap break-words") &&
     source.includes(
       "Highlight @mentions while keeping user-entered markdown characters literal",
@@ -589,17 +592,14 @@ check(
 );
 check(
   "attachment send uses backend multipart upload with quote reference id",
-  source.includes(
-    "chatMessagesApi.uploadAttachment(activeSessionId, attachedFiles",
-  ) &&
-    source.includes("chatInputMode,") &&
+  source.includes("chatMessagesApi.uploadAttachment(") &&
+    source.includes("payload.files") &&
+    source.includes("chatInputMode: payload.inputMode") &&
     source.includes("ensureWorkflowRouteToMainAgent") &&
-    source.includes('if (chatInputMode === "workflow")') &&
+    source.includes('if (payload.inputMode === "workflow")') &&
     source.includes("await ensureWorkflowRouteToMainAgent()") &&
-    source.includes("const attachmentRouteMentions =") &&
-    source.includes("content: trimmedInput ? messageText : undefined") &&
-    source.includes("referenceMessageId: quotedMessage?.id") &&
-    source.includes("mentions: attachmentRouteMentions") &&
+    source.includes("content: payload.text.trim() ? payload.text : undefined") &&
+    source.includes("referenceMessageId: payload.quotedMessageId") &&
     source.includes("await refreshMessages()") &&
     apiSource.includes('form.append("file", file, file.name)') &&
     apiSource.includes('form.append("content", options.content)') &&
@@ -613,32 +613,28 @@ check(
   "attachment send routes unmentioned free-mode uploads to the main agent",
   source.includes("const routeMentionsForText = (text: string): string[]") &&
     source.includes("/@([\\p{L}\\p{N}_-]+)/gu") &&
-    source.includes("const explicitAttachmentMentions = routeMentionsForText(messageText)") &&
-    source.includes("const mainAgentRouteMention = mainAgentName") &&
+    source.includes("const explicitMentions = routeMentionsForText(payload.text)") &&
+    source.includes("const mainRoute = mainAgentName") &&
     source.includes('mainAgentName.trim().replace(/^@/, "")') &&
     !source.includes('normalizeMentionHandle(mainAgentName).replace(/^@/, "")') &&
-    source.includes('chatInputMode !== "workflow" && mainAgentRouteMention') &&
-    source.includes("mentions: attachmentRouteMentions") &&
+    source.includes('payload.inputMode !== "workflow" && mainRoute') &&
     apiSource.includes('form.append("mentions", JSON.stringify(options.mentions))'),
   { source, apiSource },
 );
 check(
   "plan mode toggle highlights and locks the main agent mention",
-  source.includes("handleTogglePlanMode") &&
-    source.includes("setChatInputMode") &&
-    source.includes("mainAgentName,") &&
-    source.includes("const planModeMainAgentName = mainAgentHandle") &&
-    source.includes("rounded-full border px-2 py-1 text-[10px]") &&
-    source.includes('<GitBranch className="h-3 w-3" />') &&
-    source.includes("planModePlaceholder") &&
-    source.includes("plan-mode-toggle-active") &&
-    source.includes("plan-mode-input-active") &&
-    source.includes("fixedMainAgentMention") &&
-    source.includes("border-[var(--hairline)] bg-[var(--surface-2)] px-2 py-1") &&
-    source.includes('<span className="truncate">{planModeMainAgentName}</span>') &&
-    source.includes("<Lock") &&
-    !source.includes('<AtSign className="h-3.5 w-3.5 shrink-0" />'),
-  source,
+  composerSource.includes("toggleInputMode") &&
+    composerSource.includes("onInputModeChange") &&
+    composerSource.includes("mainAgentName") &&
+    composerSource.includes("rounded-full border px-2 py-1 text-[10px]") &&
+    composerSource.includes('<GitBranch className="h-3 w-3" />') &&
+    composerSource.includes("planModePlaceholder") &&
+    composerSource.includes("plan-mode-toggle-active") &&
+    composerSource.includes("plan-mode-input-active") &&
+    composerSource.includes("fixedMainAgentMention") &&
+    composerSource.includes('<span className="truncate">{mainAgentName}</span>') &&
+    composerSource.includes("<Lock"),
+  composerSource,
 );
 check(
   "renders backend file and image attachments from message meta",
