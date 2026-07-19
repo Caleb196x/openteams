@@ -1,14 +1,14 @@
 <div align="center">
-  <img src="../frontend/public/logos/logo_blue.svg" alt="OpenTeams" width="100">
+  <img src="images/openteams-logo.png" alt="openteams" width="100">
 </div>
 
 <div align="center">
-  <img src="../frontend/public/openteams-brand-logo.png" alt="OpenTeams" width="200" style="margin-top: 10px; margin-bottom: 10px;">
+  <img src="images/characters_black.png" alt="openteams" width="200" style="margin-top: 10px; margin-bottom: 10px;">
 
   <h5>Planifica, construye y entrega — con un equipo de agentes de IA en lugar de uno solo</h5>
 
   <p>
-    Varios agentes de IA comparten un mismo contexto: colabora libremente por chat u orquesta tareas complejas con workflows que puedes ver, revisar y reintentar.
+    openteams es una aplicación de escritorio de IA, de código abierto y local-first, que ayuda a desarrolladores independientes a planificar, construir y entregar software más rápido con un equipo de IA bajo su control.
   </p>
 
   <p>
@@ -39,59 +39,75 @@
 
 ---
 <div align="center">
-  <video src="https://github.com/user-attachments/assets/f918d5c7-68ff-4a8b-b2b4-f4f0ab31c17d" controls width="100%">
-    <a href="https://github.com/user-attachments/assets/f918d5c7-68ff-4a8b-b2b4-f4f0ab31c17d">Ver el video del producto</a>
+  <video src="https://github.com/user-attachments/assets/fdf0ef91-5b02-4302-bdec-087c1995a590" controls autoplay muted playsinline width="100%">
+    <a href="https://github.com/user-attachments/assets/fdf0ef91-5b02-4302-bdec-087c1995a590">Ver el video del producto</a>
   </video>
 </div>
 
-## Qué es openteams
+## ¿Qué es exactamente openteams?
 
-**openteams** es un workspace open source de colaboración multiagente. Reúne varios agentes de código de IA, como Claude Code, Codex, Gemini CLI y otros, en una sesión compartida donde pueden comunicarse, compartir contexto y trabajar juntos como un equipo. Puedes colaborar con los agentes mediante Free Chat ligero, u orquestar tareas complejas con Workflows estructurados, planes visibles, control por pasos y revisión integrada. Todo se ejecuta localmente en tu propio workspace.
+Ya usas Claude Code, Codex, Gemini CLI u otro agente de código. Cada uno funciona bien por separado. Entonces abres un segundo terminal y después un tercero. Repites el mismo contexto, llevas resultados de una ventana a otra y recuerdas quién está cambiando cada cosa. En poco tiempo, terminas gestionando a los agentes en lugar del trabajo: los cambios están repartidos entre sesiones, las prioridades del proyecto están en otro sitio y el uso de tokens no está conectado con lo que realmente se entregó.
+
+openteams aporta lo que falta alrededor de esos agentes: **una sala compartida donde pueden hablar y pasarse trabajo, un plan que puedes ver y controlar, y un registro local y ligero que conecta las tareas del proyecto con los resultados de los agentes sin entregarles el control de la hoja de ruta.**
+
+| openteams **es** | openteams **no es** |
+| --- | --- |
+| un espacio de trabajo local-first que conecta los agentes de código que ya utilizas | otro modelo o un sustituto de Claude Code, Codex o Gemini CLI |
+| una sesión compartida donde los agentes pueden hablar, pasarse trabajo y mantener el mismo contexto | una colección de chats separados que todavía tienes que coordinar a mano |
+| una lista de issues controlada por el desarrollador y vinculada a las sesiones de los agentes | una suite completa de gestión de proyectos o una hoja de ruta que los agentes reescriben |
+| un flujo de trabajo que puedes revisar, interrumpir y reintentar paso a paso | un gran prompt que permanece como una caja negra hasta que termina |
+| worktrees aislados que puedes revisar, fusionar o descartar por separado | varios agentes modificando el mismo espacio de trabajo e interfiriendo entre sí |
+| estadísticas de compilación que muestran qué entregaron los agentes, qué recursos usaron y cuánto costó | un contador de tokens sin registro de lo construido |
+
+**En concreto, al instalarlo obtienes:** sesiones de chat para colaboración ligera y ejecución planificada, plantillas de flujo de trabajo en equipo listas para usar, issues controlados por el desarrollador que vinculan el trabajo con las sesiones, espacios de trabajo independientes para aislar tareas paralelas y estadísticas de compilación detalladas.
+
+```text
+sin openteams                       con openteams
+
+Claude ─ terminal A ─┐              Claude ─┐
+Codex ── terminal B ─┼─ tú conectas Codex ──┼─ sesión compartida
+Gemini ─ terminal C ─┘              Gemini ─┘
+
+plan: en otro sitio                  issues ── sesiones ── resultados
+```
 
 ## Por qué openteams
 
-Los agentes de IA son cada vez mejores planificando, programando, revisando y probando. Pero más salida de agentes no se convierte automáticamente en trabajo entregado.
+Hacer que los agentes escriban código ya no es la parte difícil. Lo complicado es mantener el trabajo ordenado: conservar el contexto, saber por dónde va cada tarea, impedir que los trabajos paralelos se sobrescriban, decidir qué viene después y conocer el coste real.
 
-**Gestionar varios agentes agota.** Cambias entre terminales, vuelves a explicar el contexto a cada agente nuevo, copias la salida de un prompt al siguiente y reconcilias diffs contradictorios. Tu atención se va en el caos de coordinar múltiples agentes.
+openteams reúne a los agentes y sus conversaciones en una misma sesión. Para tareas grandes, el modo Workflow muestra los pasos y sus dependencias, de modo que puedes revisar o reintentar solo la parte necesaria. Si varias sesiones trabajan a la vez, cada una puede usar su propio Git worktree; los cambios permanecen separados hasta que decidas fusionarlos o descartarlos.
 
-**La ejecución de los agentes es invisible y difícil de controlar.** Le dices a Claude Code: “construye esta funcionalidad”. Corre durante 15 minutos. No sabes qué subtareas intentó, cuáles pasaron ni cuáles abandonó en silencio. La mayoría de los agentes de código tratan hoy una tarea compleja como una única ejecución monolítica: no hay plan visible antes de ejecutar, no hay forma de aprobar o rechazar pasos individuales en mitad del proceso, no hay forma de reintentar solo el paso que falló. Cuando algo sale mal, empiezas de nuevo.
+La dirección del proyecto sigue en manos del desarrollador. Los issues guardan el trabajo que has elegido y enlazan con las sesiones donde los agentes lo realizan. Los agentes hacen el trabajo, pero no cambian el plan por ti. Cuando terminan, las estadísticas de compilación muestran los resultados junto con los tokens utilizados y el coste.
 
-**openteams** resuelve ambos problemas. Los agentes **comparten un único contexto**, así que el trabajo no se pierde entre traspasos. Las tareas complejas se convierten en **workflows visibles y controlables**: puedes refinar el plan antes de ejecutarlo, ver cada paso mientras avanza e intervenir en cualquier nodo para aprobar, rechazar, reintentar o redirigir.
-
-> La verdadera ventaja no es tener más agentes. Es orquestarlos con un plan complejo que puedes ver y pasos que puedes controlar.
-
-## Casos de uso comunes
-
-Escribes: “Añade sincronización de issues de GitHub al workspace.”
-
-
-1. **El lead agent aclara los requisitos:** pregunta por la dirección de sincronización (¿unidireccional o bidireccional?), el manejo de conflictos (¿omitir, sobrescribir o registrar?) y qué campos de issue mapear. Confirmas: pull unidireccional, registrar conflictos, mapear title/body/labels/status.
-2. **El lead agent diseña el enfoque y construye el plan de ejecución:** el plan muestra 5 pasos: `Backend: OAuth + GitHub API` → `Backend: Sync Engine` → `Frontend: Sync Status UI` → `Integration Tests` → `Final Review`. Cada paso tiene alcance claro, agente asignado y criterios de aceptación.
-3. **Revisas y apruebas el plan:** puedes ajustar pasos, reordenar dependencias o reasignar agentes antes de que se ejecute código.
-4. **Los agentes ejecutan y observas el progreso en tiempo real:** `Backend: OAuth` corre primero. Cuando termina, `Sync Engine` y `Frontend: Sync Status UI` empiezan en paralelo. Cada paso muestra su estado, diff y logs en el grafo de workflow.
-5. **Revisas y apruebas cada paso completado:** `Backend: OAuth` termina. Inspeccionas el diff, ves la lógica de refresh de tokens y apruebas. Los siguientes pasos continúan.
-6. **Un paso falla y reintentas solo ese paso:** `Integration Tests` falla porque el motor de sync devuelve timestamps crudos en vez de formato ISO. Revisas el log de error y reintentas solo el paso `Integration Tests`. El resto del workflow permanece intacto.
-7. **Revisión final y aceptación:** todos los pasos pasan. Revisas el diff completo, los artefactos y los resultados de pruebas, y luego aceptas.
-8. **Seguimiento con Free Chat:** dos días después, un usuario reporta que el badge de estado de sync parpadea durante el polling. Abres Free Chat: `@Frontend Agent the sync status badge flickers when polling — debounce the state update`. Se corrige en un turno, sin workflow.
+openteams no intenta darte más agentes. Su objetivo es que siempre sepas qué se está construyendo, dónde están los cambios, qué viene después y cuánto costó el resultado.
 
 ## Inicio rápido
 ### Instalación
+#### Aplicación de escritorio (recomendada)
+
+Descarga la última versión para tu plataforma desde GitHub Releases.
+
+[![Download for Windows](https://img.shields.io/badge/Download-Windows-0078D6?style=for-the-badge&logo=windows)](https://github.com/openteams-lab/openteams/releases/latest/download/openteams-windows-x64.msi)
+[![Download for macOS](https://img.shields.io/badge/Download-macOS-000000?style=for-the-badge&logo=apple)](https://github.com/openteams-lab/openteams/releases/latest/download/openteams-macos.dmg)
+[![Download for Linux](https://img.shields.io/badge/Download-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/openteams-lab/openteams/releases/latest/download/openteams-linux-amd64.deb)
+
+**macOS:** La versión actual para macOS no está firmada con Apple Developer ID ni notarizada por Apple. Los navegadores añaden un atributo de cuarentena a las aplicaciones descargadas de Internet, por lo que Gatekeeper puede indicar que openteams está «dañada» aunque la descarga esté intacta. Después de mover `openteams.app` a `/Applications`, y solo si confías en que procede de la GitHub Release oficial de openteams, ejecuta:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/openteams.app
+```
+
+Este comando solo elimina el atributo de cuarentena de openteams; no desactiva Gatekeeper globalmente.
+
 #### npx
 
 ```bash
 npx openteams-web
 ```
 
-#### Aplicación de escritorio
-
-Descarga la última versión para tu plataforma desde GitHub Releases.
-
-[![Download for Windows](https://img.shields.io/badge/Download-Windows-0078D6?style=for-the-badge&logo=windows)](https://github.com/openteams-lab/openteams/releases/latest)
-[![Download for Linux](https://img.shields.io/badge/Download-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/openteams-lab/openteams/releases/latest)
-
 ### Configurar proveedores
 
-**openteams** incluye un agente openteams CLI integrado. Configura tus proveedores de modelos en la app desde `menu->setting->provider config->add provider`.
+**openteams** incluye un agente openteams CLI integrado. Configura tus proveedores de modelos en la app desde `Settings → Provider Config → Add Provider`.
 
 ⚙️ [Configuración de proveedores](https://doc.openteams-lab.com/advanced-usage/custom-provider)
 
@@ -107,48 +123,13 @@ También puedes conectar agentes de código compatibles como:
 
 📚 [Más guías de instalación de agentes](https://doc.openteams-lab.com/getting-started)
 
-### Empieza en 30 segundos
-**Requisitos previos: configura un proveedor de servicio API o instala cualquier Code Agent compatible.**
-
-*paso 1.* Crea una sesión de chat grupal. Añade uno o más miembros y asigna a cada uno un modelo y un rol.
-
-*paso 2.* En modo Free Chat, usa `@` para enviar un mensaje o asignar una tarea a cualquier miembro.
-
-*paso 3.* Cambia a modo Workflow. Habla de los requisitos con el lead agent, refina la solución y genera un plan de ejecución.
-
-*paso 4.* Inicia la ejecución y revisa el resultado de cada nodo de tarea cuando termine.
-
-## Modos de trabajo
-
-**openteams** admite dos modos de colaboración, porque no todas las tareas necesitan el mismo nivel de estructura. Piensa en ello como los modos **Plan y Build de Claude Code**, pero para equipos multiagente: elige colaboración libre cuando quieras que los agentes exploren y conversen abiertamente, y workflows estructurados cuando necesites una ejecución fiable y predecible.
-
-### Free Chat
-
-En el modo de chat libre, usas `@` para enviar una tarea a cualquier agente, y los agentes pueden pasarse mensajes entre sí. La colaboración se rige por un protocolo de equipo que tú defines: quién hace qué, cómo se entregan el trabajo y qué estándares seguir.
-
-**free chat mode** es ideal para pequeños arreglos, revisiones rápidas y conversaciones exploratorias donde un workflow completo sería excesivo.
-
-![](images/free_chat.png)
-
-### Workflow
-
-El modo Workflow está diseñado para tareas complejas que necesitan dividirse en subtareas, con progreso observable y ejecución controlable en cada paso.
-
-Un lead agent dirige la fase de planificación: aclara requisitos, diseña el enfoque, define el plan de ejecución y asigna tareas a los agentes adecuados. El resultado es un workflow visible con pasos, dependencias, revisiones, reintentos y puntos de aceptación.
-
-![](images/openteams-workflow.png)
-
-En lugar de pedir a los agentes que se ejecuten en una cadena suelta, **openteams** convierte el trabajo en un grafo de ejecución con estado.
-
-**Nota: el modo Workflow usa más tokens. Asegúrate de tener saldo suficiente.**
-
 ## Actualizaciones importantes
 - **2026.05.20 (v0.4.4)**
   - Versión beta del modo Workflow
 - **2026.05.07 (v0.3.22)**
   - Permite guardar con un clic los miembros de una sesión de chat grupal como equipo predefinido
 - **2026.04.14 (v0.3.15)**
-  - Visor de cambios de archivos del workspace
+  - Visor de cambios de archivos del espacio de trabajo
 - **2026.04.06 (v0.3.12)**
   - Activación del modo de UI oscura
   - Corrección de problemas de concurrencia en openteams-cli
@@ -161,8 +142,8 @@ En lugar de pedir a los agentes que se ejecuten en una cadena suelta, **openteam
 openteams está en desarrollo activo. Hacia allí vamos:
 
 - [ ] **Trabajadores IA expertos** — Lanzar más trabajadores de IA con conocimiento profundo de dominios específicos, capaces de resolver problemas especializados.
-- [ ] **Equipos IA de alta producción** — Formar equipos con trabajadores de IA expertos y eficientes, capaces de personalizar workflows de producción para necesidades de negocio específicas y convertir requisitos en resultados de extremo a extremo.
-- [ ] **Integrar más agentes** — Integrar más agentes de uso común, como Kilo code, hermes-agent, openclaw, entre otros.
+- [ ] **Equipos de IA de alto rendimiento** — Formar equipos con trabajadores de IA expertos y eficientes, capaces de personalizar workflows de producción para necesidades de negocio específicas y convertir requisitos en entregables de principio a fin.
+- [ ] **Integrar más agentes** — Integrar más agentes de uso común, como Kilo Code, hermes-agent y openclaw, entre otros.
 
 ***Visión: transformar el consumo de tokens en productividad real.***
 
@@ -173,12 +154,12 @@ openteams está en desarrollo activo. Hacia allí vamos:
 - [GitHub Issues](https://github.com/openteams-lab/openteams/issues): reportes de bugs y solicitudes de funcionalidades
 - [GitHub Discussions](https://github.com/openteams-lab/openteams/discussions): ideas de producto y preguntas
 - [Discord](https://discord.gg/openteams): chat de la comunidad
-- [Linux.do](https://linux.do): enlace amigo; gracias por apoyar el intercambio de la comunidad
+- [Linux.do](https://linux.do): sitio asociado; gracias por apoyar el intercambio de la comunidad
 - Grupos de la comunidad:
 
 <p>
-  <a href="images/openteams-wechat-community.png"><img alt="Código QR del grupo de la comunidad de OpenTeams en WeChat" src="images/openteams-wechat-community.png" width="260"></a>
-  <a href="images/openteams-feishu-community.png"><img alt="Código QR del grupo de la comunidad de OpenTeams en Feishu/Lark" src="images/openteams-feishu-community.png" width="260"></a>
+  <a href="images/openteams-wechat-community.png"><img alt="Código QR del grupo de la comunidad de openteams en WeChat" src="images/openteams-wechat-community.png" width="260"></a>
+  <a href="images/openteams-feishu-community.png"><img alt="Código QR del grupo de la comunidad de openteams en Feishu/Lark" src="images/openteams-feishu-community.png" width="260"></a>
 </p>
 
 ## Funcionalidades principales
@@ -192,8 +173,11 @@ openteams está en desarrollo activo. Hacia allí vamos:
 | Modo Workflow | Convierte tareas complejas en pasos estructurados, dependencias, revisiones, reintentos y aceptación. |
 | Ejecución visible | Mira qué está haciendo cada agente y dónde está bloqueado el trabajo. |
 | Revisión y reintento | Revisa un paso, reintenta la tarea correcta y evita reiniciar todo el proyecto. |
+| Gestión de issues | Registra y prioriza elementos de trabajo controlados por el desarrollador, sincroniza issues desde GitHub y crea o enlaza sesiones de ejecución. |
+| Workspaces aislados | Ejecuta tareas de sesiones independientes en Git worktrees separados y revisa, fusiona o descarta cada resultado sin afectar al resto del trabajo. |
+| Estadísticas de compilación | Compara bugs corregidos y funcionalidades entregadas con el consumo de tokens y los costes por sesión y modelo. |
 | Artefactos y trazas | Mantén logs, diffs, transcripciones y artefactos generados unidos al trabajo. |
-| Ejecución local del workspace | Los agentes trabajan sobre el workspace configurado, con registros de ejecución guardados bajo `.openteams/`. |
+| Ejecución local | Los agentes trabajan sobre el espacio de trabajo configurado, con registros de ejecución guardados bajo `.openteams/`. |
 
 ## Para quién es
 
@@ -222,50 +206,18 @@ No es solo un lugar para reunir más agentes. Es una forma de convertir agentes 
 - **Node.js** >= 18
 - **pnpm** >= 8
 
-### Mac/Linux
+### macOS, Linux y Windows
 
 ```bash
 # Clone the repository
 git clone https://github.com/openteams-lab/openteams.git
 cd openteams
 pnpm i
-pnpm run dev
+npm run dev
 # build
 pnpm --filter frontend build
 pnpm desktop:build
 ```
-
-### Windows (PowerShell): iniciar backend y frontend por separado
-
-`pnpm run dev` no puede ejecutarse en Windows PowerShell. Usa los siguientes comandos para ejecutar backend y frontend por separado.
-
-```powershell
-git clone https://github.com/openteams-lab/openteams.git
-cd openteams
-pnpm i
-pnpm run generate-types
-pnpm run prepare-db
-```
-
-**Terminal A (backend)**
-
-```powershell
-$env:FRONTEND_PORT = node scripts/setup-dev-environment.js frontend
-$env:BACKEND_PORT = node scripts/setup-dev-environment.js backend
-$env:RUST_LOG = "debug"
-cargo run --bin server
-```
-
-**Terminal B (frontend)**
-
-```powershell
-$env:FRONTEND_PORT = <frontend port generated from terminal A>
-$env:BACKEND_PORT = <backend port generated from terminal A>
-cd frontend
-pnpm dev -- --port $env:FRONTEND_PORT --host
-```
-
-Abre la página frontend en `http://localhost:<FRONTEND_PORT>` (por ejemplo: `http://localhost:3001`).
 
 ### Compilar `openteams-cli` localmente
 
@@ -279,10 +231,10 @@ bun run ./scripts/build-openteams-cli.ts
 
 ## Contribuir
 
-Las contribuciones son bienvenidas. Así puedes empezar:
+Las contribuciones son bienvenidas, incluidos los workflows de equipos de IA reutilizables que otros puedan estudiar y adaptar. Así puedes empezar:
 
 1. **Encuentra un issue** — Revisa [Good First Issues](https://github.com/openteams-lab/openteams/labels/good%20first%20issue) para tareas aptas para principiantes, o explora los issues abiertos.
-2. **Habla antes de construir** — Antes de abrir una pull request grande, abre un issue o una discusión para alinear la dirección.
+2. **Habla antes de construir** — Antes de abrir una pull request grande, abre un issue o una discusión para acordar el enfoque.
 3. **Sigue el estilo de código** — Ejecuta lo siguiente antes de enviar:
 
 ```bash
@@ -297,13 +249,21 @@ Consulta [CONTRIBUTING.md](../CONTRIBUTING.md) para la guía completa.
 
 ## Licencia
 
-Este proyecto usa Apache License 2.0. Consulta [LICENSE](../LICENSE) para ver
-el texto completo, incluidos los avisos de copyright y las reglas de
-redistribución.
+openteams se publica bajo Apache License 2.0. En términos prácticos, puedes:
 
-Puedes usar, cambiar, publicar y vender este proyecto,
-incluso dentro de productos cerrados. Conserva el aviso de copyright, conserva
-el texto de la licencia y cuenta qué cambiaste si lo modificas. No elimines los
-avisos obligatorios, no uses el nombre o las marcas del dueño del proyecto como
-respaldo, y no esperes mantener la concesión de patentes si inicias una demanda
-de patentes sobre este proyecto. El software se entrega tal cual, sin garantía.
+- usarlo gratis en proyectos personales, educativos, internos o comerciales;
+- copiar, modificar y reutilizar el código fuente como base de tu trabajo;
+- distribuir la versión original o modificada, como código fuente o software compilado;
+- incluirlo en un producto propietario y venderlo sin tener que publicar el resto de tu código.
+
+Si redistribuyes openteams o una versión modificada, incluye una copia de la licencia, conserva los avisos de copyright y atribución pertinentes e indica claramente qué archivos modificaste.
+
+También conviene conocer otros tres puntos:
+
+- **Marca:** Puedes usar el código, pero no presentarte como el proyecto oficial openteams ni usar su nombre o sus marcas como tu propia marca.
+- **Patentes:** Los contribuidores te permiten usar las patentes necesariamente relacionadas con su código, por lo que no pueden utilizarlas para impedir que uses openteams. A cambio, si presentas una demanda afirmando que openteams infringe tu patente, pierdes esa protección. Solo termina el permiso de patentes, no tu permiso normal para usar el código. Los usuarios que no participan en litigios de patentes normalmente no se ven afectados.
+- **Riesgo:** El software se ofrece gratis tal como está. Tú decides si sirve para tus necesidades y asumes los riesgos de usarlo; el proyecto no ofrece garantía ni compensación.
+
+Esta sección es un resumen en lenguaje sencillo. El archivo [LICENSE](../LICENSE) contiene los términos legales vinculantes.
+
+Consulta [LICENSE](../LICENSE) para ver los términos legales completos.

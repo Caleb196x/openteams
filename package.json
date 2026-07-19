@@ -1,6 +1,6 @@
 {
   "name": "openteams",
-  "version": "0.4.7",
+  "version": "0.5.1",
   "private": true,
   "bin": {
     "openteams": "npx/openteams-npx/bin/cli.js"
@@ -27,7 +27,7 @@
     "backend:format:check": "cargo fmt --all -- --check",
     "backend:dev": "BACKEND_PORT=$(node scripts/setup-dev-environment.js backend) pnpm run backend:dev:watch",
     "backend:check": "cargo check",
-    "backend:dev:watch": "DISABLE_WORKTREE_CLEANUP=1 RUST_LOG=debug cargo watch -w crates -x 'run --bin server'",
+    "backend:dev:watch": "node scripts/backend-dev-watch.js",
     "dev:qa": "export FRONTEND_PORT=$(node scripts/setup-dev-environment.js frontend) && export BACKEND_PORT=$(node scripts/setup-dev-environment.js backend) && export VK_ALLOWED_ORIGINS=\"http://localhost:${FRONTEND_PORT}\" && concurrently \"pnpm run backend:dev:watch:qa\" \"pnpm run frontend:dev\"",
     "generate-types": "cargo run --bin generate_types",
     "generate-types:check": "cargo run --bin generate_types -- --check",
@@ -50,6 +50,7 @@
   "devDependencies": {
     "@tauri-apps/cli": "^1.5.0",
     "concurrently": "^8.2.2",
+    "pngjs": "^7.0.0",
     "vite": "^6.3.5"
   },
   "engines": {

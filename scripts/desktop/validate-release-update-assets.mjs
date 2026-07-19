@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 
 function parseArgs(argv) {
@@ -74,15 +75,19 @@ function verifyMinisignSignature(data, signature, publicKey, basename) {
   const text = decodeMinisignText(signature, `signature for ${basename}`);
   const lines = text.split(/\r?\n/).filter(Boolean);
   const rawSignature = Buffer.from(lines[1] || '', 'base64');
-  if (rawSignature.length !== 74 || rawSignature.subarray(0, 2).toString() !== 'Ed') {
+  const signatureAlgorithm = rawSignature.subarray(0, 2).toString();
+  if (rawSignature.length !== 74 || !['Ed', 'ED'].includes(signatureAlgorithm)) {
     throw new Error(`Updater signature is not a valid Minisign signature for ${basename}.`);
   }
   if (!rawSignature.subarray(2, 10).equals(publicKey.keyId)) {
     throw new Error(`Updater signature key id does not match configured public key for ${basename}.`);
   }
+  const signedData = signatureAlgorithm === 'ED'
+    ? crypto.createHash('blake2b512').update(data).digest()
+    : data;
   const verified = crypto.verify(
     null,
-    data,
+    signedData,
     publicKey.key,
     rawSignature.subarray(10),
   );
@@ -109,6 +114,10 @@ function verifyMinisignSignature(data, signature, publicKey, basename) {
 
 function normalizeVersion(raw) {
   return String(raw).trim().replace(/^v/i, '');
+}
+
+function packageVersionFromReleaseTag(releaseTag) {
+  return normalizeVersion(releaseTag).replace(/[-.]\d{14}$/, '');
 }
 
 async function walk(dir) {
@@ -178,25 +187,26 @@ function architecturePattern(architecture) {
   }[architecture];
 }
 
-function ensureManifestEntryShape(platformKey, basename, releaseVersion) {
-  const version = escapeRegExp(normalizeVersion(releaseVersion));
+function ensureManifestEntryShape(platformKey, basename, releaseVersion, desktopVersion) {
+  const releaseArtifactVersion = escapeRegExp(normalizeVersion(releaseVersion));
+  const desktopArtifactVersion = escapeRegExp(normalizeVersion(desktopVersion));
   if (/^darwin-(aarch64|x86_64)$/.test(platformKey)) {
     const architecture = architecturePattern(platformKey.slice('darwin-'.length));
-    if (!new RegExp(`^openteams[_-]v?${version}[_-]${architecture}\\.app\\.tar\\.gz$`).test(basename)) {
+    if (!new RegExp(`^openteams[_-]v?${releaseArtifactVersion}[_-]${architecture}\\.app\\.tar\\.gz$`).test(basename)) {
       throw new Error(`Darwin updater must be a .app.tar.gz archive: ${basename}`);
     }
     return 'darwin';
   }
   if (/^linux-(aarch64|x86_64|i686)$/.test(platformKey)) {
     const architecture = architecturePattern(platformKey.slice('linux-'.length));
-    if (!new RegExp(`^openteams[_-]v?${version}[_-]${architecture}\\.AppImage\\.tar\\.gz$`).test(basename)) {
+    if (!new RegExp(`^openteams[_-]v?${desktopArtifactVersion}[_-]${architecture}\\.AppImage\\.tar\\.gz$`).test(basename)) {
       throw new Error(`Linux updater must be a .AppImage.tar.gz archive: ${basename}`);
     }
     return 'linux';
   }
   if (/^windows-(aarch64|x86_64|i686)$/.test(platformKey)) {
     const architecture = architecturePattern(platformKey.slice('windows-'.length));
-    if (!new RegExp(`^openteams[_-]v?${version}[_-]${architecture}(?:[_-][A-Za-z0-9-]+)?\\.msi\\.zip$`).test(basename)) {
+    if (!new RegExp(`^openteams[_-]v?${desktopArtifactVersion}[_-]${architecture}(?:[_-][A-Za-z0-9-]+)?\\.msi\\.zip$`).test(basename)) {
       throw new Error(`Windows updater must be a .msi.zip archive: ${basename}`);
     }
     return 'windows';
@@ -204,13 +214,17 @@ function ensureManifestEntryShape(platformKey, basename, releaseVersion) {
   throw new Error(`Unsupported manifest platform key: ${platformKey}`);
 }
 
-function readPackageVersion(packagePath) {
+function readPackageMetadata(packagePath) {
   const packageJson = execFileSync(
     'tar',
     ['-xOf', packagePath, 'package/package.json'],
     { encoding: 'utf8' }
   );
-  return normalizeVersion(JSON.parse(packageJson).version);
+  const metadata = JSON.parse(packageJson);
+  return {
+    name: metadata.name,
+    version: normalizeVersion(metadata.version),
+  };
 }
 
 function readTarEntries(archivePath) {
@@ -219,8 +233,22 @@ function readTarEntries(archivePath) {
     .filter(Boolean);
 }
 
-function readTarEntry(archivePath, entry) {
-  return execFileSync('tar', ['-xOf', archivePath, entry]);
+async function readTarEntryHeader(archivePath, entry) {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openteams-release-validator-'));
+  try {
+    execFileSync('tar', ['-xzf', archivePath, '-C', tempDir, entry]);
+    const extractedPath = path.join(tempDir, ...entry.split('/'));
+    const handle = await fs.open(extractedPath, 'r');
+    try {
+      const header = Buffer.alloc(4096);
+      const { bytesRead } = await handle.read(header, 0, header.length, 0);
+      return header.subarray(0, bytesRead);
+    } finally {
+      await handle.close();
+    }
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
 }
 
 function expectedArchitecture(platformKey) {
@@ -267,13 +295,14 @@ function canonicalArchitecture(value) {
   }[value] || value;
 }
 
-function validateUpdaterArchive(assets, platformKey, basename) {
+async function validateUpdaterArchive(assets, platformKey, basename) {
   const architecture = expectedArchitecture(platformKey);
   if (platformKey.startsWith('darwin-')) {
     const entries = readTarEntries(requireAsset(assets, basename));
     const executable = entries.find((entry) => /\.app\/Contents\/MacOS\/openteams$/.test(entry));
     if (!executable) throw new Error(`Darwin updater archive has no app executable: ${basename}`);
-    const actual = machoArchitectures(readTarEntry(requireAsset(assets, basename), executable));
+    const header = await readTarEntryHeader(requireAsset(assets, basename), executable);
+    const actual = machoArchitectures(header);
     if (!actual.includes(architecture)) throw new Error(`Darwin updater architecture mismatch for ${basename}`);
     return;
   }
@@ -294,7 +323,20 @@ function validateDebAsset(debPath, name, releaseVersion) {
   const controlName = members.find((member) => /^control\.tar\.(gz|xz)$/.test(member));
   if (!members.includes('debian-binary') || !controlName) return false;
   const controlArchive = execFileSync('ar', ['p', debPath, controlName]);
-  const control = execFileSync('tar', ['-xOf', '-', './control'], { input: controlArchive, encoding: 'utf8' });
+  const compressionOption = controlName.endsWith('.gz') ? '-z' : '-J';
+  const controlEntry = execFileSync(
+    'tar',
+    ['-t', compressionOption, '-f', '-'],
+    { input: controlArchive, encoding: 'utf8' },
+  )
+    .split(/\r?\n/)
+    .find((entry) => entry.replace(/^\.\//, '') === 'control');
+  if (!controlEntry) return false;
+  const control = execFileSync(
+    'tar',
+    ['-x', compressionOption, '-O', '-f', '-', controlEntry],
+    { input: controlArchive, encoding: 'utf8' },
+  );
   const architecture = control.match(/^Architecture:\s*(\S+)/m)?.[1];
   const version = control.match(/^Version:\s*(\S+)/m)?.[1];
   return canonicalArchitecture(match[1]) === canonicalArchitecture(architecture || '') && normalizeVersion(version || '') === normalizeVersion(releaseVersion);
@@ -308,6 +350,10 @@ async function main() {
   const manifestPath = requireAsset(assets, 'latest.json');
   const policyPath = requireAsset(assets, 'update-policy.json');
   const config = JSON.parse(await fs.readFile(path.resolve(args.config), 'utf8'));
+  const desktopVersion = normalizeVersion(config?.package?.version || '');
+  if (!desktopVersion) {
+    throw new Error(`Missing desktop package version in ${args.config}`);
+  }
   const publicKey = config?.tauri?.updater?.pubkey;
   if (typeof publicKey !== 'string' || !publicKey.trim()) {
     throw new Error(`Missing updater public key in ${args.config}`);
@@ -318,6 +364,13 @@ async function main() {
   const policy = JSON.parse(await fs.readFile(policyPath, 'utf8'));
 
   const normalizedReleaseVersion = normalizeVersion(args.releaseTag);
+  const expectedPackageVersion = packageVersionFromReleaseTag(args.releaseTag);
+  const expectedDesktopVersion = expectedPackageVersion.split('-')[0];
+  if (desktopVersion !== expectedDesktopVersion) {
+    throw new Error(
+      `Desktop package version ${desktopVersion} does not match release package version ${expectedPackageVersion}`
+    );
+  }
   if (normalizeVersion(manifest.version) !== normalizedReleaseVersion) {
     throw new Error(
       `Manifest version ${manifest.version} does not match release ${normalizedReleaseVersion}`
@@ -341,7 +394,12 @@ async function main() {
       throw new Error(`Manifest entry is invalid for ${platformKey}`);
     }
     const basename = parseAllowedManifestUrl(entry.url, args.releaseTag);
-    const kind = ensureManifestEntryShape(platformKey, basename, normalizedReleaseVersion);
+    const kind = ensureManifestEntryShape(
+      platformKey,
+      basename,
+      normalizedReleaseVersion,
+      desktopVersion,
+    );
     platformKinds.add(kind);
     requireAsset(assets, basename);
     if (kind === 'linux') {
@@ -364,7 +422,7 @@ async function main() {
       publicKeyObject,
       basename,
     );
-    validateUpdaterArchive(assets, platformKey, basename);
+    await validateUpdaterArchive(assets, platformKey, basename);
   }
 
   if (!platformKinds.has('darwin')) {
@@ -372,9 +430,9 @@ async function main() {
   }
 
   const debPattern = new RegExp(
-    `^openteams[_-]v?${escapeRegExp(normalizedReleaseVersion)}[_-](?:amd64|x86_64|x64|arm64|aarch64|i386|i686|x86)(?:[_-]linux)?\\.deb$`,
+    `^openteams[_-]v?${escapeRegExp(desktopVersion)}[_-](?:amd64|x86_64|x64|arm64|aarch64|i386|i686|x86)(?:[_-]linux)?\\.deb$`,
   );
-  if (![...assets.entries()].some(([name, file]) => debPattern.test(name) && validateDebAsset(file, name, normalizedReleaseVersion))) {
+  if (![...assets.entries()].some(([name, file]) => debPattern.test(name) && validateDebAsset(file, name, desktopVersion))) {
     throw new Error('At least one Linux .deb asset is required.');
   }
 
@@ -389,15 +447,18 @@ async function main() {
   }
 
   const packages = [...assets.keys()].filter((name) =>
-    new RegExp(`^openteams-v?${escapeRegExp(normalizedReleaseVersion)}\\.tgz$`).test(name)
+    new RegExp(`^openteams-lab-openteams-web-v?${escapeRegExp(expectedPackageVersion)}\\.tgz$`).test(name)
   );
   if (packages.length !== 1) {
     throw new Error('Expected exactly one validated main Web package.');
   }
-  const packageVersion = readPackageVersion(requireAsset(assets, packages[0]));
-  if (packageVersion !== normalizedReleaseVersion) {
+  const packageMetadata = readPackageMetadata(requireAsset(assets, packages[0]));
+  if (packageMetadata.name !== '@openteams-lab/openteams-web') {
+    throw new Error(`Unexpected main Web package name: ${packageMetadata.name}`);
+  }
+  if (packageMetadata.version !== expectedPackageVersion) {
     throw new Error(
-      `Main Web package version ${packageVersion} does not match manifest version ${normalizedReleaseVersion}`
+      `Main Web package version ${packageMetadata.version} does not match release package version ${expectedPackageVersion}`
     );
   }
 }
