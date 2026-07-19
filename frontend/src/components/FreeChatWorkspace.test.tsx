@@ -419,6 +419,13 @@ check(
   runStatusSource,
 );
 check(
+  "agent startup uses distinct copy until a real run id is available",
+  messageContentSource.includes('message.runId') &&
+    messageContentSource.includes('"agentActivity.starting"') &&
+    messageContentSource.includes('"agentActivity.running"'),
+  messageContentSource,
+);
+check(
   "agent messages expose hover copy and quote actions",
   source.includes("handleCopyAgentMessage") &&
     source.includes("handleQuoteAgentMessage") &&
@@ -661,6 +668,18 @@ check(
 check(
   "linked work item status trigger does not show a redundant tooltip",
   !source.includes('"linkedWorkItems.changeStatusTitle"'),
+  source,
+);
+check(
+  "linked work item status menu toggles and resets across sessions",
+  source.includes("linkedWorkItemStatusMenuTarget") &&
+    source.includes("setLinkedWorkItemStatusMenuTarget((current) =>") &&
+    source.includes("toggleLinkedWorkItemStatusMenuTarget(") &&
+    source.includes("isLinkedWorkItemStatusMenuTarget(") &&
+    source.includes("setLinkedWorkItemStatusMenuTarget(null)") &&
+    source.includes("handleLinkedWorkItemStatusMenuOpenChange") &&
+    source.includes("!linkedWorkItemsLoading") &&
+    !source.includes("linkedWorkItemStatusMenuRequestKey"),
   source,
 );
 check(

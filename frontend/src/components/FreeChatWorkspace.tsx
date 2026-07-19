@@ -53,6 +53,11 @@ import {
   type LinkedWorkItemsChangedDetail,
 } from "@/lib/linkedWorkItemsEvents";
 import {
+  isLinkedWorkItemStatusMenuTarget,
+  toggleLinkedWorkItemStatusMenuTarget,
+  type LinkedWorkItemStatusMenuTarget,
+} from "@/lib/linkedWorkItemStatusMenu";
+import {
   SOURCE_CONTROL_REFRESH_REQUESTED_EVENT,
   type SourceControlRefreshRequestedDetail,
 } from "@/lib/sourceControlEvents";
@@ -313,14 +318,16 @@ const translateWithFallback = (
 function LinkedWorkItemRow({
   item,
   statusPending,
-  statusMenuRequestKey,
+  statusMenuOpen,
+  onStatusMenuOpenChange,
   onOpen,
   onStatusChange,
   t,
 }: {
   item: ProjectWorkItem;
   statusPending: boolean;
-  statusMenuRequestKey: number;
+  statusMenuOpen: boolean;
+  onStatusMenuOpenChange: (itemId: string, open: boolean) => void;
   onOpen: (item: ProjectWorkItem) => void;
   onStatusChange: (
     item: ProjectWorkItem,
@@ -328,7 +335,6 @@ function LinkedWorkItemRow({
   ) => void;
   t: (key: string, replacements?: Record<string, string | number>) => string;
 }) {
-  const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const statusMenuRef = useRef<HTMLDivElement | null>(null);
   const statusTriggerRef = useRef<HTMLButtonElement | null>(null);
   const issueStatus = linkedWorkItemIssueStatus(item.status);
@@ -343,21 +349,23 @@ function LinkedWorkItemRow({
     if (!statusMenuOpen) return;
     const handlePointerDown = (event: MouseEvent) => {
       if (!statusMenuRef.current?.contains(event.target as Node)) {
-        setStatusMenuOpen(false);
+        onStatusMenuOpenChange(item.id, false);
       }
     };
     document.addEventListener("mousedown", handlePointerDown);
     return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, [statusMenuOpen]);
+  }, [item.id, onStatusMenuOpenChange, statusMenuOpen]);
 
   useEffect(() => {
-    if (!statusMenuRequestKey || statusPending) return;
-    setStatusMenuOpen(true);
-    window.requestAnimationFrame(() => statusTriggerRef.current?.focus());
-  }, [statusMenuRequestKey, statusPending]);
+    if (!statusMenuOpen || statusPending) return;
+    const frame = window.requestAnimationFrame(() =>
+      statusTriggerRef.current?.focus(),
+    );
+    return () => window.cancelAnimationFrame(frame);
+  }, [statusMenuOpen, statusPending]);
 
   const handleStatusSelect = (status: ProjectWorkItem["status"]) => {
-    setStatusMenuOpen(false);
+    onStatusMenuOpenChange(item.id, false);
     if (status !== item.status) onStatusChange(item, status);
   };
 
@@ -389,7 +397,7 @@ function LinkedWorkItemRow({
           if (!statusMenuOpen) return;
           if (event.key === "Escape") {
             event.preventDefault();
-            setStatusMenuOpen(false);
+            onStatusMenuOpenChange(item.id, false);
             return;
           }
           const option = linkedWorkItemStatusOptions.find(
@@ -408,7 +416,7 @@ function LinkedWorkItemRow({
           aria-expanded={statusMenuOpen}
           onClick={(event) => {
             event.stopPropagation();
-            setStatusMenuOpen((current) => !current);
+            onStatusMenuOpenChange(item.id, !statusMenuOpen);
           }}
           className="inline-flex h-full max-w-[128px] items-center gap-1.5 rounded-r-md bg-[var(--surface-1)] px-2 py-1.5 text-[var(--ink-tertiary)] transition hover:bg-[var(--surface-2)] hover:text-[var(--ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/40 disabled:cursor-not-allowed disabled:opacity-70"
           aria-label={translateWithFallback(
@@ -695,9 +703,9 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
     useState(0);
   const [linkedWorkItems, setLinkedWorkItems] = useState<ProjectWorkItem[]>([]);
   const [
-    linkedWorkItemStatusMenuRequestKey,
-    setLinkedWorkItemStatusMenuRequestKey,
-  ] = useState(0);
+    linkedWorkItemStatusMenuTarget,
+    setLinkedWorkItemStatusMenuTarget,
+  ] = useState<LinkedWorkItemStatusMenuTarget>(null);
   const [linkedWorkItemsLoading, setLinkedWorkItemsLoading] = useState(false);
   const [linkedWorkItemsError, setLinkedWorkItemsError] = useState<
     string | null
@@ -1018,16 +1026,44 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
       setCommitMessageFocusRequestKey((value) => value + 1);
     },
   });
+  const handleLinkedWorkItemStatusMenuOpenChange = useCallback(
+    (itemId: string, open: boolean) => {
+      setLinkedWorkItemStatusMenuTarget((current) => {
+        if (open && activeSessionId) {
+          return { sessionId: activeSessionId, itemId };
+        }
+        return activeSessionId &&
+          isLinkedWorkItemStatusMenuTarget(current, activeSessionId, itemId)
+          ? null
+          : current;
+      });
+    },
+    [activeSessionId],
+  );
   useCommandHandler('session.linked-issue.status.open', {
     scope: "page",
     enabled: Boolean(
       activeSessionId &&
+        !linkedWorkItemsLoading &&
         linkedWorkItems.length > 0 &&
         !updatingLinkedWorkItemIds.has(linkedWorkItems[0].id),
     ),
-    execute: () =>
-      setLinkedWorkItemStatusMenuRequestKey((value) => value + 1),
+    execute: () => {
+      const itemId = linkedWorkItems[0]?.id;
+      if (!activeSessionId || !itemId) return;
+      setLinkedWorkItemStatusMenuTarget((current) =>
+        toggleLinkedWorkItemStatusMenuTarget(
+          current,
+          activeSessionId,
+          itemId,
+        ),
+      );
+    },
   });
+
+  useEffect(() => {
+    setLinkedWorkItemStatusMenuTarget(null);
+  }, [activeSessionId]);
 
   useEffect(() => {
     const handleSourceControlRefreshRequested = (event: Event) => {
@@ -2549,10 +2585,16 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
                         key={item.id}
                         item={item}
                         statusPending={updatingLinkedWorkItemIds.has(item.id)}
-                        statusMenuRequestKey={
-                          item.id === linkedWorkItems[0]?.id
-                            ? linkedWorkItemStatusMenuRequestKey
-                            : 0
+                        statusMenuOpen={Boolean(
+                          activeSessionId &&
+                            isLinkedWorkItemStatusMenuTarget(
+                              linkedWorkItemStatusMenuTarget,
+                              activeSessionId,
+                              item.id,
+                            ),
+                        )}
+                        onStatusMenuOpenChange={
+                          handleLinkedWorkItemStatusMenuOpenChange
                         }
                         onOpen={handleOpenLinkedWorkItem}
                         t={t}
