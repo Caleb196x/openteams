@@ -55,6 +55,20 @@ test('desktop and signed release builds preserve the styled DMG template', () =>
       join(root, '.github', 'workflows', workflowName),
       'utf8'
     );
+    const macosDmgStepStart = workflow.indexOf(
+      '- name: Build desktop bundle (macOS with DMG)'
+    );
+    assert.notEqual(macosDmgStepStart, -1);
+
+    const macosDmgStepEnd = workflow.indexOf(
+      '\n      - name:',
+      macosDmgStepStart + 1
+    );
+    assert.notEqual(macosDmgStepEnd, -1);
+
+    const macosDmgStep = workflow.slice(macosDmgStepStart, macosDmgStepEnd);
+
+    assert.match(macosDmgStep, /\n\s+CI: "false"/);
     assert.match(workflow, /style-dmg\.mjs \\\n\s+--dmg "\$template_dmg" \\\n\s+--app 'signed\/openteams\.app'/);
     assert.doesNotMatch(
       workflow,
