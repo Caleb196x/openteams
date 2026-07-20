@@ -2347,6 +2347,7 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
 
                 {!msg.isUser &&
                   msg.isAgentRunning &&
+                  msg.runId &&
                   msg.sessionAgentId &&
                   sessionsAsync.source === "api" && (
                     <button
@@ -2374,6 +2375,7 @@ export const FreeChatWorkspace: React.FC<FreeChatWorkspaceProps> = ({
                   <div
                     className={`pointer-events-none absolute bottom-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100 ${
                       msg.isAgentRunning &&
+                      msg.runId &&
                       msg.sessionAgentId &&
                       sessionsAsync.source === "api"
                         ? "right-8"

@@ -422,6 +422,8 @@ check(
   "running pill uses the required copy and reused visual tokens",
   runStatusSource.includes("正在执行") &&
     runStatusSource.includes("Loader2") &&
+    runStatusSource.includes("min-h-6") &&
+    runStatusSource.includes("whitespace-nowrap") &&
     runStatusSource.includes("bg-[var(--primary-tint)]") &&
     runStatusSource.includes("text-[var(--primary)]"),
   runStatusSource,
@@ -432,6 +434,17 @@ check(
     messageContentSource.includes('"agentActivity.starting"') &&
     messageContentSource.includes('"agentActivity.running"'),
   messageContentSource,
+);
+check(
+  "startup keeps the same status component and hides run-only controls",
+  messageContentSource.includes("<AgentRunStatusPill") &&
+    /message\.runId\s*\?\s*"agentActivity\.running"/.test(
+      messageContentSource,
+    ) &&
+    /msg\.isAgentRunning\s*&&\s*msg\.runId\s*&&\s*msg\.sessionAgentId/.test(
+      source,
+    ),
+  { source, messageContentSource },
 );
 check(
   "agent messages expose hover copy and quote actions",
