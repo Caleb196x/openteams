@@ -20,10 +20,42 @@ const check = (label: string, cond: boolean, detail?: unknown) => {
 
 console.log('WorkspaceContext project session isolation');
 
-const source = readFileSync(
+const workspaceContextSource = readFileSync(
   new URL('./WorkspaceContext.tsx', import.meta.url),
   'utf8',
 );
+const runtimeSource = readFileSync(
+  new URL('./workspace/useWorkspaceChatRuntime.ts', import.meta.url),
+  'utf8',
+);
+const runtimeHookStart = workspaceContextSource.indexOf(
+  '  const { mapBackendChatMessage, upsertStreamedMessage } =',
+);
+const runtimeHookEnd = workspaceContextSource.indexOf(
+  '  // ---------------------------------------------------------------------------\n  // i18n',
+  runtimeHookStart,
+);
+const source = [
+  readFileSync(
+    new URL('./workspace/workspaceContextTypes.ts', import.meta.url),
+    'utf8',
+  ),
+  readFileSync(
+    new URL('./workspace/workspaceContextContract.ts', import.meta.url),
+    'utf8',
+  ),
+  readFileSync(
+    new URL('./workspace/workspaceContextUtils.ts', import.meta.url),
+    'utf8',
+  ),
+  readFileSync(
+    new URL('./workspace/useWorkspaceState.ts', import.meta.url),
+    'utf8',
+  ),
+  workspaceContextSource.slice(0, runtimeHookStart),
+  runtimeSource,
+  workspaceContextSource.slice(runtimeHookEnd),
+].join('\n');
 const workflowCardSource = readFileSync(
   new URL('../components/workflow/WorkflowCard.tsx', import.meta.url),
   'utf8',

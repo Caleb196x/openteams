@@ -19,10 +19,12 @@ const check = (label: string, cond: boolean, detail?: unknown) => {
 
 console.log("FreeChatWorkspace");
 
-const source = readFileSync(
-  new URL("./FreeChatWorkspace.tsx", import.meta.url),
-  "utf8",
-);
+const source = [
+  "./free-chat/FreeChatWorkspaceParts.tsx",
+  "./FreeChatWorkspace.tsx",
+]
+  .map((path) => readFileSync(new URL(path, import.meta.url), "utf8"))
+  .join("\n");
 const composerSource = readFileSync(
   new URL("./chat/ChatComposer.tsx", import.meta.url),
   "utf8",
@@ -532,7 +534,7 @@ check(
     source.includes("messagesById.get(item.message.chat_message_id)") &&
     source.includes("queueGroupsBySessionAgentId") &&
     source.includes("queueAnchorMessageIds") &&
-    source.includes("renderInlineQueueGroup") &&
+    source.includes("InlineQueueGroup") &&
     source.includes("queueAnchorMessageIds.get(msg.sessionAgentId) === msg.id") &&
     source.includes("queueGroupsBySessionAgentId.get(msg.sessionAgentId)") &&
     source.includes("<Trash2") &&
@@ -547,7 +549,7 @@ check(
     source.includes("max-h-24") &&
     source.includes("handleDeleteQueuedMessage") &&
     source.includes("handleContinueMemberQueue") &&
-    source.indexOf("renderInlineQueueGroup(") <
+    source.indexOf("<InlineQueueGroup") <
       source.indexOf("\n          <ChatComposer") &&
     !source.includes("{visibleQueueGroups.length > 0") &&
     !source.includes("false && visibleQueueGroups.length > 0"),
