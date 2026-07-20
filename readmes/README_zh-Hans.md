@@ -229,6 +229,14 @@ pnpm desktop:build
 bun run ./scripts/build-openteams-cli.ts
 ```
 
+### Windows 故障排查（可选）
+
+在 Windows 上，如果运行 `pnpm run dev` 时出现 `error: no such command: watch`，请安装 `cargo-watch` 后重新运行开发命令。仅在出现此错误时才需要安装。
+
+```powershell
+cargo install cargo-watch
+```
+
 ## 贡献
 
 欢迎贡献，也欢迎分享可供其他开发者学习和复用的 AI 团队工作流。你可以这样开始：
