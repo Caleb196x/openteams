@@ -229,6 +229,14 @@ Les artefacts de compilation seront placés dans le répertoire binaries.
 bun run ./scripts/build-openteams-cli.ts
 ```
 
+### Dépannage sous Windows (facultatif)
+
+Sous Windows, si `pnpm run dev` affiche `error: no such command: watch`, installez `cargo-watch`, puis relancez la commande de développement. Cette installation n'est nécessaire que si cette erreur se produit.
+
+```powershell
+cargo install cargo-watch
+```
+
 ## Contribution
 
 Les contributions sont les bienvenues, notamment les workflows d'équipes IA réutilisables que d'autres pourront étudier et adapter. Voici comment commencer :
