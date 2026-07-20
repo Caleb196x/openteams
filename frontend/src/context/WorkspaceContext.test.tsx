@@ -482,6 +482,14 @@ check(
   source,
 );
 check(
+  'missing member mentions show a localized error naming the requested member',
+  source.includes("parsed.reason === 'member_not_found'") &&
+    source.includes('memberNotFoundToastMessage(locale, parsed.agent_name)') &&
+    source.includes("const key = 'toast.memberNotFound'") &&
+    source.includes('clientMessageId: parsed.client_message_id'),
+  source,
+);
+check(
   'runtime snapshots and websocket notifications sync file-backed activity',
     source.includes("parsed.type === 'agent_activity_updated'") &&
     source.includes('runActivityStore.notifyUpdated(') &&

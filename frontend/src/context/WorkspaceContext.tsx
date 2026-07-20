@@ -187,6 +187,7 @@ type ChatStreamEvent =
       type: 'mention_error';
       session_id: string;
       message_id: string;
+      client_message_id: string | null;
       agent_name: string;
       agent_id: string | null;
       reason: string;
@@ -1286,6 +1287,15 @@ const extractAgentMentions = (text: string): string[] =>
 
 const asAgentHandle = (name: string): string =>
   name.startsWith('@') ? name : `@${name}`;
+
+export const memberNotFoundToastMessage = (
+  locale: Locale,
+  memberName: string,
+): string => {
+  const key = 'toast.memberNotFound';
+  const template = i18nDict[locale]?.[key] ?? i18nDict.en[key] ?? key;
+  return template.replace('{member}', asAgentHandle(memberName));
+};
 
 const optimisticAgentPlaceholderId = (
   clientMessageId: string,
@@ -4224,6 +4234,12 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
       }
 
       if (parsed.type === 'mention_error' && parsed.session_id === sid) {
+        if (parsed.reason === 'member_not_found') {
+          showToast(
+            memberNotFoundToastMessage(locale, parsed.agent_name),
+            'error',
+          );
+        }
         setAllMessages((prev) => {
           const current = filterMessagesForSession(sid, prev[sid] ?? []);
           if (current.length === 0) return prev;
@@ -4232,6 +4248,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
               !(
                 isOptimisticPendingAgentPlaceholder(msg) &&
                 pendingPlaceholderMatches(msg, {
+                  clientMessageId: parsed.client_message_id,
                   sourceMessageId: parsed.message_id,
                   agentName: parsed.agent_name,
                 })
@@ -4303,6 +4320,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({
     activeSessionId,
     handleWorkflowRuntimeLine,
     insertRunningPlaceholder,
+    locale,
     mapBackendChatMessage,
     mergeMemberQueueSnapshot,
     refreshMessages,
