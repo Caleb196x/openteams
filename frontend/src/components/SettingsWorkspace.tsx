@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { DropdownSelect, type DropdownSelectOption } from '@/components/DropdownSelect';
 import { ResourceStateNotice } from '@/components/ResourceState';
+import { useConfirmationDialogKeyboard } from '@/components/useConfirmationDialogKeyboard';
 import { ProviderSettingsPanel } from '@/components/settings/ProviderSettingsPanel';
 import { KeyboardShortcutSettings } from '@/shortcuts/KeyboardShortcutSettings';
 import {
@@ -626,6 +627,13 @@ export const SettingsWorkspace: React.FC = () => {
       setDeleteArchivedSessionInFlight(false);
     }
   };
+
+  useConfirmationDialogKeyboard({
+    enabled: Boolean(deletingArchivedSession),
+    confirming: deleteArchivedSessionInFlight,
+    onCancel: closeDeleteArchivedSessionDialog,
+    onConfirm: () => void confirmDeleteArchivedSession(),
+  });
 
   const handleResetOnboardingGuide = async () => {
     if (onboardingAction) return;
