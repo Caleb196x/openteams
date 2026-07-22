@@ -371,6 +371,36 @@ impl WorkflowOrchestrator {
         None
     }
 
+    /// Find a card that plan generation may safely replace.
+    ///
+    /// Unlike `find_session_workflow_card_message_id`, this deliberately excludes
+    /// every card whose plan has already materialized an execution. Plan generation
+    /// must never overwrite the card used to observe an active or terminal run.
+    pub async fn find_reusable_plan_generation_card_message_id(
+        pool: &SqlitePool,
+        session_id: Uuid,
+    ) -> Option<Uuid> {
+        let plans = WorkflowPlan::find_by_session(pool, session_id)
+            .await
+            .unwrap_or_default();
+        let executions = WorkflowExecution::find_by_session(pool, session_id)
+            .await
+            .unwrap_or_default();
+        let execution_card_message_ids = executions
+            .iter()
+            .filter_map(|execution| execution.workflow_card_message_id)
+            .collect::<HashSet<_>>();
+
+        plans.into_iter().find_map(|plan| {
+            let card_message_id = plan.workflow_card_message_id?;
+            let has_execution = executions
+                .iter()
+                .any(|execution| execution.plan_id == plan.id);
+            (!has_execution && !execution_card_message_ids.contains(&card_message_id))
+                .then_some(card_message_id)
+        })
+    }
+
     /// Execute a plan that is in `ready` status.
     /// Idempotent: if an active execution already exists for this plan, returns it.
     pub async fn execute_plan(
@@ -985,5 +1015,66 @@ mod tests {
             WorkflowOrchestrator::find_session_workflow_card_message_id(&pool, session_id).await;
 
         assert_eq!(found, Some(card_message_id));
+    }
+
+    #[tokio::test]
+    async fn reusable_plan_generation_card_returns_unexecuted_preview_card() {
+        let pool = setup_pool().await;
+
+        let session_id = Uuid::new_v4();
+        let card_message_id = Uuid::new_v4();
+        create_ready_plan(&pool, session_id, card_message_id, "Preview").await;
+
+        let found =
+            WorkflowOrchestrator::find_reusable_plan_generation_card_message_id(&pool, session_id)
+                .await;
+
+        assert_eq!(found, Some(card_message_id));
+    }
+
+    #[tokio::test]
+    async fn reusable_plan_generation_card_skips_active_execution_card() {
+        let pool = setup_pool().await;
+
+        let session_id = Uuid::new_v4();
+        let card_message_id = Uuid::new_v4();
+        let plan = create_ready_plan(&pool, session_id, card_message_id, "Active").await;
+        create_execution_with_card(
+            &pool,
+            session_id,
+            plan.id,
+            card_message_id,
+            WorkflowExecutionStatus::Running,
+        )
+        .await;
+
+        let found =
+            WorkflowOrchestrator::find_reusable_plan_generation_card_message_id(&pool, session_id)
+                .await;
+
+        assert_eq!(found, None);
+    }
+
+    #[tokio::test]
+    async fn reusable_plan_generation_card_skips_terminal_execution_card() {
+        let pool = setup_pool().await;
+
+        let session_id = Uuid::new_v4();
+        let card_message_id = Uuid::new_v4();
+        let plan = create_ready_plan(&pool, session_id, card_message_id, "Completed").await;
+        create_execution_with_card(
+            &pool,
+            session_id,
+            plan.id,
+            card_message_id,
+            WorkflowExecutionStatus::Completed,
+        )
+        .await;
+
+        let found =
+            WorkflowOrchestrator::find_reusable_plan_generation_card_message_id(&pool, session_id)
+                .await;
+
+        assert_eq!(found, None);
     }
 }
